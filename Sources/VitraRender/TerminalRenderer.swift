@@ -215,6 +215,8 @@ public final class TerminalRenderer {
         let defaultBackground = snapshot.defaultBackground
 
         let cursor = cursorOn ? snapshot.cursor : nil
+        // Only a filled block replaces the cell's colours; hollow and thin
+        // cursors draw over whatever is already there.
         let cursorIsBlock = cursor?.style == .block
 
         for row in 0 ..< Int(snapshot.rows) {
@@ -358,22 +360,29 @@ public final class TerminalRenderer {
         let y = Float(padding) + Float(cursor.row) * cellHeight
         let thickness = max(1, Float(metrics.underlineThickness))
 
-        let (origin, size): (SIMD2<Float>, SIMD2<Float>) = switch cursor.style {
-        case .bar:
-            (SIMD2(x, y), SIMD2(thickness, cellHeight))
-        case .underline:
-            (SIMD2(x, y + cellHeight - thickness), SIMD2(cellWidth, thickness))
-        case .blockHollow, .block:
-            (SIMD2(x, y), SIMD2(cellWidth, thickness))
+        func solid(_ origin: SIMD2<Float>, _ size: SIMD2<Float>) {
+            instances.append(CellInstance(
+                origin: origin,
+                size: size,
+                color: cursor.color.simd,
+                uvMin: .zero,
+                uvMax: .zero
+            ))
         }
 
-        instances.append(CellInstance(
-            origin: origin,
-            size: size,
-            color: cursor.color.simd,
-            uvMin: .zero,
-            uvMax: .zero
-        ))
+        switch cursor.style {
+        case .bar:
+            solid(SIMD2(x, y), SIMD2(thickness, cellHeight))
+        case .underline:
+            solid(SIMD2(x, y + cellHeight - thickness), SIMD2(cellWidth, thickness))
+        case .blockHollow, .block:
+            // Four edges. This is what an unfocused terminal shows, and drawing
+            // it as an outline keeps the character underneath readable.
+            solid(SIMD2(x, y), SIMD2(cellWidth, thickness))
+            solid(SIMD2(x, y + cellHeight - thickness), SIMD2(cellWidth, thickness))
+            solid(SIMD2(x, y), SIMD2(thickness, cellHeight))
+            solid(SIMD2(x + cellWidth - thickness, y), SIMD2(thickness, cellHeight))
+        }
     }
 
     // MARK: - Buffers

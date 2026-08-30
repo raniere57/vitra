@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.mainMenu = MainMenu.build()
         newWindow(nil)
+        SelfCapture.scheduleIfRequested()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

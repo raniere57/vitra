@@ -23,6 +23,10 @@ final class TerminalView: NSView {
     private var blinkTimer: DispatchSourceTimer?
     private var cursorOn = true
 
+    /// Paused whenever there is nothing to draw, which is most of the time.
+    private var displayLink: CADisplayLink?
+    private var needsRedraw = true
+
     /// The key event AppKit is currently interpreting, so `insertText` knows
     /// which physical key produced the text it is handed.
     private var pendingKeyEvent: NSEvent?
@@ -44,12 +48,13 @@ final class TerminalView: NSView {
         super.init(frame: .zero)
 
         wantsLayer = true
-        // updateLayer() runs inside AppKit's own display cycle, which is already
-        // aligned to the screen refresh. No CVDisplayLink needed.
-        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        // A view that supplies its own CAMetalLayer owns that layer's contents:
+        // AppKit will not call updateLayer() or draw(_:) for it, so redraws have
+        // to be driven explicitly.
+        layerContentsRedrawPolicy = .never
 
         session.onNeedsRedraw = { [weak self] in
-            self?.needsDisplay = true
+            self?.setNeedsRender()
         }
     }
 
@@ -58,6 +63,13 @@ final class TerminalView: NSView {
 
     deinit {
         blinkTimer?.cancel()
+    }
+
+    /// Tears down the display link, which cannot be touched from a nonisolated
+    /// deinit. Called when the view leaves its window.
+    private func stopDisplayLink() {
+        displayLink?.invalidate()
+        displayLink = nil
     }
 
     // MARK: - Layer
@@ -76,19 +88,52 @@ final class TerminalView: NSView {
 
     private var metalLayer: CAMetalLayer? { layer as? CAMetalLayer }
 
-    override var wantsUpdateLayer: Bool { true }
+    // MARK: - Rendering
 
-    override func updateLayer() {
-        guard let metalLayer, let drawable = metalLayer.nextDrawable() else { return }
+    /// Asks for a frame on the next screen refresh.
+    ///
+    /// The display link is the clock, but it runs only while there is work: it
+    /// starts here and pauses itself again as soon as a tick finds nothing
+    /// changed. That is what keeps an idle terminal at zero CPU while still
+    /// drawing in step with the display.
+    func setNeedsRender() {
+        needsRedraw = true
+        displayLink?.isPaused = false
+    }
 
-        // Skip the frame only when nothing changed *and* a snapshot already
-        // exists; the first frame must draw even though the terminal is empty.
-        let changed = session.updateSnapshot(snapshot)
-        if !changed && snapshot.columns == 0 { return }
+    private func startDisplayLink() {
+        guard displayLink == nil, window != nil else { return }
+        let link = displayLink(target: self, selector: #selector(renderFrame))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+        setNeedsRender()
+    }
+
+    @objc private func renderFrame() {
+        if session.updateSnapshot(snapshot) { needsRedraw = true }
+
+        guard needsRedraw else {
+            // Nothing changed this tick, so stop asking for ticks.
+            displayLink?.isPaused = true
+            return
+        }
+        needsRedraw = false
+
+        guard let metalLayer, metalLayer.drawableSize.width > 0,
+              let drawable = metalLayer.nextDrawable()
+        else { return }
+
+        // An unfocused terminal shows a hollow cursor rather than none: it still
+        // marks the position without claiming to accept input.
+        let focused = window?.isKeyWindow ?? false
+        if !focused, var cursor = snapshot.cursor {
+            cursor.style = .blockHollow
+            snapshot.cursor = cursor
+        }
 
         renderer.draw(
             snapshot: snapshot,
-            cursorOn: cursorOn && (window?.isKeyWindow ?? false),
+            cursorOn: focused ? cursorOn : true,
             padding: padding * scale,
             drawable: drawable,
             viewportSize: metalLayer.drawableSize
@@ -106,8 +151,13 @@ final class TerminalView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        guard window != nil else {
+            stopDisplayLink()
+            return
+        }
         updateDrawableSize()
         updateBlinkTimer()
+        startDisplayLink()
     }
 
     override func viewDidChangeBackingProperties() {
@@ -139,7 +189,7 @@ final class TerminalView: NSView {
             pixelWidth: UInt16(clamping: Int(pixelSize.width)),
             pixelHeight: UInt16(clamping: Int(pixelSize.height))
         ))
-        needsDisplay = true
+        setNeedsRender()
     }
 
     /// The window size that shows exactly `columns` x `rows` cells.
@@ -162,13 +212,13 @@ final class TerminalView: NSView {
 
     override func becomeFirstResponder() -> Bool {
         updateBlinkTimer()
-        needsDisplay = true
+        setNeedsRender()
         return true
     }
 
     override func resignFirstResponder() -> Bool {
         updateBlinkTimer()
-        needsDisplay = true
+        setNeedsRender()
         return true
     }
 
@@ -182,7 +232,7 @@ final class TerminalView: NSView {
         cursorOn = true
 
         guard window?.isKeyWindow == true else {
-            needsDisplay = true
+            setNeedsRender()
             return
         }
 
@@ -194,7 +244,7 @@ final class TerminalView: NSView {
             // programs turn it off, and honouring that keeps the app idle.
             guard self.snapshot.cursor?.isBlinking == true else { return }
             self.cursorOn.toggle()
-            self.needsDisplay = true
+            self.setNeedsRender()
         }
         timer.resume()
         blinkTimer = timer
