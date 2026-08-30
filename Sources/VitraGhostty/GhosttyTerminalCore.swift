@@ -11,6 +11,8 @@ import VitraCore
 /// the compiler cannot see the queue discipline that makes it safe.
 public final class GhosttyTerminalCore: TerminalCore, @unchecked Sendable {
     private let handle: GhosttyTerminal
+    private let renderReader: RenderStateReader
+    private let keyEncoder: KeyEncoder
     public private(set) var size: TerminalSize
 
     /// Bytes the emulator wants sent back to the child (device status reports,
@@ -28,6 +30,8 @@ public final class GhosttyTerminalCore: TerminalCore, @unchecked Sendable {
         }
         self.handle = terminal
         self.size = size
+        self.renderReader = try RenderStateReader()
+        self.keyEncoder = try KeyEncoder()
 
         installCallbacks()
     }
@@ -51,6 +55,28 @@ public final class GhosttyTerminalCore: TerminalCore, @unchecked Sendable {
             throw TerminalCoreError.operationFailed("terminal_resize", code: result.rawValue)
         }
         self.size = size
+    }
+
+    public func scrollViewport(lines: Int) {
+        guard lines != 0 else { return }
+        var behavior = GhosttyTerminalScrollViewport()
+        behavior.tag = GHOSTTY_SCROLL_VIEWPORT_DELTA
+        behavior.value.delta = lines
+        ghostty_terminal_scroll_viewport(handle, behavior)
+    }
+
+    public func scrollToBottom() {
+        var behavior = GhosttyTerminalScrollViewport()
+        behavior.tag = GHOSTTY_SCROLL_VIEWPORT_BOTTOM
+        ghostty_terminal_scroll_viewport(handle, behavior)
+    }
+
+    public func encode(_ event: KeyEvent) -> [UInt8] {
+        keyEncoder.encode(event, terminal: handle)
+    }
+
+    public func updateSnapshot(_ snapshot: RenderSnapshot) throws -> Bool {
+        try renderReader.update(from: handle, into: snapshot)
     }
 
     public func screenText() -> String {

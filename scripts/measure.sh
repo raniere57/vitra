@@ -56,23 +56,27 @@ case "${1:-}" in
     [[ -n "${pid:-}" ]] || die "no process matching '$target'"
 
     printf 'pid %s\n' "$pid"
-    footprint -j "$pid" 2>/dev/null | tail -5 || printf '  (footprint needs no privileges but may be unavailable)\n'
-    ps -o rss=,vsz= -p "$pid" | awk '{ printf "RSS: %.1f MB   VSZ: %.1f MB\n", $1 / 1024, $2 / 1024 }'
 
-    # 10 one-second samples; the first is discarded because top reports a
-    # meaningless cumulative value on its first pass.
-    printf 'CPU (10x1s): '
+    # phys_footprint is the number macOS uses for jetsam and shows in Activity
+    # Monitor. RSS is reported too because it is the familiar number, but it
+    # counts shared framework pages the app does not really spend.
+    footprint -p "$pid" --noCategories 2>/dev/null \
+      | awk '/phys_footprint:/ { printf "phys_footprint: %s %s\n", $2, $3 }
+             /phys_footprint_peak:/ { printf "peak:           %s %s\n", $2, $3 }'
+    ps -o rss=,vsz= -p "$pid" | awk '{ printf "RSS:            %.1f MB\n", $1 / 1024 }'
+
+    # 11 samples, first discarded: top reports a meaningless cumulative value on
+    # its first pass.
+    printf 'CPU (10x1s):    '
     top -l 11 -s 1 -pid "$pid" -stats cpu 2>/dev/null \
       | awk '/^[0-9.]+$/ { n++; if (n > 1) { sum += $1; c++ } } END { printf "%.2f%% avg\n", (c ? sum / c : 0) }'
 
-    # WebKit runs out of process; the app's own footprint never includes it.
-    webkit="$(pgrep -f 'com.apple.WebKit' || true)"
-    if [[ -n "$webkit" ]]; then
-      printf 'WebKit helper processes: %s\n' "$(echo "$webkit" | tr '\n' ' ')"
-      echo "$webkit" | xargs -I{} ps -o rss=,comm= -p {} \
-        | awk '{ rss += $1; printf "  %.1f MB  %s\n", $1 / 1024, $2 } END { printf "  total: %.1f MB\n", rss / 1024 }'
-    else
-      printf 'WebKit helper processes: none\n'
+    # WebKit runs in XPC services owned by launchd, not as our children, so they
+    # cannot be attributed by process tree. Phase 3 measures them as a delta
+    # around opening and closing the browser panel instead.
+    children="$(pgrep -P "$pid" 2>/dev/null || true)"
+    if [[ -n "$children" ]]; then
+      printf 'child processes: %s\n' "$(echo "$children" | tr '\n' ' ')"
     fi
     ;;
 

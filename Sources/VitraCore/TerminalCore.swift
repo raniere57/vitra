@@ -8,11 +8,37 @@ import Foundation
 public protocol TerminalCore: AnyObject {
     var size: TerminalSize { get }
 
+    /// Bytes the emulator wants written back to the pty: device status reports,
+    /// device attributes, cursor position queries. Programs that probe the
+    /// terminal hang forever when these go unanswered.
+    var onWritePTY: (@Sendable (UnsafeRawBufferPointer) -> Void)? { get set }
+    var onTitleChanged: (@Sendable (String) -> Void)? { get set }
+    var onBell: (@Sendable () -> Void)? { get set }
+
     /// Feeds bytes read from the PTY into the emulator.
     func feed(_ bytes: UnsafeRawBufferPointer)
 
     /// Resizes the screen, reflowing existing content.
     func resize(to size: TerminalSize) throws
+
+    /// Scrolls the viewport by `lines`; negative scrolls up into scrollback.
+    func scrollViewport(lines: Int)
+
+    /// Scrolls the viewport back to the live edge of the screen.
+    func scrollToBottom()
+
+    /// Encodes a key event into the bytes to write to the pty.
+    ///
+    /// Encoding depends on live terminal state (application cursor keys, the
+    /// Kitty keyboard protocol flags, modifyOtherKeys), which is why it belongs
+    /// to the engine rather than to the view that captured the keystroke.
+    func encode(_ event: KeyEvent) -> [UInt8]
+
+    /// Refills `snapshot` with the current grid, or returns false if nothing has
+    /// changed since the last call and the previous frame is still valid.
+    ///
+    /// This is what keeps the renderer off the CPU when the screen is static.
+    func updateSnapshot(_ snapshot: RenderSnapshot) throws -> Bool
 
     /// The active screen as plain text, including scrollback, trailing blanks trimmed.
     ///

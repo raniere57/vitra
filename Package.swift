@@ -20,8 +20,19 @@ let package = Package(
         ),
         .target(name: "VitraCore"),
         .target(name: "VitraGhostty", dependencies: ["CGhosttyVT", "VitraCore"]),
-        .executableTarget(name: "vitra-spike", dependencies: ["VitraCore", "VitraGhostty"]),
+        .target(
+            name: "VitraRender",
+            dependencies: ["VitraCore"],
+            plugins: ["MetalShaderCompiler"]
+        ),
+        .plugin(name: "MetalShaderCompiler", capability: .buildTool()),
+        .executableTarget(name: "vitra-spike", dependencies: ["VitraCore", "VitraGhostty", "VitraRender"]),
+        .executableTarget(
+            name: "VitraApp",
+            dependencies: ["VitraCore", "VitraGhostty", "VitraRender"]
+        ),
         .testTarget(name: "VitraCoreTests", dependencies: ["VitraCore"]),
         .testTarget(name: "VitraGhosttyTests", dependencies: ["VitraGhostty", "VitraCore"]),
+        .testTarget(name: "VitraRenderTests", dependencies: ["VitraRender", "VitraCore"]),
     ]
 )
