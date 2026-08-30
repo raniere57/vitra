@@ -1,0 +1,18 @@
+# Build artifacts
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+
+# Vendored libghostty-vt (reproducible via scripts/vendor-ghostty-vt.sh)
+vendor/
+
+# Generated headers copied by the vendor script
+Sources/CGhosttyVT/include/ghostty/
+
+# macOS
+.DS_Store
+
+# Release output
+dist/
