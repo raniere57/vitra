@@ -46,6 +46,17 @@ enum MainMenu {
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
+        let viewMenuItem = NSMenuItem()
+        let viewMenu = NSMenu(title: "View")
+        let togglePanel = viewMenu.addItem(
+            withTitle: "Preview Panel",
+            action: #selector(AppDelegate.togglePreviewPanel(_:)),
+            keyEquivalent: "p"
+        )
+        togglePanel.keyEquivalentModifierMask = [.command, .shift]
+        viewMenuItem.submenu = viewMenu
+        mainMenu.addItem(viewMenuItem)
+
         let windowMenuItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")

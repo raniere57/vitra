@@ -255,6 +255,23 @@ public final class PTY: @unchecked Sendable {
         Darwin.close(masterFD)
     }
 
+    /// The working directory of the job in the foreground, or of the shell.
+    ///
+    /// Read from the kernel rather than from shell integration: an `OSC 7` from
+    /// the user's rc files may never arrive, but the process always has a cwd.
+    public var workingDirectory: URL? {
+        let foreground = tcgetpgrp(masterFD)
+        let pid = foreground > 0 ? foreground : processID
+        var info = proc_vnodepathinfo()
+        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
+
+        let path = withUnsafePointer(to: &info.pvi_cdir.vip_path) {
+            $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+        }
+        return path.isEmpty ? nil : URL(fileURLWithPath: path, isDirectory: true)
+    }
+
     public func terminate() {
         kill(processID, SIGHUP)
     }

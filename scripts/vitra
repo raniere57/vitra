@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+# vitra — talk to the running Vitra from inside it.
+#
+#   vitra open <file>...   show files in the preview panel
+#
+# Files are handed to the app as open requests, which the front window turns
+# into previews. Vitra is launched if it is not already running.
+
+set -eu
+
+usage() {
+  echo "usage: vitra open <file>..." >&2
+  exit 64
+}
+
+[ $# -ge 1 ] || usage
+
+case "$1" in
+  open)
+    shift
+    [ $# -ge 1 ] || usage
+    for file do
+      [ -e "$file" ] || { echo "vitra: no such file: $file" >&2; exit 66; }
+    done
+    exec open -a Vitra "$@"
+    ;;
+  *)
+    usage
+    ;;
+esac

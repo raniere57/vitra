@@ -139,3 +139,40 @@ multithreaded AppKit process every time a pane opens. `PTY` now uses
 `posix_spawn` with `POSIX_SPAWN_SETSID` and a file action that opens the slave
 by path, which keeps the controlling terminal and never runs Swift in a forked
 child. 98 tests, 8 consecutive clean runs.
+
+## Phase 3 — preview panel
+
+Installed `Vitra.app`, fresh launch per row, file opened through `ESC ] 7337`.
+
+| State | phys_footprint | peak | RSS | CPU |
+|---|---|---|---|---|
+| panel closed (idle) | **25 MB** | 30 MB | 44.7 MB | 0.00% |
+| image preview open (92 KB PNG) | **25 MB** | 30 MB | 44.7 MB | 0.00% |
+| web preview open, Vitra's own process | **31 MB** | 36 MB | 27.5 MB | 0.00% |
+| the same preview's `WebKit.WebContent` process | **14 MB** | – | 28 MB | – |
+
+### The WebKit lifetime, verified
+
+The 150 MB budget was the open risk in this phase, and the ambiguity in how to
+count a `WKWebView` turns out not to matter: **45 MB for both processes together**
+with a web page open, against a budget of 150 MB. Either reading passes.
+
+WebKit is only mapped once a web preview is opened, and the content process is
+gone as soon as the panel closes. Sampled during one run, with a page loaded and
+then `Cmd-Shift-P` pressed:
+
+```
+t=3s (panel open)     4 WebContent processes: 48266  48729  48730  50369
+t=8s (panel closed)   3 WebContent processes: 48266  48729  48730
+```
+
+The three survivors belong to other applications and predate the run; 50369 is
+Vitra's, and it exits when `PreviewPanel.clearContent()` drops the view. Closing
+the panel — not just switching files — is what releases it.
+
+Reproduce:
+
+```bash
+printf '\033]7337;file=%s\a' "$PWD/page.html"   # inside Vitra
+ps -axo pid,rss,comm | grep WebKit.WebContent   # before and after Cmd-Shift-P
+```

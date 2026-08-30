@@ -28,6 +28,14 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$BUILD/VitraApp" "$APP/Contents/MacOS/Vitra"
 
+# The CLI ships inside the bundle so it updates with the app; the README
+# explains linking it onto PATH. It cannot live in Contents/MacOS beside the
+# executable: the filesystem is case-insensitive, so `vitra` would overwrite
+# `Vitra`.
+mkdir -p "$APP/Contents/Helpers"
+cp "$ROOT/scripts/vitra" "$APP/Contents/Helpers/vitra"
+chmod +x "$APP/Contents/Helpers/vitra"
+
 # SwiftPM resource bundles (default.metallib lives in one) are found through
 # Bundle.main.resourceURL inside an app bundle.
 for bundle in "$BUILD"/*.bundle; do
@@ -51,6 +59,18 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key> <true/>
     <key>NSSupportsAutomaticTermination</key> <false/>
     <key>NSSupportsSuddenTermination</key>    <false/>
+    <!-- Viewer of last resort: this is what lets "vitra open" hand any file to
+         the running app. LSHandlerRank None keeps Vitra out of the running for
+         becoming anything's default application. -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+      <dict>
+        <key>CFBundleTypeName</key>   <string>Any File</string>
+        <key>CFBundleTypeRole</key>   <string>Viewer</string>
+        <key>LSHandlerRank</key>      <string>None</string>
+        <key>LSItemContentTypes</key> <array><string>public.item</string></array>
+      </dict>
+    </array>
 </dict>
 </plist>
 PLIST

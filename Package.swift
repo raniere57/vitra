@@ -19,6 +19,7 @@ let package = Package(
             linkerSettings: [.unsafeFlags([ghosttyArchive])]
         ),
         .target(name: "VitraCore"),
+        .target(name: "VitraPanel", dependencies: ["VitraCore"]),
         .target(name: "VitraGhostty", dependencies: ["CGhosttyVT", "VitraCore"]),
         .target(
             name: "VitraRender",
@@ -29,11 +30,12 @@ let package = Package(
         .executableTarget(name: "vitra-spike", dependencies: ["VitraCore", "VitraGhostty", "VitraRender"]),
         .executableTarget(
             name: "VitraApp",
-            dependencies: ["VitraCore", "VitraGhostty", "VitraRender"]
+            dependencies: ["VitraCore", "VitraGhostty", "VitraRender", "VitraPanel"]
         ),
         .testTarget(name: "VitraCoreTests", dependencies: ["VitraCore"]),
         .testTarget(name: "VitraGhosttyTests", dependencies: ["VitraGhostty", "VitraCore"]),
         .testTarget(name: "VitraRenderTests", dependencies: ["VitraRender", "VitraCore"]),
+        .testTarget(name: "VitraPanelTests", dependencies: ["VitraPanel", "VitraCore"]),
         .testTarget(name: "VitraAppTests", dependencies: ["VitraApp", "VitraCore"]),
     ]
 )

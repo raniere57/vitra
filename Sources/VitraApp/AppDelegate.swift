@@ -7,6 +7,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var device: MTLDevice?
     private let attachments = AttachmentStore()
 
+    /// Files handed to the app before it had a window to show them in.
+    private var pendingPreviews: [URL] = []
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let device = MTLCreateSystemDefaultDevice() else {
             fail("Vitra needs a Metal-capable GPU.")
@@ -20,7 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.global(qos: .utility).async { store.purgeExpired() }
 
         NSApp.mainMenu = MainMenu.build()
-        newWindow(nil)
+        if pendingPreviews.isEmpty { newWindow(nil) }
+        showPendingPreviews()
         SelfCapture.scheduleIfRequested()
     }
 
@@ -41,6 +45,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func splitVertically(_ sender: Any?) {
         currentController?.splitFocusedPane(vertical: false)
+    }
+
+    @objc func togglePreviewPanel(_ sender: Any?) {
+        currentController?.togglePanel()
+    }
+
+    /// `vitra open <file>`, which reaches the running app as an open request.
+    ///
+    /// Files are previewed in the front window rather than opened as documents:
+    /// Vitra is a terminal, and a file handed to it is something to look at.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        pendingPreviews.append(contentsOf: urls)
+        showPendingPreviews()
+    }
+
+    /// Opens whatever arrived before there was anywhere to show it.
+    ///
+    /// A file passed at launch reaches the delegate before
+    /// applicationDidFinishLaunching, when there is no Metal device and so no
+    /// window yet; without this the very first `vitra open` would be swallowed.
+    private func showPendingPreviews() {
+        guard device != nil, !pendingPreviews.isEmpty else { return }
+        if currentController == nil { makeWindow(asTabOf: nil) }
+        guard let controller = currentController else { return }
+
+        let urls = pendingPreviews
+        pendingPreviews.removeAll()
+        for url in urls {
+            guard let target = PreviewTarget.resolve(path: url.path) else { continue }
+            controller.preview(target)
+        }
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc func closePane(_ sender: Any?) {

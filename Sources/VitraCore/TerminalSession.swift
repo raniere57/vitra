@@ -17,12 +17,19 @@ public final class TerminalSession: @unchecked Sendable {
     public var onNeedsRedraw: (@Sendable () -> Void)?
     public var onTitleChanged: (@Sendable (String) -> Void)?
     public var onBell: (@Sendable () -> Void)?
+
+    /// A file the program asked the panel to show, via `ESC ] 7337`.
+    public var onPreviewRequest: (@Sendable (PreviewTarget) -> Void)?
     public var onExit: (@Sendable (Int32?) -> Void)?
 
     private let pty: PTY
     private let queue: DispatchQueue
     private var redrawPending = false
+
+    /// Only touched from the read queue, where the pty delivers its bytes.
+    private var oscScanner = OSCScanner()
     private var hasExited = false
+    private var hasStarted = false
     private var selectionAnchor: GridPosition?
     private var selectionMode: SelectionMode = .cell
 
@@ -56,11 +63,24 @@ public final class TerminalSession: @unchecked Sendable {
             DispatchQueue.main.async { handler() }
         }
 
+    }
+
+    /// Starts reading the child's output.
+    ///
+    /// Separate from `init` on purpose: the shell can write before the caller's
+    /// next line runs, so callbacks installed after construction would miss the
+    /// first output — including an escape sequence asking to open a preview.
+    public func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+
         pty.startReading(
             on: queue,
             onData: { [weak self] bytes in
-                self?.core.feed(bytes)
-                self?.scheduleRedraw()
+                guard let self else { return }
+                self.scanForPreviewRequests(bytes)
+                self.core.feed(bytes)
+                self.scheduleRedraw()
             },
             onEOF: { [weak self] in
                 self?.handleExit()
@@ -223,6 +243,20 @@ public final class TerminalSession: @unchecked Sendable {
     }
 
     // MARK: - Lifecycle
+
+    /// Picks `ESC ] 7337` out of the stream before the core swallows it.
+    ///
+    /// Paths are resolved against the foreground job's working directory, so a
+    /// program can ask for a file by the name it just wrote.
+    private func scanForPreviewRequests(_ bytes: UnsafeRawBufferPointer) {
+        guard let handler = onPreviewRequest else { return }
+        oscScanner.scan(bytes) { [weak self] payload in
+            guard let self,
+                  let target = PreviewTarget.parse(payload: payload, relativeTo: self.pty.workingDirectory)
+            else { return }
+            handler(target)
+        }
+    }
 
     public func terminate() {
         pty.terminate()
