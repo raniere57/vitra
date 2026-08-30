@@ -150,6 +150,7 @@ Installed `Vitra.app`, fresh launch per row, file opened through `ESC ] 7337`.
 | image preview open (92 KB PNG) | **25 MB** | 30 MB | 44.7 MB | 0.00% |
 | web preview open, Vitra's own process | **31 MB** | 36 MB | 27.5 MB | 0.00% |
 | the same preview's `WebKit.WebContent` process | **14 MB** | – | 28 MB | – |
+| `cat` of the 100 MB fixture, panel closed | **34 MB** | 38 MB | 42.5 MB | 0.00% |
 
 ### The WebKit lifetime, verified
 
