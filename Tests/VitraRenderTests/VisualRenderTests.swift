@@ -237,3 +237,18 @@ private func put(
     #expect(frame.hasInk(inRect: (cellWidth, 0, cellWidth, cellHeight), over: background))
     #expect(!frame.hasInk(inRect: (cellWidth * 2, 0, cellWidth, cellHeight), over: background))
 }
+
+@Test func selectedCellsArePaintedWithTheSelectionColour() throws {
+    let snapshot = makeSnapshot(columns: 3, rows: 1) { snapshot in
+        put("a", at: 0, row: 0, in: snapshot, flags: .selected)
+        put("b", at: 1, row: 0, in: snapshot)
+    }
+    let frame = try render(snapshot, cursorOn: false, saveAs: "selection")
+
+    let cellWidth = Int(visualFonts.metrics.cellWidth)
+    let selected = frame.color(x: 1, y: 1)
+    let unselected = frame.color(x: cellWidth + 1, y: 1)
+
+    #expect(selected.b > selected.r)
+    #expect(unselected.r == 20 && unselected.g == 20 && unselected.b == 25)
+}

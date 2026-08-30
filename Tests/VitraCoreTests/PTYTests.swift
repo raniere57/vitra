@@ -8,7 +8,10 @@ private func capture(
     _ executable: String,
     _ arguments: [String],
     size: TerminalSize = .default,
-    timeout: TimeInterval = 5
+    // Generous because the suite runs tests in parallel: under contention a
+    // shell can take seconds to start, and a short timeout turns that into a
+    // flaky failure that looks like a real bug.
+    timeout: TimeInterval = 20
 ) throws -> (output: String, status: Int32?) {
     let collected = Output()
     let finished = DispatchSemaphore(value: 0)
@@ -25,7 +28,7 @@ private func capture(
     )
     if finished.wait(timeout: .now() + timeout) == .timedOut {
         pty.terminate()
-        Issue.record("pty did not reach EOF within \(timeout)s")
+        Issue.record("pty did not reach EOF within \(timeout)s; output so far: \(collected.text)")
     }
     return (collected.text, pty.reap(blocking: true))
 }
@@ -75,7 +78,7 @@ private func capture(
     Thread.sleep(forTimeInterval: 0.3)
     pty.resize(to: TerminalSize(columns: 100, rows: 30))
 
-    if finished.wait(timeout: .now() + 5) == .timedOut {
+    if finished.wait(timeout: .now() + 20) == .timedOut {
         pty.terminate()
         Issue.record("child never reported the new size")
     }

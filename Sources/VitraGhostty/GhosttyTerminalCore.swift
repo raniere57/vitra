@@ -10,7 +10,7 @@ import VitraCore
 /// Serialization is the caller's responsibility, so this is `@unchecked Sendable`:
 /// the compiler cannot see the queue discipline that makes it safe.
 public final class GhosttyTerminalCore: TerminalCore, @unchecked Sendable {
-    private let handle: GhosttyTerminal
+    let handle: GhosttyTerminal
     private let renderReader: RenderStateReader
     private let keyEncoder: KeyEncoder
     public private(set) var size: TerminalSize

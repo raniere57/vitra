@@ -10,7 +10,7 @@ import VitraRender
 /// happens only when the emulator reports the screen changed, when the cursor
 /// blinks, or when the view resizes, which is what keeps the app at zero CPU
 /// while idle.
-final class TerminalView: NSView {
+final class TerminalView: NSView, NSMenuItemValidation {
     let session: TerminalSession
 
     private var renderer: TerminalRenderer
@@ -63,6 +63,13 @@ final class TerminalView: NSView {
 
     deinit {
         blinkTimer?.cancel()
+    }
+
+    /// Stops all timers and the display link before the view is discarded.
+    func prepareForRemoval() {
+        blinkTimer?.cancel()
+        blinkTimer = nil
+        stopDisplayLink()
     }
 
     /// Tears down the display link, which cannot be touched from a nonisolated
@@ -252,6 +259,45 @@ final class TerminalView: NSView {
 
     // MARK: - Mouse
 
+    /// The cell under a mouse event, clamped to the grid.
+    ///
+    /// Clamped rather than optional: a drag that leaves the window should extend
+    /// the selection to the edge, not stop updating it.
+    private func cell(for event: NSEvent) -> (column: UInt16, row: UInt16) {
+        let point = convert(event.locationInWindow, from: nil)
+        let cellWidth = renderer.metrics.cellWidth / scale
+        let cellHeight = renderer.metrics.cellHeight / scale
+
+        let column = Int(((point.x - padding) / cellWidth).rounded(.down))
+        let row = Int(((point.y - padding) / cellHeight).rounded(.down))
+        return (
+            UInt16(clamping: min(max(0, column), Int(snapshot.columns) - 1)),
+            UInt16(clamping: min(max(0, row), Int(snapshot.rows) - 1))
+        )
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        // Clicking a pane focuses it; with splits there is more than one.
+        if window?.firstResponder !== self { window?.makeFirstResponder(self) }
+        let position = cell(for: event)
+        session.beginSelection(column: position.column, row: position.row, clickCount: event.clickCount)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let position = cell(for: event)
+        // Option turns the drag into a rectangular selection, the convention
+        // every terminal that supports it uses.
+        session.extendSelection(
+            column: position.column,
+            row: position.row,
+            rectangle: event.modifierFlags.contains(.option)
+        )
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        session.endSelection()
+    }
+
     override func scrollWheel(with event: NSEvent) {
         let lines: Int
         if event.hasPreciseScrollingDeltas {
@@ -271,9 +317,49 @@ final class TerminalView: NSView {
 
     private var scrollAccumulator: CGFloat = 0
 
+    // MARK: - Clipboard
+
+    @objc func copy(_ sender: Any?) {
+        guard let text = session.selectedText(), !text.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
+    @objc func paste(_ sender: Any?) {
+        guard let text = NSPasteboard.general.string(forType: .string) else { return }
+        session.paste(text)
+    }
+
+    override func selectAll(_ sender: Any?) {
+        session.selectAll()
+    }
+
+    /// Clears the screen and the scrollback, the way Cmd-K does everywhere else
+    /// on macOS.
+    @objc func clearScreen(_ sender: Any?) {
+        session.clearScreen()
+    }
+
+    /// Greys out Copy when there is nothing selected.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(copy(_:)):
+            return session.selectedText()?.isEmpty == false
+        case #selector(paste(_:)):
+            return NSPasteboard.general.string(forType: .string) != nil
+        default:
+            return true
+        }
+    }
+
     // MARK: - Keyboard
 
     override var acceptsFirstResponder: Bool { true }
+
+    /// Top-left origin, matching the terminal grid and the renderer, so a mouse
+    /// point converts to a cell without flipping y at every call site.
+    override var isFlipped: Bool { true }
 
     override func keyDown(with event: NSEvent) {
         // Command belongs to the app, not the terminal: it drives the menu.
@@ -294,8 +380,10 @@ final class TerminalView: NSView {
         }
         pendingKeyEvent = nil
 
-        // Any keystroke means the user wants to see the live screen again.
+        // Any keystroke means the user wants the live screen back, and no longer
+        // cares about whatever was selected.
         session.scrollToBottom()
+        session.clearSelection()
     }
 
     override func flagsChanged(with event: NSEvent) {

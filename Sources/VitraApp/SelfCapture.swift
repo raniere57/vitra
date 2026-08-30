@@ -14,6 +14,23 @@ enum SelfCapture {
         guard let path = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT"] else { return }
         let delay = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_DELAY"].flatMap(Double.init) ?? 1.5
 
+        // Optional comma-separated selectors fired before the shot, so keyboard
+        // shortcuts can be exercised from an automated run.
+        if let actions = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_ACTIONS"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay / 2) {
+                for name in actions.split(separator: ",") {
+                    let selector = Selector(String(name))
+                    // The responder chain only reaches the app delegate when a
+                    // key window exists, which it may not for a headless run.
+                    var delivered = NSApp.sendAction(selector, to: nil, from: nil)
+                    if !delivered {
+                        delivered = NSApp.sendAction(selector, to: NSApp.delegate, from: nil)
+                    }
+                    FileHandle.standardError.write(Data("[self-shot] \(name): \(delivered ? "sent" : "NOT DELIVERED")\n".utf8))
+                }
+            }
+        }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             capture(to: path)
             if ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_QUIT"] != nil {
@@ -23,7 +40,10 @@ enum SelfCapture {
     }
 
     private static func capture(to path: String) {
-        guard let window = NSApp.windows.first(where: { $0.isVisible }) else {
+        // Prefer the key window: with native tabs, several windows are "visible"
+        // but only the front tab is on screen.
+        let candidate = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible })
+        guard let window = candidate else {
             FileHandle.standardError.write(Data("[self-shot] no visible window\n".utf8))
             return
         }
@@ -35,7 +55,12 @@ enum SelfCapture {
             windowID,
             [.boundsIgnoreFraming, .bestResolution]
         ) else {
-            FileHandle.standardError.write(Data("[self-shot] capture failed\n".utf8))
+            // Tabbed windows are composited by a container the app does not own,
+            // so a child tab has no image of its own to capture.
+            let tabs = window.tabGroup?.windows.count ?? 1
+            FileHandle.standardError.write(Data(
+                "[self-shot] capture failed (windows=\(NSApp.windows.count) tabs=\(tabs))\n".utf8
+            ))
             return
         }
 

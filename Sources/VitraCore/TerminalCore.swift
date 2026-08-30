@@ -21,6 +21,29 @@ public protocol TerminalCore: AnyObject {
     /// Resizes the screen, reflowing existing content.
     func resize(to size: TerminalSize) throws
 
+    /// Whether the program running inside asked for bracketed paste (mode 2004).
+    ///
+    /// Pasting without honouring this lets pasted newlines run as commands, so
+    /// it is a safety property, not a formatting preference.
+    var isBracketedPasteEnabled: Bool { get }
+
+    /// Converts a viewport cell coordinate into a scrollback-absolute position.
+    func screenPosition(viewportColumn: UInt16, viewportRow: UInt16) -> GridPosition?
+
+    /// Selects between two screen positions. `mode` widens the range to whole
+    /// words or lines, matching double- and triple-click behaviour.
+    func setSelection(from: GridPosition, to: GridPosition, mode: SelectionMode, rectangle: Bool)
+
+    func selectAll()
+    func clearSelection()
+
+    /// The currently selected text, or nil when there is no selection.
+    func selectedText() -> String?
+
+    /// Encodes text for the pty as a paste, stripping control bytes and applying
+    /// bracketed paste when the running program enabled it.
+    func encodePaste(_ text: String) -> [UInt8]
+
     /// Scrolls the viewport by `lines`; negative scrolls up into scrollback.
     func scrollViewport(lines: Int)
 

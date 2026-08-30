@@ -23,6 +23,8 @@ public final class TerminalSession: @unchecked Sendable {
     private let queue: DispatchQueue
     private var redrawPending = false
     private var hasExited = false
+    private var selectionAnchor: GridPosition?
+    private var selectionMode: SelectionMode = .cell
 
     public init(
         core: TerminalCore,
@@ -101,6 +103,86 @@ public final class TerminalSession: @unchecked Sendable {
         queue.async { [weak self] in
             self?.core.scrollToBottom()
             self?.scheduleRedraw()
+        }
+    }
+
+    /// Clears the screen and scrollback without disturbing the running program.
+    ///
+    /// The sequences are fed to the emulator rather than written to the pty: the
+    /// shell should not see them, and would echo them if it did.
+    public func clearScreen() {
+        queue.async { [weak self] in
+            self?.core.feed("\u{1B}[H\u{1B}[2J\u{1B}[3J")
+            self?.scheduleRedraw()
+        }
+    }
+
+    // MARK: - Selection
+
+    /// Starts a selection at a viewport cell. `clickCount` picks cell, word, or
+    /// line granularity.
+    public func beginSelection(column: UInt16, row: UInt16, clickCount: Int) {
+        queue.async { [weak self] in
+            guard let self, let anchor = self.core.screenPosition(viewportColumn: column, viewportRow: row)
+            else { return }
+            self.selectionAnchor = anchor
+            self.selectionMode = SelectionMode(clickCount: clickCount)
+
+            // A double or triple click selects immediately, without waiting for a
+            // drag; a single click just places the anchor and clears any old
+            // selection.
+            if self.selectionMode == .cell {
+                self.core.clearSelection()
+            } else {
+                self.core.setSelection(from: anchor, to: anchor, mode: self.selectionMode, rectangle: false)
+            }
+            self.scheduleRedraw()
+        }
+    }
+
+    public func extendSelection(column: UInt16, row: UInt16, rectangle: Bool = false) {
+        queue.async { [weak self] in
+            guard let self,
+                  let anchor = self.selectionAnchor,
+                  let position = self.core.screenPosition(viewportColumn: column, viewportRow: row)
+            else { return }
+            self.core.setSelection(from: anchor, to: position, mode: self.selectionMode, rectangle: rectangle)
+            self.scheduleRedraw()
+        }
+    }
+
+    public func endSelection() {
+        queue.async { [weak self] in self?.selectionAnchor = nil }
+    }
+
+    public func selectAll() {
+        queue.async { [weak self] in
+            self?.core.selectAll()
+            self?.scheduleRedraw()
+        }
+    }
+
+    public func clearSelection() {
+        queue.async { [weak self] in
+            self?.selectionAnchor = nil
+            self?.core.clearSelection()
+            self?.scheduleRedraw()
+        }
+    }
+
+    /// The selected text, read synchronously because the clipboard needs it now.
+    public func selectedText() -> String? {
+        queue.sync { core.selectedText() }
+    }
+
+    /// Sends text as a paste, wrapped in bracketed paste when the program asked
+    /// for it.
+    public func paste(_ text: String) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            let bytes = self.core.encodePaste(text)
+            guard !bytes.isEmpty else { return }
+            bytes.withUnsafeBytes { try? self.pty.write($0) }
         }
     }
 
