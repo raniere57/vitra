@@ -42,3 +42,52 @@ is distinguishable from a fast run that processed all of it.
 800 KB of headroom across a 100 MB stream is the scrollback limiter and page
 compression inside libghostty doing their job. There is no CPU figure for this
 phase: the spike has no idle state to measure.
+
+## Phase 1a - Metal renderer and terminal window
+
+Commit: `fcd26f5`. Binary: `.build/release/VitraApp`, 2.0 MB. One window, 80x24,
+Menlo 13pt on a Retina display.
+
+| Scenario | phys_footprint | RSS | CPU |
+|---|---|---|---|
+| idle, window focused, shell at prompt | **14 MB** | 34.8 MB | **0.00%** |
+| `cat` of the 100 MB fixture, steady state | **16 MB** | 62.4 MB | 0.00% after |
+| peak across the whole load run | 16 MB | - | - |
+
+Against a 150 MB budget, a loaded terminal costs 16 MB. The 2 MB delta between
+idle and 100 MB of throughput is scrollback compression inside libghostty.
+
+`phys_footprint` and RSS diverge by more than 2x. RSS counts shared framework
+pages (AppKit, Metal, CoreText) that are mapped but not spent; `phys_footprint`
+is what macOS charges the process and what Activity Monitor displays. Both are
+reported, and `phys_footprint` is the one the budget is measured against.
+
+CPU is 0.00% averaged over 10 one-second samples with the window focused and the
+cursor blinking. That is the on-demand design working: no display link, and the
+blink timer only runs while the window has focus and only redraws when the
+terminal actually asked for a blinking cursor.
+
+Reproduce:
+
+```bash
+scripts/measure.sh load
+.build/release/VitraApp &
+scripts/measure.sh live VitraApp
+.build/release/VitraApp -e /bin/sh -c 'cat .build/fixtures/load-100mb.txt; exec sleep 600' &
+scripts/measure.sh live VitraApp
+```
+
+### Launch cost
+
+Measured separately because a terminal is judged on how fast it opens:
+
+| Phase | Cost |
+|---|---|
+| `MTLCreateSystemDefaultDevice` | 43.2 ms |
+| load `default.metallib` | 0.7 ms |
+| glyph atlas (2048x2048 R8, 4 MB) | 4.1 ms |
+| render pipeline, cold / warm | 1.8 ms / 0.3 ms |
+
+The shader is compiled at build time by a SwiftPM plugin. Compiling it from
+source at launch instead costs **463 ms**, which is why the plugin exists;
+`swift build` does not compile `.metal` files on its own the way Xcode does.
