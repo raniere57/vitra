@@ -13,6 +13,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
     private let fontName: String
     private let fontSize: CGFloat
     private let command: [String]?
+    private let attachments: AttachmentStore
 
     /// Panes still alive in this window, in creation order.
     private var panes: [TerminalView] = []
@@ -21,12 +22,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
         device: MTLDevice,
         fontName: String,
         fontSize: CGFloat,
-        command: [String]? = nil
+        command: [String]? = nil,
+        attachments: AttachmentStore = AttachmentStore()
     ) throws {
         self.device = device
         self.fontName = fontName
         self.fontSize = fontSize
         self.command = command
+        self.attachments = attachments
 
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: NSSize(width: 720, height: 460)),
@@ -85,7 +88,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
             session: session,
             device: device,
             fontName: fontName,
-            fontSize: fontSize
+            fontSize: fontSize,
+            attachments: attachments
         )
 
         session.onTitleChanged = { [weak self, weak pane] title in

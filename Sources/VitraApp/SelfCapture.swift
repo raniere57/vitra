@@ -12,7 +12,19 @@ import UniformTypeIdentifiers
 enum SelfCapture {
     static func scheduleIfRequested() {
         guard let path = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT"] else { return }
+
+        // A binary launched from a shell never becomes active on its own, and
+        // without an active app there is no key window to send actions to.
+        NSApp.activate(ignoringOtherApps: true)
         let delay = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_DELAY"].flatMap(Double.init) ?? 1.5
+
+        // A PNG put on the clipboard before the actions fire, so an automated run
+        // can exercise Cmd-V with an image the way pasting a screenshot does.
+        if let image = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_PASTE_IMAGE"],
+           let data = FileManager.default.contents(atPath: image) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setData(data, forType: .png)
+        }
 
         // Optional comma-separated selectors fired before the shot, so keyboard
         // shortcuts can be exercised from an automated run.
@@ -20,10 +32,15 @@ enum SelfCapture {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay / 2) {
                 for name in actions.split(separator: ",") {
                     let selector = Selector(String(name))
-                    // The responder chain only reaches the app delegate when a
-                    // key window exists, which it may not for a headless run.
+                    // The responder chain only reaches anything when a key window
+                    // exists, which it may not for a run launched from a shell, so
+                    // the view and then the delegate are tried by hand.
                     var delivered = NSApp.sendAction(selector, to: nil, from: nil)
-                    if !delivered {
+                    if !delivered, let responder = (NSApp.keyWindow ?? NSApp.mainWindow)?.firstResponder,
+                       responder.responds(to: selector) {
+                        delivered = NSApp.sendAction(selector, to: responder, from: nil)
+                    }
+                    if !delivered, NSApp.delegate?.responds(to: selector) == true {
                         delivered = NSApp.sendAction(selector, to: NSApp.delegate, from: nil)
                     }
                     FileHandle.standardError.write(Data("[self-shot] \(name): \(delivered ? "sent" : "NOT DELIVERED")\n".utf8))

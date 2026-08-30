@@ -1,9 +1,11 @@
 import AppKit
 import Metal
+import VitraCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windows: [TerminalWindowController] = []
     private var device: MTLDevice?
+    private let attachments = AttachmentStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let device = MTLCreateSystemDefaultDevice() else {
@@ -11,6 +13,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         self.device = device
+
+        // Attachments are written for one conversation; sweep last week's on the
+        // way in, off the main thread so it never delays the first window.
+        let store = attachments
+        DispatchQueue.global(qos: .utility).async { store.purgeExpired() }
 
         NSApp.mainMenu = MainMenu.build()
         newWindow(nil)
@@ -59,7 +66,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 device: device,
                 fontName: "Menlo",
                 fontSize: 13,
-                command: Self.commandFromArguments()
+                command: Self.commandFromArguments(),
+                attachments: attachments
             )
             windows.append(controller)
 

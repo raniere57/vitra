@@ -34,5 +34,6 @@ let package = Package(
         .testTarget(name: "VitraCoreTests", dependencies: ["VitraCore"]),
         .testTarget(name: "VitraGhosttyTests", dependencies: ["VitraGhostty", "VitraCore"]),
         .testTarget(name: "VitraRenderTests", dependencies: ["VitraRender", "VitraCore"]),
+        .testTarget(name: "VitraAppTests", dependencies: ["VitraApp", "VitraCore"]),
     ]
 )

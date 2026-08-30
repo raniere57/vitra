@@ -33,8 +33,19 @@ final class TerminalView: NSView, NSMenuItemValidation {
     private var keyWasHandledByInput = false
     private var markedText = ""
 
-    init(session: TerminalSession, device: MTLDevice, fontName: String, fontSize: CGFloat) throws {
+    private let attachments: AttachmentStore
+    private let chips = AttachmentChipView()
+    private var isDropTarget = false
+
+    init(
+        session: TerminalSession,
+        device: MTLDevice,
+        fontName: String,
+        fontSize: CGFloat,
+        attachments: AttachmentStore = AttachmentStore()
+    ) throws {
         self.session = session
+        self.attachments = attachments
         self.device = device
         self.fontName = fontName
         self.fontSize = fontSize
@@ -56,6 +67,17 @@ final class TerminalView: NSView, NSMenuItemValidation {
         session.onNeedsRedraw = { [weak self] in
             self?.setNeedsRender()
         }
+
+        // Files dropped anywhere on the terminal become attachments.
+        registerForDraggedTypes([.fileURL])
+
+        chips.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(chips)
+        NSLayoutConstraint.activate([
+            chips.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
+            chips.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -padding),
+            chips.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padding),
+        ])
     }
 
     @available(*, unavailable)
@@ -80,6 +102,12 @@ final class TerminalView: NSView, NSMenuItemValidation {
     }
 
     // MARK: - Layer
+
+    /// A border drawn while a drag hovers, so the drop target is obvious.
+    private func updateDropHighlight() {
+        layer?.borderWidth = isDropTarget ? 2 : 0
+        layer?.borderColor = NSColor.controlAccentColor.cgColor
+    }
 
     override func makeBackingLayer() -> CALayer {
         let layer = CAMetalLayer()
@@ -125,6 +153,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
             return
         }
         needsRedraw = false
+        updateDropHighlight()
 
         guard let metalLayer, metalLayer.drawableSize.width > 0,
               let drawable = metalLayer.nextDrawable()
@@ -327,8 +356,23 @@ final class TerminalView: NSView, NSMenuItemValidation {
     }
 
     @objc func paste(_ sender: Any?) {
+        // Files and images on the clipboard become paths, never bytes on the pty.
+        let found = PasteboardAttachments.read(from: .general, store: attachments)
+        if !found.isEmpty {
+            attach(found)
+            return
+        }
         guard let text = NSPasteboard.general.string(forType: .string) else { return }
         session.paste(text)
+    }
+
+    /// Types the paths of `files` into the prompt and shows them as chips.
+    private func attach(_ files: [Attachment]) {
+        guard !files.isEmpty else { return }
+        // Trailing space so the next thing typed does not run into the path.
+        session.paste(ShellQuoting.join(files.map(\.path)) + " ")
+        chips.show(files)
+        setNeedsRender()
     }
 
     override func selectAll(_ sender: Any?) {
@@ -351,6 +395,34 @@ final class TerminalView: NSView, NSMenuItemValidation {
         default:
             return true
         }
+    }
+
+    // MARK: - Drag and drop
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard PasteboardAttachments.fileURLs(from: sender.draggingPasteboard)?.isEmpty == false else {
+            return []
+        }
+        isDropTarget = true
+        setNeedsRender()
+        return .copy
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        isDropTarget = false
+        setNeedsRender()
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        isDropTarget = false
+        setNeedsRender()
+
+        guard let urls = PasteboardAttachments.fileURLs(from: sender.draggingPasteboard), !urls.isEmpty
+        else { return false }
+
+        window?.makeFirstResponder(self)
+        attach(urls.map { Attachment(url: $0, isTemporary: false) })
+        return true
     }
 
     // MARK: - Keyboard
