@@ -23,9 +23,24 @@ public struct AttachmentStore: Sendable {
     public func store(_ data: Data, extension pathExtension: String, prefix: String = "paste") throws -> URL {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let url = directory.appendingPathComponent("\(prefix)-\(Self.timestamp()).\(pathExtension)")
-        try data.write(to: url, options: .atomic)
-        return url
+        // Two pastes inside the same millisecond would otherwise produce the
+        // same name and the second would silently replace the first, so the
+        // write refuses to overwrite and a counter is appended until it lands.
+        let stamp = Self.timestamp()
+        for attempt in 0... {
+            let suffix = attempt == 0 ? "" : "-\(attempt + 1)"
+            let url = directory.appendingPathComponent("\(prefix)-\(stamp)\(suffix).\(pathExtension)")
+            do {
+                // Not atomic: Foundation rejects that combination, and an
+                // atomic write would rename over the name this is claiming.
+                try data.write(to: url, options: .withoutOverwriting)
+                return url
+            } catch CocoaError.fileWriteFileExists {
+                continue
+            }
+        }
+        // Unreachable: the loop only exits by returning or throwing.
+        throw CocoaError(.fileWriteUnknown)
     }
 
     /// Deletes attachments older than `retention`.

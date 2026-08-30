@@ -39,6 +39,22 @@ private func capture(
     #expect(result.status == 0)
 }
 
+/// Job control is the whole reason the spawn opens the tty by path: a child
+/// without a controlling terminal cannot open /dev/tty, and Ctrl-C, `fg` and
+/// `bg` stop working in the shell.
+@Test func childHasAControllingTerminal() throws {
+    let result = try capture("/bin/sh", ["-c", "echo controlling > /dev/tty"])
+    #expect(result.output.contains("controlling"))
+    #expect(result.status == 0)
+}
+
+/// The child owns the terminal's foreground process group, which is what lets a
+/// shell hand foreground control to the jobs it starts.
+@Test func childOwnsTheForegroundProcessGroup() throws {
+    let result = try capture("/bin/sh", ["-c", "test \"$(ps -o tpgid= -p $$ | tr -d ' ')\" = \"$$\" && echo foreground"])
+    #expect(result.output.contains("foreground"))
+}
+
 @Test func childExitStatusIsReported() throws {
     #expect(try capture("/bin/sh", ["-c", "exit 3"]).status == 3)
 }
@@ -48,9 +64,17 @@ private func capture(
     #expect(try capture("/bin/sh", ["-c", "kill -TERM $$"]).status == 128 + Int32(SIGTERM))
 }
 
-@Test func missingExecutableExitsWith127() throws {
-    // execve() failing in the child must not take the parent down with it.
-    #expect(try capture("/nonexistent/binary", []).status == 127)
+@Test func missingExecutableFailsToSpawn() {
+    // posix_spawn resolves the executable before the child exists, so a missing
+    // shell is reported to the caller rather than becoming a pane that opens and
+    // immediately dies with status 127.
+    #expect(throws: PTYError.self) {
+        _ = try PTY(
+            executable: "/nonexistent/binary",
+            environment: ShellEnvironment.childEnvironment(),
+            size: .default
+        )
+    }
 }
 
 @Test func childSeesTheWindowSizeItWasGiven() throws {

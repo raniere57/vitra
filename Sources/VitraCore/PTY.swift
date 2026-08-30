@@ -2,13 +2,16 @@ import Darwin
 import Foundation
 
 public enum PTYError: Error, CustomStringConvertible {
-    case forkFailed(errno: Int32)
+    case openFailed(errno: Int32)
+    case spawnFailed(errno: Int32)
     case writeFailed(errno: Int32)
 
     public var description: String {
         switch self {
-        case let .forkFailed(code):
-            return "forkpty failed: \(String(cString: strerror(code)))"
+        case let .openFailed(code):
+            return "openpty failed: \(String(cString: strerror(code)))"
+        case let .spawnFailed(code):
+            return "posix_spawn failed: \(String(cString: strerror(code)))"
         case let .writeFailed(code):
             return "pty write failed: \(String(cString: strerror(code)))"
         }
@@ -17,9 +20,19 @@ public enum PTYError: Error, CustomStringConvertible {
 
 /// A pseudo-terminal with a child process attached to its slave side.
 ///
-/// `forkpty(3)` is used rather than `posix_spawn` because only it performs
-/// `login_tty()` in the child: `setsid()` plus `TIOCSCTTY`. Without a controlling
-/// terminal the shell has no job control, so Ctrl-C, `fg`, and `bg` all break.
+/// The child is started with `posix_spawn(2)` rather than `forkpty(3)`. The
+/// earlier fork-based version wrote the child's setup in Swift, and calling into
+/// the Swift runtime between fork and exec is unsafe in a process with other
+/// threads: a metadata lookup takes a lock another thread held at fork time, and
+/// the kernel kills the child before it ever execs. That was reproducible under
+/// load — "crashed on child side of fork pre-exec", os_unfair_lock corrupt —
+/// and it would have shown up as a pane that opens dead.
+///
+/// The properties `login_tty()` provided are kept: `POSIX_SPAWN_SETSID` makes the
+/// child a session leader, and the first file action opens the slave *by path*
+/// without `O_NOCTTY`, which is what makes that tty the child's controlling
+/// terminal. Without one there is no job control, so Ctrl-C, `fg`, and `bg` break.
+///
 /// Access must be serialized by the caller, so this is `@unchecked Sendable`:
 /// the compiler cannot see the queue discipline that makes it safe.
 public final class PTY: @unchecked Sendable {
@@ -32,13 +45,13 @@ public final class PTY: @unchecked Sendable {
     private let readBufferSize = 64 * 1024
     private var isClosed = false
 
-    /// A second descriptor onto the slave side, held open by the parent.
+    /// The parent's own descriptor onto the slave side.
     ///
-    /// `forkpty()` returns only the master. Once the child exits and the last
-    /// slave descriptor closes, Darwin tears the pty down and discards output
-    /// that was still buffered — a short-lived command's entire result can
-    /// vanish. Holding this open keeps that data readable until we drop it
-    /// deliberately, after draining.
+    /// Once the child exits and the last slave descriptor closes, Darwin tears
+    /// the pty down and discards output that was still buffered — a short-lived
+    /// command's entire result can vanish. Holding this open keeps that data
+    /// readable until we drop it deliberately, after draining. The child gets a
+    /// separate descriptor of its own, opened by the spawn's file actions.
     private var slaveFD: Int32 = -1
 
     public init(
@@ -47,9 +60,8 @@ public final class PTY: @unchecked Sendable {
         environment: [String: String],
         size: TerminalSize
     ) throws {
-        // Every buffer the child touches is built before forkpty(). Between fork
-        // and execve only async-signal-safe calls are legal, which rules out all
-        // Swift allocation, ARC traffic, and String bridging.
+        // argv/envp are C arrays because posix_spawn takes them that way; they
+        // are freed once the child has been started.
         let path = strdup(executable)!
         let argv = Self.makeCArray([executable] + arguments)
         let envp = Self.makeCArray(environment.map { "\($0.key)=\($0.value)" })
@@ -67,43 +79,69 @@ public final class PTY: @unchecked Sendable {
         )
 
         var master: Int32 = -1
-        let pid = forkpty(&master, nil, nil, &ws)
-
-        if pid < 0 { throw PTYError.forkFailed(errno: errno) }
-
-        if pid == 0 {
-            // --- child ---
-            // A GUI process ignores SIGPIPE and may block signals; shells expect
-            // default dispositions and an empty mask.
-            for sig in [SIGPIPE, SIGINT, SIGQUIT, SIGTERM, SIGHUP, SIGCHLD, SIGTTIN, SIGTTOU, SIGWINCH] {
-                signal(sig, SIG_DFL)
-            }
-            var empty = sigset_t()
-            sigemptyset(&empty)
-            sigprocmask(SIG_SETMASK, &empty, nil)
-
-            // forkpty() dup2s the slave onto 0/1/2 and closes the master, but every
-            // other descriptor the app had open is still inherited. Leaking those
-            // into the shell leaks them into everything the user runs.
-            let maxFD = getdtablesize()
-            for fd in 3..<maxFD { Darwin.close(fd) }
-
-            execve(path, argv, envp)
-            _exit(127)
+        var slave: Int32 = -1
+        guard openpty(&master, &slave, nil, nil, &ws) == 0 else {
+            throw PTYError.openFailed(errno: errno)
         }
 
-        // --- parent ---
+        // ttyname() returns a pointer into per-thread storage that the next call
+        // overwrites, so the path is copied before it is handed to the spawn.
+        guard let name = ttyname(slave).map({ strdup($0) }) else {
+            Darwin.close(master)
+            Darwin.close(slave)
+            throw PTYError.openFailed(errno: errno)
+        }
+        defer { free(name) }
+
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+
+        // Opened by path, after SETSID and without O_NOCTTY: that is what makes
+        // this tty the child's controlling terminal. Inheriting a descriptor
+        // would not — a controlling terminal is acquired by opening one.
+        posix_spawn_file_actions_addopen(&actions, 0, name, O_RDWR, 0)
+        posix_spawn_file_actions_adddup2(&actions, 0, 1)
+        posix_spawn_file_actions_adddup2(&actions, 0, 2)
+
+        var attributes: posix_spawnattr_t?
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+
+        // CLOEXEC_DEFAULT closes every descriptor the file actions do not name,
+        // so nothing the app had open — including this pty's own master — leaks
+        // into the shell and from there into everything the user runs.
+        posix_spawnattr_setflags(&attributes, Int16(
+            POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT
+                | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
+        ))
+
+        // A GUI process ignores SIGPIPE and may block signals; shells expect
+        // default dispositions and an empty mask.
+        var all = sigset_t()
+        sigfillset(&all)
+        posix_spawnattr_setsigdefault(&attributes, &all)
+        var empty = sigset_t()
+        sigemptyset(&empty)
+        posix_spawnattr_setsigmask(&attributes, &empty)
+
+        var pid: pid_t = 0
+        let result = posix_spawn(&pid, path, &actions, &attributes, argv, envp)
+        guard result == 0 else {
+            Darwin.close(master)
+            Darwin.close(slave)
+            // posix_spawn reports through its return value, not errno.
+            throw PTYError.spawnFailed(errno: result)
+        }
+
         self.masterFD = master
         self.processID = pid
+        self.slaveFD = slave
         self.readBuffer = .allocate(byteCount: readBufferSize, alignment: MemoryLayout<UInt8>.alignment)
 
         // Non-blocking so a full read loop can drain to EAGAIN in one wakeup and
         // so draining after child exit can never block the session queue.
         _ = fcntl(master, F_SETFL, fcntl(master, F_GETFL, 0) | O_NONBLOCK)
-
-        if let name = ptsname(master) {
-            slaveFD = open(name, O_RDWR | O_NOCTTY)
-        }
     }
 
     deinit {

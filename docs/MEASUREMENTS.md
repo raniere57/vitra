@@ -91,3 +91,51 @@ Measured separately because a terminal is judged on how fast it opens:
 The shader is compiled at build time by a SwiftPM plugin. Compiling it from
 source at launch instead costs **463 ms**, which is why the plugin exists;
 `swift build` does not compile `.metal` files on its own the way Xcode does.
+
+## Phase 2 — attachments
+
+Measured on the installed `Vitra.app` (Release, ad-hoc signed) unless a row says
+otherwise. Each run is a fresh launch with `-e /bin/sh`.
+
+| State | phys_footprint | peak | RSS | CPU |
+|---|---|---|---|---|
+| idle, bare `.build/release/VitraApp` | **25 MB** | 29 MB | 72.5 MB | 0.00% |
+| idle, installed `.app` | **26 MB** | 30 MB | 75.4 MB | 0.00% |
+| after pasting an image, chip and thumbnail on screen | **43 MB** | 54 MB | 86.9 MB | 0.00% |
+| `cat` of the 100 MB fixture | **34 MB** | 38 MB | 64.1 MB | 0.00% |
+
+Against the 150 MB budget the worst measured state is 43 MB.
+
+Idle grew from Phase 1a's 14 MB to 25 MB. The measurement method is identical
+(same script, same bare release binary), so the 11 MB is code: tabs, splits,
+selection, pasteboard and drag-and-drop registration all arrived in between. It
+is not attributed more finely than that because at 1/6 of the budget the split
+would not change any decision.
+
+The 17 MB step from pasting is QuickLook: `QLThumbnailGenerator` loads the
+thumbnailing stack and the image decoders behind it. Kept on purpose — seeing
+*which* screenshot was attached is the point of the chip, and a generic
+`NSWorkspace` file icon would cost nothing and show nothing. Revisit if the
+idle-after-paste number stops coming back down.
+
+Reproduce:
+
+```bash
+scripts/measure.sh load
+/Applications/Vitra.app/Contents/MacOS/Vitra -e /bin/sh &
+scripts/measure.sh live $!
+```
+
+### Fork hazard found while measuring
+
+The parallel test suite started failing at random once the suite grew to load
+AppKit. The crash reports showed the cause: `crashed on child side of fork
+pre-exec`, `os_unfair_lock is corrupt`, in `swift_conformsToProtocol`. The
+child's setup between `fork()` and `execve()` was written in Swift, and the
+Swift runtime takes locks that another thread can hold at fork time.
+
+This was a production bug, not a test artifact: the app forks from a
+multithreaded AppKit process every time a pane opens. `PTY` now uses
+`posix_spawn` with `POSIX_SPAWN_SETSID` and a file action that opens the slave
+by path, which keeps the controlling terminal and never runs Swift in a forked
+child. 98 tests, 8 consecutive clean runs.
