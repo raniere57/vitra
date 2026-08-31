@@ -21,6 +21,10 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
     /// The visible rows: a project header, then its sessions, and so on.
     private var rows: [Row] = []
     private var filter = ""
+    /// The session running in the pane that has the keyboard, if it is one of
+    /// these. Marked rather than selected: selection is what the user clicked
+    /// last, which is a different question.
+    private var current: String?
     private var hasLoaded = false
     private var archivedHidden = 0
     private var showsArchived = false
@@ -281,7 +285,17 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
         cell.worktree.stringValue = session.worktree ?? ""
         cell.worktree.isHidden = session.worktree == nil
         cell.toolTip = "\(session.projectPath)\n\(session.id)"
+        cell.isCurrent = session.id == current
         return cell
+    }
+}
+
+extension SessionListView {
+    /// Marks the session the focused pane is running. Nil unmarks.
+    func setCurrent(_ id: String?) {
+        guard id != current else { return }
+        current = id
+        table.reloadData()
     }
 }
 
@@ -343,6 +357,17 @@ final class DotView: NSView {
 /// Two lines: what the session is called, then when it was and, if it ran in
 /// one, which worktree — as a whole label rather than a truncated path.
 private final class SessionCell: NSTableCellView {
+    /// The session this pane is in: an accent rail down the leading edge, and a
+    /// title that carries its weight. Loud enough to find at a glance, quiet
+    /// enough not to compete with the row the user is about to click.
+    var isCurrent = false {
+        didSet {
+            guard isCurrent != oldValue else { return }
+            title.font = .systemFont(ofSize: 12, weight: isCurrent ? .semibold : .regular)
+            needsDisplay = true
+        }
+    }
+
     let title = NSTextField(labelWithString: "")
     let detail = NSTextField(labelWithString: "")
     let worktree = ChipLabel(labelWithString: "")
@@ -382,6 +407,19 @@ private final class SessionCell: NSTableCellView {
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard isCurrent else { return }
+        SessionCell.rail.setFill()
+        NSBezierPath(
+            roundedRect: NSRect(x: 0, y: 4, width: 2.5, height: bounds.height - 8),
+            xRadius: 1.25,
+            yRadius: 1.25
+        ).fill()
+    }
+
+    private static let rail = NSColor(srgbRed: 0.486, green: 0.753, blue: 1, alpha: 1)
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }

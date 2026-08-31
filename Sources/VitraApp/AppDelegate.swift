@@ -192,8 +192,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Opens a folder as a tab of the front window, which is what a folder
     /// switcher is for: the windows stay together and the tab bar becomes the
     /// list of what is open.
-    func openTab(for bookmark: Bookmark, running command: String? = nil) {
-        makeWindow(asTabOf: currentController?.window, bookmark: bookmark, running: command)
+    func openTab(for bookmark: Bookmark, running command: String? = nil, session: String? = nil) {
+        makeWindow(asTabOf: currentController?.window, bookmark: bookmark, running: command, session: session)
     }
 
     private func report(_ problems: [String]) {
@@ -278,7 +278,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ?? windows.last
     }
 
-    private func makeWindow(asTabOf sibling: NSWindow?, bookmark: Bookmark? = nil, running: String? = nil) {
+    private func makeWindow(
+        asTabOf sibling: NSWindow?,
+        bookmark: Bookmark? = nil,
+        running: String? = nil,
+        session: String? = nil
+    ) {
         guard let device else { return }
         do {
             let controller = try TerminalWindowController(
@@ -303,7 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // the window exists, rather than a timer waiting for a prompt.
             if let running {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    controller.run(running)
+                    controller.run(running, session: session)
                 }
             }
         } catch {

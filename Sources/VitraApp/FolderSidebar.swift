@@ -49,6 +49,9 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
     private let rail = FolderRail()
     private let tree = DirectoryTreeView()
     private let sessions = SessionListView()
+
+    /// Marks the session the focused pane is running.
+    func setCurrentSession(_ id: String?) { sessions.setCurrent(id) }
     private let divider = NSBox()
     private let search = NSSearchField()
 

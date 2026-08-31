@@ -111,7 +111,15 @@ enum SelfCapture {
                         keyCode: character == " " ? 49 : 0
                     ) else { return }
                     let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible })
-                    (window?.firstResponder as? TerminalView)?.keyDown(with: event)
+                    // The pane is handed the key directly, because a synthetic
+                    // event does not survive AppKit's routing; anything else
+                    // that has the keyboard - a search field - is reached the
+                    // ordinary way.
+                    if let pane = window?.firstResponder as? TerminalView {
+                        pane.keyDown(with: event)
+                    } else {
+                        NSApp.sendEvent(event)
+                    }
                 }
             }
         }

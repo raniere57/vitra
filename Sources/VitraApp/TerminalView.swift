@@ -31,6 +31,11 @@ final class TerminalView: NSView, NSMenuItemValidation {
     private var cursorOn = true
     private var cursorStyle: CursorStyleSetting = .bar
 
+    /// The Claude Code session this pane was told to resume, while it is still
+    /// running one. Set by whoever opened it, cleared when the program ends:
+    /// this is what the sessions sidebar marks as "you are here".
+    var claudeSession: String?
+
     /// Paused whenever there is nothing to draw, which is most of the time.
     private var displayLink: CADisplayLink?
     private var needsRedraw = true
@@ -309,6 +314,11 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     /// Records how the command that just finished ended.
     func record(_ status: CommandStatus) {
+        // The command that ended is the one that was resuming a session, so the
+        // pane is in no session now. Cleared here rather than on every refresh:
+        // a shell takes a moment to start what it was handed, and a mark that
+        // clears itself in that gap never appears at all.
+        claudeSession = nil
         commandStatuses.insert(status, at: 0)
         if commandStatuses.count > 200 { commandStatuses.removeLast() }
         commandStartedAt = nil

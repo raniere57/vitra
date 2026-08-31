@@ -294,10 +294,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// `--resume` only lists the sessions of the directory it runs in, so the
     /// directory is part of the line: the shell arrives where the session was.
     /// Types a command into the focused pane. Used when a tab opens to run one.
-    func run(_ command: String) {
+    ///
+    /// `session` is the Claude Code session the command resumes, when it is
+    /// one: the sidebar marks the pane that is in it.
+    func run(_ command: String, session: String? = nil) {
         guard let pane = focusedPane else { return }
+        pane.claudeSession = session
         pane.session.send(text: command)
         window?.makeFirstResponder(pane)
+        sidebar.setCurrentSession(session)
     }
 
     private func openSession(_ session: ClaudeSession) {
@@ -310,10 +315,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
                     name: URL(fileURLWithPath: session.projectPath).lastPathComponent,
                     path: session.projectPath
                 ),
-                running: ClaudeSessionStore.resumeCommand(for: session)
+                running: ClaudeSessionStore.resumeCommand(for: session),
+                session: session.id
             )
             return
         }
+        pane.claudeSession = session.id
         pane.session.send(text: ClaudeSessionStore.resumeCommand(for: session))
         window?.makeFirstResponder(pane)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -422,6 +429,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         let directory = focusedPane?.session.currentDirectory
         updateBreadcrumb()
         sidebar.reveal(directory)
+        sidebar.setCurrentSession(focusedPane?.claudeSession)
         if let directory, let panel {
             if panel.isListingFiles {
                 // Browsed somewhere else on purpose while the pane was busy: a
