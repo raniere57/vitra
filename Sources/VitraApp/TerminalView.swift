@@ -245,6 +245,11 @@ final class TerminalView: NSView, NSMenuItemValidation {
         // Draw from the top-left so resizing does not scale stale content.
         layer.autoresizingMask = []
         layer.needsDisplayOnBoundsChange = false
+        // Two drawables, not the default three. Each one is a full-window
+        // IOSurface — 27 MB on this display — and a terminal that draws only
+        // when the screen changes never has three frames in flight. Measured:
+        // 106 MB of footprint for one window becomes 79 MB.
+        layer.maximumDrawableCount = 2
         return layer
     }
 

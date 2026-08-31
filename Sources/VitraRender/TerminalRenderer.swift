@@ -50,13 +50,43 @@ public final class TerminalRenderer {
     /// Extra colour applied to selected cells, blended over their background.
     public var selectionColor = TerminalColor(red: 60, green: 90, blue: 140)
 
+    /// One atlas per font and size, shared by every pane drawing in it.
+    ///
+    /// The atlas is a 2048x2048 texture — 4 MB — and eight panes in the same
+    /// font were paying for it eight times over. Held weakly, so the last pane
+    /// in a font that nobody uses any more takes its texture with it.
+    /// Guarded by a lock rather than an actor: renderers are built on the main
+    /// thread in the app and off it in the tests, and a lock held for a
+    /// dictionary lookup costs nothing either way.
+    nonisolated(unsafe) private static var atlases: [String: WeakAtlas] = [:]
+    private static let atlasLock = NSLock()
+
+    private final class WeakAtlas {
+        weak var atlas: GlyphAtlas?
+        init(_ atlas: GlyphAtlas) { self.atlas = atlas }
+    }
+
+    private static func atlas(device: MTLDevice, fonts: FontSet) throws -> GlyphAtlas {
+        atlasLock.lock()
+        defer { atlasLock.unlock() }
+
+        let key = "\(ObjectIdentifier(device))|\(fonts.metrics.cellWidth)x\(fonts.metrics.cellHeight)"
+            + "|\(CTFontCopyPostScriptName(fonts.regular) as String? ?? "")"
+        if let existing = atlases[key]?.atlas { return existing }
+        let atlas = try GlyphAtlas(device: device, fonts: fonts)
+        atlases[key] = WeakAtlas(atlas)
+        // Entries whose atlas has gone are the only garbage this can leave.
+        atlases = atlases.filter { $0.value.atlas != nil }
+        return atlas
+    }
+
     public init(device: MTLDevice, fonts: FontSet) throws {
         guard let queue = device.makeCommandQueue() else {
             throw RendererError.pipelineCreationFailed("no command queue")
         }
         self.device = device
         self.commandQueue = queue
-        self.atlas = try GlyphAtlas(device: device, fonts: fonts)
+        self.atlas = try Self.atlas(device: device, fonts: fonts)
 
         let library = try Self.loadShaderLibrary(device: device)
 

@@ -347,3 +347,48 @@ Two things the harness had to learn before this could be measured: a synthesised
 wheel event posted with `NSApp.postEvent` never reaches the view — AppKit drops
 it — so the pane has to be handed the event directly, and the pane needed a way
 to say what the viewport is doing at the moment of the shot.
+
+## Where the memory actually was
+
+Force Quit reported 657 MB. The measurements, in order of size:
+
+**Closed windows were still open.** A window that closed stayed in the app's
+list of controllers, with its shells, its scrollback and its Metal layer.
+Opening and closing eight tabs now returns to the baseline it started from —
+105.3 MB before and after — where before each closed tab left its whole cost
+behind. This was the 657 MB.
+
+**The drawables are the biggest single slice.** One window on this display:
+
+```
+Physical footprint:  105.9M
+IOSurface             75.0M
+```
+
+`CAMetalLayer` keeps three drawables by default and each is a full-window
+surface — 3360x2038 at 4 bytes is 27 MB. A terminal that draws only when the
+screen changes never has three frames in flight, so it keeps two:
+
+```
+Physical footprint:   80.8M      (was 105.9M)
+IOSurface             50.0M      (was 75.0M)
+```
+
+**One glyph atlas per pane.** The atlas is a 2048x2048 texture, 4 MB, and every
+pane had its own. Six panes, same font, measured both ways:
+
+```
+shared      140.9M
+unshared    162.1M
+```
+
+**Scrollback is not the problem.** 300,000 lines of output into one pane moved
+the footprint by about 2 MB, and 20,000 lines of 200 columns by the same. The
+10,000-line limit is not what to tighten.
+
+**What is loaded but not used.** With no browser ever opened, WebKit is already
+mapped: WebCore 10.9 MB resident, JavaScriptCore 8.7 MB, WebKit 4.8 MB — about
+24 MB for a window nobody asked for. SwiftUI, which draws only the side panels
+and the preferences window, is another 9.5 MB. Both are dyld loading what the
+binary links; deferring them means loading the browser from a bundle at the
+moment it opens, and writing the panels in AppKit.
