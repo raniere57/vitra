@@ -236,8 +236,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         separator.boxType = .separator
         separator.translatesAutoresizingMaskIntoConstraints = false
 
-        let row = NSStackView(views: [makeCluster([splitRight, splitDown, separator, panelButton])])
+        // Bare here too, same as the pair on the left: the hairline is enough
+        // to say the splits and the panel are different jobs.
+        let row = NSStackView(views: [splitRight, splitDown, separator, panelButton])
         row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 4
+        row.setCustomSpacing(8, after: splitDown)
+        row.setCustomSpacing(8, after: separator)
         row.edgeInsets = NSEdgeInsets(top: 0, left: 6, bottom: 0, right: 10)
         row.frame = NSRect(x: 0, y: 0, width: row.fittingSize.width, height: 28)
         NSLayoutConstraint.activate([
@@ -419,18 +425,6 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     }
 
     /// The tinted well the icons sit in, on both sides of the title bar.
-    private func makeCluster(_ views: [NSView]) -> NSStackView {
-        let cluster = NSStackView(views: views)
-        cluster.orientation = .horizontal
-        cluster.alignment = .centerY
-        cluster.spacing = 3
-        cluster.edgeInsets = NSEdgeInsets(top: 2, left: 3, bottom: 2, right: 3)
-        cluster.wantsLayer = true
-        cluster.layer?.cornerRadius = 8
-        cluster.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor
-        return cluster
-    }
-
     @objc private func toggleSidebarFromButton(_ sender: Any?) { toggleSidebar() }
 
     @objc private func toggleSessionsFromButton(_ sender: Any?) { toggleSessions() }
@@ -673,6 +667,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     private func syncPanelButton() {
         panelButton.state = panel == nil ? .off : .on
         panelButton.contentTintColor = panel == nil ? nil : .controlAccentColor
+        tint(panelButton, on: panel != nil)
     }
 
     @discardableResult
