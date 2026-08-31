@@ -207,6 +207,15 @@ whatever program is running. A pane that is not the key window always shows a
 hollow block — the position is still worth knowing, the claim on your typing is
 not.
 
+## Closing a pane
+
+A × in the pane's top-right corner, shown while the pointer is in that pane and
+gone when it leaves: closing a terminal by typing `exit` means going into it
+first, which is two moves for something the pointer is already over. It is
+hidden at rest because a button parked over the corner of every pane is a button
+covering the text scrolling past it. `Cmd-W` still does the same thing from the
+keyboard, and the last pane takes the window with it.
+
 ## The workspace comes back
 
 Quitting writes the arrangement to `~/.vitra/layout.json`, and the next launch

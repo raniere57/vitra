@@ -580,6 +580,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         session.onBell = { NSSound.beep() }
         pane.onFocused = { [weak self] in self?.refreshDirectory() }
         pane.onOpenLink = { [weak self] url, external in self?.open(url, external: external) }
+        pane.onClose = { [weak self, weak pane] in
+            guard let pane else { return }
+            self?.close(pane)
+        }
         session.onCommandStarted = { [weak pane] in
             pane?.commandStarted()
         }

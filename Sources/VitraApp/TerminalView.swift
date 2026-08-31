@@ -52,6 +52,10 @@ final class TerminalView: NSView, NSMenuItemValidation {
     /// One rail per command, drawn in the left padding.
     private let blockGutter = CommandBlockView()
     private let scrollIndicator = ScrollIndicator()
+    private let closeButton = PaneCloseButton()
+
+    /// The pane was asked to close from its own corner.
+    var onClose: (() -> Void)?
     private var showsCommandBlocks = true
 
     /// How commands ended, newest first, as the shell reported them.
@@ -130,6 +134,8 @@ final class TerminalView: NSView, NSMenuItemValidation {
         scrollIndicator.autoresizingMask = [.width, .height]
         scrollIndicator.isHidden = true
         addSubview(scrollIndicator)
+        closeButton.onClose = { [weak self] in self?.onClose?() }
+        addSubview(closeButton)
 
         focusBar.wantsLayer = true
         focusBar.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor
@@ -300,6 +306,13 @@ final class TerminalView: NSView, NSMenuItemValidation {
     /// Hands the gutter this frame's command blocks.
     private func updateCommandBlocks() {
         scrollIndicator.frame = bounds
+        closeButton.frame = NSRect(
+            x: bounds.maxX - PaneCloseButton.size - PaneCloseButton.margin,
+            // The view is flipped, so the top of the pane is the low y.
+            y: bounds.minY + PaneCloseButton.margin,
+            width: PaneCloseButton.size,
+            height: PaneCloseButton.size
+        )
         scrollIndicator.update(snapshot.scroll)
         guard showsCommandBlocks else { return }
         blockGutter.frame = bounds
@@ -558,6 +571,13 @@ final class TerminalView: NSView, NSMenuItemValidation {
         if link(for: event) != nil { NSCursor.pointingHand.set() } else { NSCursor.iBeam.set() }
     }
 
+    override func layout() {
+        super.layout()
+        // The overlays follow the pane's size; the button lives in the corner
+        // whether or not a frame has been drawn since the last resize.
+        updateCommandBlocks()
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let linkTracking { removeTrackingArea(linkTracking) }
@@ -570,8 +590,13 @@ final class TerminalView: NSView, NSMenuItemValidation {
         linkTracking = area
     }
 
+    override func mouseEntered(with event: NSEvent) {
+        closeButton.isHidden = false
+    }
+
     override func mouseExited(with event: NSEvent) {
         NSCursor.arrow.set()
+        closeButton.isHidden = true
     }
 
     /// What the viewport is doing right now, for a measured run to print.
