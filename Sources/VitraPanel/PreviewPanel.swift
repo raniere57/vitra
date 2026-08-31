@@ -97,7 +97,13 @@ public final class PreviewPanel: NSView {
             }
             self.show(target)
         }
-        list.onOpenDirectory = { [weak self] url in self?.onDirectorySelected?(url) }
+        // The list browses itself: a file list that only moves when a shell
+        // agrees to move is a file list that stops working the moment
+        // something is running in that shell.
+        list.onOpenDirectory = { [weak self] url in
+            self?.showFiles(in: url)
+            self?.onDirectorySelected?(url)
+        }
         list.frame = contentContainer.bounds
         list.autoresizingMask = [.width, .height]
         contentContainer.addSubview(list)

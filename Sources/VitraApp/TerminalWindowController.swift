@@ -27,6 +27,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// Built the first time the panel is opened, and kept afterwards.
     private var panel: PreviewPanel?
     private var panelSplit: NSSplitView?
+    /// The file list is showing a folder the terminal is not in, because the
+    /// user browsed there while something was running.
+    private var panelBrowsedAway = false
 
     /// The window's permanent content view.
     ///
@@ -358,8 +361,27 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     ///
     /// Without Cmd this is a `cd` typed into the terminal you are looking at —
     /// the shell moves, the sidebars follow it, and nothing new is opened.
+    /// Takes the terminal along with the file list, when it can be taken.
+    ///
+    /// Browsing the panel is not a request to run anything: a pane with a
+    /// program in the foreground would read the `cd` as input, which is how it
+    /// ended up in Claude Code's chat box. The list has already moved.
+    private func followDirectory(_ url: URL) {
+        guard let pane = focusedPane, !pane.session.isRunningProgram else {
+            panelBrowsedAway = true
+            return
+        }
+        panelBrowsedAway = false
+        pane.session.send(text: ShellQuote.changeDirectory(to: url.path))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.refreshDirectory()
+        }
+    }
+
     private func openDirectory(_ url: URL, newTab: Bool) {
-        if newTab {
+        // A busy pane cannot be sent a command, so the folder opens where it
+        // can be opened: a tab of its own.
+        if newTab || focusedPane?.session.isRunningProgram == true {
             (NSApp.delegate as? AppDelegate)?.openTab(
                 for: Bookmark(name: url.lastPathComponent, path: url.path)
             )
@@ -384,7 +406,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         sidebar.reveal(directory)
         if let directory, let panel {
             if panel.isListingFiles {
-                panel.showFiles(in: directory)
+                // Browsed somewhere else on purpose while the pane was busy: a
+                // redraw is no reason to drag the user back.
+                if !panelBrowsedAway { panel.showFiles(in: directory) }
             } else {
                 // Not listing right now, but the back arrow should still lead
                 // somewhere: the folder this terminal is in.
@@ -695,7 +719,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
         let panel = PreviewPanel(frame: .zero)
         panel.onClose = { [weak self] in self?.closePanel() }
-        panel.onDirectorySelected = { [weak self] url in self?.openDirectory(url, newTab: false) }
+        panel.onDirectorySelected = { [weak self] url in self?.followDirectory(url) }
+        panelBrowsedAway = false
         if let directory = focusedPane?.session.currentDirectory {
             panel.showFiles(in: directory)
         }

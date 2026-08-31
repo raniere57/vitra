@@ -146,6 +146,12 @@ program in the foreground reads what it is handed as *input*, which is how the
 command used to end up in Claude Code's own chat box; the tty says who holds the
 terminal (`tcgetpgrp`), and a busy pane gets the session in a new tab instead.
 
+A folder in that list browses the list itself, and takes the terminal along
+with a `cd` when the shell is free to take one. When something is running in
+the pane — Claude Code, vim, less — nothing is typed at it: the tty says who
+holds the terminal, and the list moves on its own. The same rule decides what a
+folder in the left sidebar does: `cd` in a free pane, a new tab in a busy one.
+
 ## Scrolling
 
 The wheel and the trackpad scroll the scrollback, and a thin thumb appears on
