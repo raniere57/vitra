@@ -84,15 +84,15 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     /// Marks the pane holding the keyboard when a window has more than one.
     ///
-    /// A bar on the leading edge rather than a ring around the pane: it says the
-    /// same thing without drawing a box around the text you are reading, and it
-    /// carries the folder's colour, so the mark and the rail agree.
+    /// A ring around the whole pane, in the folder's colour, so the mark and the
+    /// rail agree. It is a view of its own rather than a border on the terminal's
+    /// layer, because that border belongs to the drag-and-drop highlight.
     private let focusBar = PassthroughView()
 
     /// The colour of that bar — the folder's, when the window has one.
     var focusTint: NSColor = .controlAccentColor {
         didSet {
-            focusBar.layer?.backgroundColor = focusTint.withAlphaComponent(0.9).cgColor
+            focusBar.layer?.borderColor = focusTint.withAlphaComponent(0.9).cgColor
             // The rail on the command you are running now takes the same colour
             // as the focus bar, so a pane's marks all say the same thing.
             blockGutter.currentRailColor = focusTint.withAlphaComponent(0.8)
@@ -100,6 +100,9 @@ final class TerminalView: NSView, NSMenuItemValidation {
         }
     }
     private var isDropTarget = false
+
+    /// How thick the focus ring is drawn, in points.
+    private static let focusRingWidth: CGFloat = 2
 
     init(
         session: TerminalSession,
@@ -145,8 +148,10 @@ final class TerminalView: NSView, NSMenuItemValidation {
         addSubview(closeButton)
 
         focusBar.wantsLayer = true
-        focusBar.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor
-        focusBar.autoresizingMask = [.height]
+        focusBar.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor
+        focusBar.layer?.borderWidth = TerminalView.focusRingWidth
+        focusBar.layer?.cornerRadius = 5
+        focusBar.autoresizingMask = [.width, .height]
         focusBar.isHidden = true
         addSubview(focusBar)
 
@@ -478,7 +483,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
     }
 
     private func updateFocusIndicator() {
-        focusBar.frame = NSRect(x: 0, y: 0, width: 2, height: bounds.height)
+        focusBar.frame = bounds.insetBy(dx: TerminalView.focusRingWidth / 2, dy: TerminalView.focusRingWidth / 2)
         focusBar.isHidden = !(showsFocusIndicator && window?.firstResponder === self)
     }
 

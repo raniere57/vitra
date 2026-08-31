@@ -77,8 +77,8 @@ level under every root plus everything already opened, which is what keeps it
 instant — nothing walks the disk in the background. `Return` takes the first
 result, `Esc` clears the field and hands the keyboard back to the terminal.
 
-With more than one pane, the pane holding the keyboard carries a bar on its
-leading edge, in the folder's colour. Panes and the preview panel are resized by
+With more than one pane, the pane holding the keyboard is ringed in the folder's
+colour. Panes and the preview panel are resized by
 dragging the dividers: the line is a hairline, the grab band is five pixels
 either side of it.
 
