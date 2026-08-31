@@ -388,17 +388,6 @@ final class TerminalView: NSView, NSMenuItemValidation {
         setNeedsRender()
     }
 
-    /// The window size that shows exactly `columns` x `rows` cells.
-    func idealSize(columns: Int, rows: Int) -> NSSize {
-        let pixels = renderer.pixelSize(
-            columns: columns,
-            rows: rows,
-            padding: padding * scale,
-            gutter: gutterWidth * scale
-        )
-        return NSSize(width: pixels.width / scale, height: pixels.height / scale)
-    }
-
     var backgroundColor: NSColor {
         let background = snapshot.defaultBackground
         return NSColor(

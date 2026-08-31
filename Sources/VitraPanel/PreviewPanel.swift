@@ -43,7 +43,9 @@ public final class PreviewPanel: NSView {
 
     /// Shows `target`, replacing whatever was there.
     public func show(_ target: PreviewTarget) {
-        clearContent()
+        // Keeping the directory is what leaves a way back: opening a file from
+        // the list must not throw the list away.
+        clearContent(keepingDirectory: true)
         self.target = target
 
         titleLabel.stringValue = target.displayName
@@ -101,6 +103,16 @@ public final class PreviewPanel: NSView {
         contentContainer.addSubview(list)
         content = list
         updateFileHeader(list)
+    }
+
+    /// Remembers a directory to go back to without listing it now.
+    ///
+    /// A file opened by the agent or by `vitra open` never went through the
+    /// list, and it should still leave the panel one click from the folder the
+    /// terminal is in.
+    public func rememberDirectory(_ directory: URL) {
+        listedDirectory = directory
+        syncBackButton()
     }
 
     /// Re-reads the listed directory, for after a command that touched it.

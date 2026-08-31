@@ -16,6 +16,9 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
     private let outline = NSOutlineView()
     private let scroll = NSScrollView()
     private var roots: [Node] = []
+    /// What the search field holds, and what it matched.
+    private var filter = ""
+    private var matches: [Node] = []
     /// Where the terminal is, so the row can be lit even after the user has
     /// scrolled somewhere else in the tree.
     private var current: URL?
@@ -34,13 +37,16 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
             self.emoji = emoji
         }
 
-        /// The subdirectories, read once and kept until `reload()`.
+        /// The subdirectories, read the first time they are asked for.
         func loadedChildren() -> [Node] {
             if let children { return children }
             let loaded = DirectoryListing.directories(of: url).map { Node(url: $0.url) }
             children = loaded
             return loaded
         }
+
+        /// The children already in hand, without going to disk for them.
+        var cachedChildren: [Node]? { children }
     }
 
     override init(frame frameRect: NSRect) {
@@ -120,6 +126,67 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
         outline.scrollRowToVisible(row)
     }
 
+    /// Filters the tree down to folders whose name contains `text`.
+    ///
+    /// The search covers one level under every root plus everything already
+    /// opened, which is what makes it instant: a favourite with two hundred
+    /// projects is one `readdir`, and nothing walks the disk in the background.
+    func setFilter(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard trimmed != filter else { return }
+        filter = trimmed
+        matches = trimmed.isEmpty ? [] : findMatches(trimmed)
+        outline.reloadData()
+        if trimmed.isEmpty { reveal(current) }
+    }
+
+    /// `Return` in the filter field takes the first result, which is the one
+    /// the list is sorted to put there.
+    func openFirstMatch() {
+        guard let first = matches.first else { return }
+        onOpen?(first.url, false)
+    }
+
+    private func findMatches(_ text: String) -> [Node] {
+        var results: [Node] = []
+        var seen: Set<String> = []
+
+        func consider(_ node: Node) {
+            guard results.count < 200 else { return }
+            let name = node.url.lastPathComponent
+            guard name.range(of: text, options: [.caseInsensitive, .diacriticInsensitive]) != nil,
+                  seen.insert(node.url.path).inserted
+            else { return }
+            results.append(node)
+        }
+
+        func walkOpened(_ node: Node) {
+            // Only what is already in memory: opening folders to search them is
+            // how a sidebar ends up stat-ing a home directory on every keystroke.
+            guard let children = node.cachedChildren else { return }
+            for child in children {
+                consider(child)
+                walkOpened(child)
+            }
+        }
+
+        for root in roots {
+            for child in root.loadedChildren() {
+                consider(child)
+                walkOpened(child)
+            }
+        }
+
+        // A folder whose name starts with what was typed is the one being
+        // looked for; the rest follow in the order a file browser would list.
+        return results.sorted { lhs, rhs in
+            let lhsPrefix = lhs.url.lastPathComponent.lowercased().hasPrefix(text.lowercased())
+            let rhsPrefix = rhs.url.lastPathComponent.lowercased().hasPrefix(text.lowercased())
+            if lhsPrefix != rhsPrefix { return lhsPrefix }
+            return lhs.url.lastPathComponent.localizedStandardCompare(rhs.url.lastPathComponent) == .orderedAscending
+        }
+    }
+
     func apply(_ config: Config) {
         let background = NSColor(hex: config.theme.background.hex) ?? .black
         outline.backgroundColor = background.blended(withFraction: 0.04, of: .white) ?? background
@@ -141,19 +208,23 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
     // MARK: - NSOutlineViewDataSource
 
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
-        guard let node = item as? Node else { return roots.count }
-        return node.loadedChildren().count
+        guard let node = item as? Node else { return isFiltering ? matches.count : roots.count }
+        return isFiltering ? 0 : node.loadedChildren().count
     }
 
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
-        guard let node = item as? Node else { return roots[index] }
+        guard let node = item as? Node else { return isFiltering ? matches[index] : roots[index] }
         return node.loadedChildren()[index]
     }
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        guard let node = item as? Node else { return false }
+        guard !isFiltering, let node = item as? Node else { return false }
         return !node.loadedChildren().isEmpty
     }
+
+    /// Results are a flat list: a tree of matches would hide the ones whose
+    /// parent did not match, which is the opposite of what searching is for.
+    private var isFiltering: Bool { !filter.isEmpty }
 
     // MARK: - NSOutlineViewDelegate
 
@@ -164,13 +235,21 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
         let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView
             ?? Self.makeCell(identifier: identifier)
 
-        cell.textField?.stringValue = node.emoji.map { "\($0)  \(node.label)" } ?? node.label
+        let label = node.emoji.map { "\($0)  \(node.label)" } ?? node.label
+        cell.textField?.stringValue = isFiltering ? "\(label)  —  \(Self.parentLabel(of: node.url))" : label
         cell.textField?.font = node.emoji == nil
             ? .systemFont(ofSize: 11.5)
             : .systemFont(ofSize: 11.5, weight: .medium)
         cell.textField?.textColor = node.url.path == current?.path ? .labelColor : .secondaryLabelColor
         cell.toolTip = node.url.path
         return cell
+    }
+
+    /// Where a search result lives, shortened the way a shell prompt would.
+    private static func parentLabel(of url: URL) -> String {
+        let parent = url.deletingLastPathComponent().path
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return parent.hasPrefix(home) ? "~" + parent.dropFirst(home.count) : parent
     }
 
     private static func makeCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {

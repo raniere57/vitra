@@ -58,6 +58,29 @@ enum SelfCapture {
             }
         }
 
+        // Keystrokes sent to whatever holds the keyboard, so chrome that only
+        // reacts to typing — the sidebar's filter field — can be checked too.
+        if let keys = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_KEYS"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.7) {
+                for character in keys {
+                    let text = String(character)
+                    guard let event = NSEvent.keyEvent(
+                        with: .keyDown,
+                        location: .zero,
+                        modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: NSApp.keyWindow?.windowNumber ?? 0,
+                        context: nil,
+                        characters: text,
+                        charactersIgnoringModifiers: text,
+                        isARepeat: false,
+                        keyCode: 0
+                    ) else { continue }
+                    NSApp.sendEvent(event)
+                }
+            }
+        }
+
         // Text typed into the focused pane before the shot, so terminal
         // behaviour — not just chrome — can be checked from an automated run.
         if let input = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_INPUT"] {

@@ -66,6 +66,12 @@ window - and `Cmd-click` is the exception that opens one. The folder the focused
 shell is in is selected in the tree and the tree is opened down to it, so the
 sidebar always says where you are, including after a `cd` you typed yourself.
 
+Above the tree there is a **filter**: type part of a folder's name and the tree
+becomes a flat list of matches, each with the folder it lives in. It searches one
+level under every root plus everything already opened, which is what keeps it
+instant — nothing walks the disk in the background. `Return` takes the first
+result, `Esc` clears the field and hands the keyboard back to the terminal.
+
 With more than one pane, the pane holding the keyboard carries a bar on its
 leading edge, in the folder's colour. Panes and the preview panel are resized by
 dragging the dividers: the line is a hairline, the grab band is five pixels
@@ -82,6 +88,10 @@ A folder's theme wins over the one in the configuration, which is the point of
 setting it: a tab on production should not look like a tab on a scratch
 directory. Its colour becomes a two-pixel stripe under that window's title bar,
 and its emoji prefixes the title, which is what the tab bar shows.
+
+A window opens filled — the screen minus the menu bar and the Dock, the green
+button's "Fill" rather than full screen, so the menu bar and every other window
+stay where they are.
 
 ## Command blocks
 

@@ -8,7 +8,7 @@ import VitraCore
 /// beside it, so widening the sidebar adds navigation instead of replacing
 /// what was already there.
 @MainActor
-final class FolderSidebar: NSView {
+final class FolderSidebar: NSView, NSSearchFieldDelegate {
     static let collapsedWidth: CGFloat = FolderRail.width
     static let expandedWidth: CGFloat = 260
     /// Wider than this and the sidebar counts as expanded.
@@ -24,6 +24,10 @@ final class FolderSidebar: NSView {
         set { rail.onMenu = newValue }
     }
 
+    /// Escape in the filter field: the caller puts the keyboard back where it
+    /// belongs, which is the terminal.
+    var onDismissSearch: (() -> Void)?
+
     /// A folder in the tree was chosen: `newTab` is true when Cmd was held.
     var onOpenDirectory: ((URL, Bool) -> Void)? {
         get { tree.onOpen }
@@ -35,6 +39,7 @@ final class FolderSidebar: NSView {
     private let rail = FolderRail()
     private let tree = DirectoryTreeView()
     private let divider = NSBox()
+    private let search = NSSearchField()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -44,8 +49,21 @@ final class FolderSidebar: NSView {
         divider.boxType = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
         tree.translatesAutoresizingMaskIntoConstraints = false
+
+        search.placeholderString = "Filter folders"
+        search.font = .systemFont(ofSize: 11.5)
+        search.controlSize = .small
+        search.focusRingType = .none
+        search.sendsWholeSearchString = false
+        search.sendsSearchStringImmediately = true
+        search.target = self
+        search.action = #selector(searchChanged)
+        search.delegate = self
+        search.translatesAutoresizingMaskIntoConstraints = false
+
         addSubview(rail)
         addSubview(divider)
+        addSubview(search)
         addSubview(tree)
 
         NSLayoutConstraint.activate([
@@ -59,9 +77,13 @@ final class FolderSidebar: NSView {
             divider.bottomAnchor.constraint(equalTo: bottomAnchor),
             divider.widthAnchor.constraint(equalToConstant: 1),
 
+            search.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 8),
+            search.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            search.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+
             tree.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             tree.trailingAnchor.constraint(equalTo: trailingAnchor),
-            tree.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            tree.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 6),
             tree.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
 
@@ -76,6 +98,23 @@ final class FolderSidebar: NSView {
         isExpanded = expanded
         tree.isHidden = !expanded
         divider.isHidden = !expanded
+        search.isHidden = !expanded
+        // Collapsing hides the field, so a filter left behind would go on
+        // hiding folders from a tree nobody can see to clear it.
+        if !expanded, !search.stringValue.isEmpty {
+            search.stringValue = ""
+            tree.setFilter("")
+        }
+    }
+
+    @objc private func searchChanged() {
+        tree.setFilter(search.stringValue)
+    }
+
+    /// Focuses the filter field, for the shortcut and for expanding by menu.
+    func focusSearch() {
+        guard isExpanded else { return }
+        window?.makeFirstResponder(search)
     }
 
     func update(bookmarks: [Bookmark], current: Bookmark.ID?) {
@@ -87,6 +126,26 @@ final class FolderSidebar: NSView {
     func reveal(_ directory: URL?) {
         guard isExpanded else { return }
         tree.reveal(directory)
+    }
+
+    /// Live-updates as the field is typed in; the action alone fires late.
+    func controlTextDidChange(_ notification: Notification) {
+        tree.setFilter(search.stringValue)
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        switch selector {
+        case #selector(NSResponder.cancelOperation(_:)):
+            search.stringValue = ""
+            tree.setFilter("")
+            onDismissSearch?()
+            return true
+        case #selector(NSResponder.insertNewline(_:)):
+            tree.openFirstMatch()
+            return true
+        default:
+            return false
+        }
     }
 
     func apply(_ config: Config) {

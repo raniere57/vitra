@@ -115,6 +115,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         sidebar.onOpenDirectory = { [weak self] url, newTab in
             self?.openDirectory(url, newTab: newTab)
         }
+        sidebar.onDismissSearch = { [weak self] in
+            guard let self else { return }
+            self.window?.makeFirstResponder(self.focusedPane)
+        }
 
         // A split rather than a fixed strip: the divider is how the sidebar is
         // expanded, so navigation is one drag away and stays whatever width the
@@ -307,7 +311,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             expanded ? FolderSidebar.expandedWidth : FolderSidebar.collapsedWidth,
             ofDividerAt: 0
         )
-        if expanded { sidebar.reveal(focusedPane?.session.currentDirectory) }
+        if expanded {
+            sidebar.reveal(focusedPane?.session.currentDirectory)
+            // Expanding deliberately is a request to find a folder, so the
+            // filter field takes the keyboard; Escape hands it back.
+            sidebar.focusSearch()
+        }
         syncSidebarButton()
     }
 
@@ -344,8 +353,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         let directory = focusedPane?.session.currentDirectory
         updateBreadcrumb()
         sidebar.reveal(directory)
-        if let directory, let panel, panel.isListingFiles {
-            panel.showFiles(in: directory)
+        if let directory, let panel {
+            if panel.isListingFiles {
+                panel.showFiles(in: directory)
+            } else {
+                // Not listing right now, but the back arrow should still lead
+                // somewhere: the folder this terminal is in.
+                panel.rememberDirectory(directory)
+            }
         }
     }
 
@@ -416,14 +431,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         super.showWindow(sender)
         window?.makeKeyAndOrderFront(sender)
 
-        // Size to a whole number of cells, which is only knowable once the view
-        // has a window and therefore a backing scale.
-        if let window, let pane = panes.first {
-            let ideal = pane.idealSize(columns: 80, rows: 24)
-            if ideal != paneContainer.frame.size {
-                window.setContentSize(ideal)
-                window.center()
-            }
+        // Opens filled: the whole screen minus the menu bar and the Dock, which
+        // is the "Fill" the green button offers and not full screen — the menu
+        // bar stays, other windows stay, and Mission Control is not involved.
+        // A terminal is where the work happens; it should not open as a
+        // eighty-by-twenty-four postcard that has to be resized first.
+        if let window, let screen = window.screen ?? NSScreen.main {
+            window.setFrame(screen.visibleFrame, display: true)
         }
     }
 
