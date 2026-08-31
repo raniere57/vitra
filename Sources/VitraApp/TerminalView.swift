@@ -415,6 +415,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
         updateBlinkTimer()
         updateFocusIndicator()
         setNeedsRender()
+        onFocused?()
         return true
     }
 
@@ -427,6 +428,10 @@ final class TerminalView: NSView, NSMenuItemValidation {
         setNeedsRender()
         return true
     }
+
+    /// Called when this pane takes the keyboard, so the window can point the
+    /// sidebars at the folder this shell is in rather than the last one's.
+    var onFocused: (() -> Void)?
 
     /// Whether this pane should show which one has the keyboard.
     ///

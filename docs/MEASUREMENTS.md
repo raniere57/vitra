@@ -274,3 +274,24 @@ Checked before designing anything: an SGR test run inside Vitra paints 8-colour,
 bright, bold, 24-bit truecolour, reverse, underline and background attributes
 correctly. What the screenshot showed was macOS `ls` shipping without colour and
 no marks between commands - a missing feature, not a broken renderer.
+
+## Sidebars
+
+`footprint`, Release build, one window, launched fresh and left alone:
+
+| State | phys_footprint |
+|---|---|
+| Rail collapsed, no panel | 31 MB |
+| Folder tree expanded and the file list open | 44 MB |
+
+Thirteen megabytes for an `NSOutlineView`, an `NSTableView` and the Finder icons
+they show, against a 150 MB budget. Both lists are read on demand: the tree
+reads a folder the first time it is opened and keeps it, the file list is read
+when the panel opens and again when a command finishes — the moment the shell's
+directory has settled. There is no file-system watcher and no timer behind
+either, so an idle window with both sidebars open still schedules nothing.
+
+A first measurement read 355 MB and was wrong: `pgrep` had matched the
+long-running instance in `/Applications`, not the one just launched. Measuring
+by the PID of the process actually started is the difference between a
+regression and a mistake.

@@ -57,6 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         makeWindow(asTabOf: currentController?.window)
     }
 
+    /// Expands the folder sidebar of the front window, or collapses it.
+    @objc func toggleFolderSidebar(_ sender: Any?) {
+        currentController?.toggleSidebar()
+    }
+
     @objc func splitHorizontally(_ sender: Any?) {
         currentController?.splitFocusedPane(vertical: true)
     }

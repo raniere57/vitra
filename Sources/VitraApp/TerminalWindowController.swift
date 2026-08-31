@@ -50,8 +50,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     private let folderButton = NSButton()
     private let pathLabel = NSTextField(labelWithString: "")
 
-    /// The favourites, down the left edge.
-    private let rail = FolderRail()
+    /// The favourites down the left edge, and the folder tree beside them.
+    private let sidebar = FolderSidebar()
+    private var sidebarSplit: NSSplitView?
+    /// The title bar button that expands and collapses the sidebar.
+    private let sidebarButton = NSButton()
 
     /// Everything right of the rail: the panes, and the panel when it is open.
     private let bodyView = NSView()
@@ -105,22 +108,29 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         rootView.autoresizingMask = [.width, .height]
         window.contentView = rootView
 
-        rail.frame = NSRect(x: 0, y: 0, width: FolderRail.width, height: rootView.bounds.height)
-        rail.autoresizingMask = [.height]
-        rail.onOpen = { bookmark in
+        sidebar.onOpenBookmark = { bookmark in
             (NSApp.delegate as? AppDelegate)?.openTab(for: bookmark)
         }
-        rail.onMenu = { [weak self] button in self?.showFolderMenu(button) }
-        rootView.addSubview(rail)
+        sidebar.onMenu = { [weak self] button in self?.showFolderMenu(button) }
+        sidebar.onOpenDirectory = { [weak self] url, newTab in
+            self?.openDirectory(url, newTab: newTab)
+        }
 
-        bodyView.frame = NSRect(
-            x: FolderRail.width,
-            y: 0,
-            width: rootView.bounds.width - FolderRail.width,
-            height: rootView.bounds.height
-        )
-        bodyView.autoresizingMask = [.width, .height]
-        rootView.addSubview(bodyView)
+        // A split rather than a fixed strip: the divider is how the sidebar is
+        // expanded, so navigation is one drag away and stays whatever width the
+        // user left it at.
+        let split = PaneSplitView()
+        split.isVertical = true
+        split.dividerStyle = .thin
+        split.frame = rootView.bounds
+        split.autoresizingMask = [.width, .height]
+        split.addArrangedSubview(sidebar)
+        split.addArrangedSubview(bodyView)
+        split.delegate = self
+        rootView.addSubview(split)
+        sidebarSplit = split
+        split.layoutSubtreeIfNeeded()
+        split.setPosition(FolderSidebar.collapsedWidth, ofDividerAt: 0)
 
         paneContainer.frame = bodyView.bounds
         paneContainer.autoresizingMask = [.width, .height]
@@ -197,7 +207,16 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         pathLabel.lineBreakMode = .byTruncatingHead
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let row = NSStackView(views: [folderButton, pathLabel])
+        sidebarButton.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "Folders sidebar")
+        sidebarButton.bezelStyle = .texturedRounded
+        sidebarButton.isBordered = false
+        sidebarButton.setButtonType(.pushOnPushOff)
+        sidebarButton.target = self
+        sidebarButton.action = #selector(toggleSidebarFromButton)
+        sidebarButton.toolTip = "Folders sidebar (⌥⌘S)"
+        sidebarButton.setContentHuggingPriority(.required, for: .horizontal)
+
+        let row = NSStackView(views: [sidebarButton, folderButton, pathLabel])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 2
@@ -268,13 +287,66 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         window.addTitlebarAccessoryViewController(accessory)
     }
 
-    /// Redraws the rail from the app's current favourites.
+    /// Redraws the sidebar from the app's current favourites.
     func refreshRail() {
-        rail.update(
+        sidebar.update(
             bookmarks: (NSApp.delegate as? AppDelegate)?.bookmarks ?? [],
             current: bookmark?.id
         )
-        rail.apply(config)
+        sidebar.apply(config)
+    }
+
+    /// Expands the sidebar to the folder tree, or collapses it to the rail.
+    func toggleSidebar() {
+        setSidebar(expanded: !sidebar.isExpanded)
+    }
+
+    private func setSidebar(expanded: Bool) {
+        sidebar.setExpanded(expanded)
+        sidebarSplit?.setPosition(
+            expanded ? FolderSidebar.expandedWidth : FolderSidebar.collapsedWidth,
+            ofDividerAt: 0
+        )
+        if expanded { sidebar.reveal(focusedPane?.session.currentDirectory) }
+        syncSidebarButton()
+    }
+
+    private func syncSidebarButton() {
+        sidebarButton.state = sidebar.isExpanded ? .on : .off
+        sidebarButton.contentTintColor = sidebar.isExpanded ? .controlAccentColor : nil
+    }
+
+    /// A folder was chosen in the sidebar or the file list.
+    ///
+    /// Without Cmd this is a `cd` typed into the terminal you are looking at —
+    /// the shell moves, the sidebars follow it, and nothing new is opened.
+    private func openDirectory(_ url: URL, newTab: Bool) {
+        if newTab {
+            (NSApp.delegate as? AppDelegate)?.openTab(
+                for: Bookmark(name: url.lastPathComponent, path: url.path)
+            )
+            return
+        }
+
+        guard let pane = focusedPane else { return }
+        pane.session.send(text: ShellQuote.changeDirectory(to: url.path))
+        window?.makeFirstResponder(pane)
+        // Shell integration reports the prompt coming back, which is the moment
+        // the new directory is true. Without it nothing would report at all, so
+        // one delayed read stands in — a single hop, not a running timer.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.refreshDirectory()
+        }
+    }
+
+    /// Points both sidebars at the folder the focused terminal is in.
+    func refreshDirectory() {
+        let directory = focusedPane?.session.currentDirectory
+        updateBreadcrumb()
+        sidebar.reveal(directory)
+        if let directory, let panel, panel.isListingFiles {
+            panel.showFiles(in: directory)
+        }
     }
 
     /// Shows where the focused shell is, relative to the window's folder.
@@ -309,6 +381,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         button.frame = NSRect(x: 0, y: 0, width: 28, height: 22)
         return button
     }
+
+    @objc private func toggleSidebarFromButton(_ sender: Any?) { toggleSidebar() }
 
     @objc private func splitRightFromButton(_ sender: Any?) { splitFocusedPane(vertical: true) }
     @objc private func splitDownFromButton(_ sender: Any?) { splitFocusedPane(vertical: false) }
@@ -401,15 +475,20 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             // told apart from the other five, and the tab bar shows little else.
             let prefix = self.bookmark.map { "\($0.emoji) " } ?? ""
             self.window?.title = title.isEmpty ? (prefix.isEmpty ? "Vitra" : prefix.trimmingCharacters(in: .whitespaces)) : prefix + title
-            self.updateBreadcrumb()
+            self.refreshDirectory()
         }
         session.onBell = { NSSound.beep() }
+        pane.onFocused = { [weak self] in self?.refreshDirectory() }
         session.onCommandStarted = { [weak pane] in
             pane?.commandStarted()
         }
-        session.onCommandFinished = { [weak pane] status in
+        session.onCommandFinished = { [weak self, weak pane] status in
             // Already on main: the session hops for this callback.
             pane?.record(status)
+            // A command that ended is the moment the working directory and the
+            // files in it are settled — the only moment worth re-reading them.
+            guard let self, let pane, self.focusedPane === pane else { return }
+            self.refreshDirectory()
         }
         session.onPreviewRequest = { [weak self] target in
             // Arrives on the session's read queue; the panel is main-thread only.
@@ -565,6 +644,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
         let panel = PreviewPanel(frame: .zero)
         panel.onClose = { [weak self] in self?.closePanel() }
+        panel.onDirectorySelected = { [weak self] url in self?.openDirectory(url, newTab: false) }
+        if let directory = focusedPane?.session.currentDirectory {
+            panel.showFiles(in: directory)
+        }
 
         let split = PaneSplitView()
         split.isVertical = true
@@ -643,7 +726,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             blurView = nil
         }
 
-        rail.apply(config)
+        sidebar.apply(config)
 
         for pane in panes {
             do {
@@ -658,11 +741,26 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     /// The terminal keeps a usable width; the panel keeps a readable one.
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposed: CGFloat, ofSubviewAt index: Int) -> CGFloat {
-        max(proposed, 240)
+        // The sidebar never goes narrower than the rail: collapsed is a state,
+        // not a disappearance — the favourites stay reachable at every width.
+        if splitView === sidebarSplit { return FolderSidebar.collapsedWidth }
+        return max(proposed, 240)
     }
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposed: CGFloat, ofSubviewAt index: Int) -> CGFloat {
-        min(proposed, splitView.bounds.width - PanelStyle.minimumWidth)
+        if splitView === sidebarSplit { return min(proposed, 420) }
+        return min(proposed, splitView.bounds.width - PanelStyle.minimumWidth)
+    }
+
+    /// Dragging the divider is what expands the sidebar, so the tree appears
+    /// and disappears from the drag itself rather than from a second control.
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        guard notification.object as? NSSplitView === sidebarSplit else { return }
+        let expanded = sidebar.frame.width > FolderSidebar.expansionThreshold
+        guard expanded != sidebar.isExpanded else { return }
+        sidebar.setExpanded(expanded)
+        syncSidebarButton()
+        if expanded { sidebar.reveal(focusedPane?.session.currentDirectory) }
     }
 
     /// A one-pixel divider is a one-pixel target. The drawn line stays thin and
@@ -683,14 +781,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// Growing the window gives the extra width to the terminal, which is what a
     /// side panel is expected to do.
     func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
-        view !== panel
+        view !== panel && view !== sidebar
     }
 
     // MARK: - NSWindowDelegate
 
     func windowDidBecomeKey(_ notification: Notification) {
         panes.forEach { $0.updateBlinkTimer() }
-        updateBreadcrumb()
+        refreshDirectory()
     }
 
     func windowDidResignKey(_ notification: Notification) {

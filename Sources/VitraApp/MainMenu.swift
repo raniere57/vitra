@@ -99,6 +99,13 @@ enum MainMenu {
             keyEquivalent: key("preview_panel", keybindings)
         )
         togglePanel.keyEquivalentModifierMask = [.command, .shift]
+
+        let toggleSidebar = viewMenu.addItem(
+            withTitle: "Folders Sidebar",
+            action: #selector(AppDelegate.toggleFolderSidebar(_:)),
+            keyEquivalent: key("folder_sidebar", keybindings)
+        )
+        toggleSidebar.keyEquivalentModifierMask = [.command, .option]
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 

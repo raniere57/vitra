@@ -58,6 +58,14 @@ and `+` at the bottom opens the rest (go to, open, star, manage). The title bar
 carries a **breadcrumb**: the folder, then where the focused shell has since
 wandered. Splitting and the preview panel sit in one cluster at the right.
 
+The rail is the sidebar collapsed. `Opt-Cmd-S`, the title bar button, or simply
+dragging the divider widens it into a **folder tree**: the favourites and home
+as roots, subdirectories read only when a folder is opened. Clicking a folder
+is a `cd` typed into the terminal you are already in - not a new tab, not a new
+window - and `Cmd-click` is the exception that opens one. The folder the focused
+shell is in is selected in the tree and the tree is opened down to it, so the
+sidebar always says where you are, including after a `cd` you typed yourself.
+
 With more than one pane, the pane holding the keyboard carries a bar on its
 leading edge, in the folder's colour. Panes and the preview panel are resized by
 dragging the dividers: the line is a hairline, the grab band is five pixels
@@ -120,8 +128,14 @@ days, at launch.
 
 ## The preview panel
 
-`Cmd-Shift-P` toggles the panel. Images, PDFs, HTML, SVG and text are rendered
-by `CGImageSource`, PDFKit, WebKit and `NSTextView` respectively.
+`Cmd-Shift-P` toggles the panel. It opens on the **files of the directory the
+focused terminal is in**: one click previews a file, one click on a folder is
+the same `cd` the left sidebar does, and `../` walks up. Images, PDFs, HTML, SVG
+and text are rendered by `CGImageSource`, PDFKit, WebKit and `NSTextView`
+respectively; the arrow in the header goes back to the list.
+
+The list is re-read when a command finishes, which is the moment the directory
+has settled - there is no watcher and no timer behind it.
 
 Three ways in, all equivalent:
 
@@ -213,6 +227,7 @@ stays, and the reason is printed.
 | `Cmd-D` / `Cmd-Shift-D` | split right / down |
 | `Cmd-W` | close pane |
 | `Cmd-Shift-P` | preview panel |
+| `Opt-Cmd-S` | folder sidebar |
 | `Cmd-P` | go to folder |
 | `Cmd-Shift-O` | new tab in a folder |
 | `Cmd-Ctrl-D` | add the current folder |

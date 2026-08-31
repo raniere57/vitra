@@ -38,6 +38,7 @@ public struct Config: Equatable, Sendable {
         "split_right": "d",
         "close_pane": "w",
         "preview_panel": "p",
+        "folder_sidebar": "s",
         "clear": "k",
     ]
 

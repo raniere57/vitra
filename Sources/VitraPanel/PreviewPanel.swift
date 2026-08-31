@@ -9,11 +9,20 @@ public final class PreviewPanel: NSView {
     /// Called when the panel's own close control is used.
     public var onClose: (() -> Void)?
 
+    /// A folder was clicked in the file list. The panel does not follow it
+    /// itself: the terminal decides where it is, and the list follows that.
+    public var onDirectorySelected: ((URL) -> Void)?
+
     /// What is on screen, if anything.
     public private(set) var target: PreviewTarget?
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
+    private let backButton = NSButton()
+    private var titleLeading: NSLayoutConstraint?
+    private var titleAfterBack: NSLayoutConstraint?
+    /// The directory the file list is on, kept so `Back` has somewhere to go.
+    private var listedDirectory: URL?
     private let contentContainer = NSView()
     private var content: (any PreviewContentView)?
     private var emptyState: NSView?
@@ -41,6 +50,8 @@ public final class PreviewPanel: NSView {
         detailLabel.stringValue = Self.detail(for: target)
         toolTip = target.url.path
 
+        syncBackButton()
+
         let kind = PreviewKind(for: target.url)
         guard let view = Self.makeContent(kind: kind, target: target) else {
             showEmptyState(message: "No preview for \(target.displayName)")
@@ -54,6 +65,73 @@ public final class PreviewPanel: NSView {
         view.autoresizingMask = [.width, .height]
         contentContainer.addSubview(view)
         content = view
+    }
+
+    /// Lists a directory, replacing whatever the panel was showing.
+    ///
+    /// This is the panel's resting state once a terminal is open: the files of
+    /// the folder that terminal is in, one click from being previewed.
+    public func showFiles(in directory: URL) {
+        listedDirectory = directory
+
+        if let list = content as? FileListView {
+            list.show(directory)
+            updateFileHeader(list)
+            return
+        }
+
+        clearContent(keepingDirectory: true)
+        emptyState?.removeFromSuperview()
+        emptyState = nil
+
+        let list = FileListView(directory: directory)
+        list.onOpenFile = { [weak self] url in
+            guard let self else { return }
+            // Resolution is the same gate the escape sequence goes through, so
+            // a click on a socket or a dangling link cannot open anything.
+            guard let target = PreviewTarget.resolve(path: url.path) else {
+                self.showEmptyState(message: "No preview for \(url.lastPathComponent)")
+                return
+            }
+            self.show(target)
+        }
+        list.onOpenDirectory = { [weak self] url in self?.onDirectorySelected?(url) }
+        list.frame = contentContainer.bounds
+        list.autoresizingMask = [.width, .height]
+        contentContainer.addSubview(list)
+        content = list
+        updateFileHeader(list)
+    }
+
+    /// Re-reads the listed directory, for after a command that touched it.
+    public func refreshFiles() {
+        guard let list = content as? FileListView else { return }
+        list.reload()
+        updateFileHeader(list)
+    }
+
+    /// Whether the panel is showing the file list rather than a preview.
+    public var isListingFiles: Bool { content is FileListView }
+
+    private func updateFileHeader(_ list: FileListView) {
+        target = nil
+        titleLabel.stringValue = list.directory.lastPathComponent
+        detailLabel.stringValue = list.summary
+        toolTip = list.directory.path
+        syncBackButton()
+    }
+
+    /// The arrow back to the file list, shown only when there is one to go to.
+    private func syncBackButton() {
+        let showsBack = listedDirectory != nil && !(content is FileListView)
+        backButton.isHidden = !showsBack
+        titleLeading?.isActive = !showsBack
+        titleAfterBack?.isActive = showsBack
+    }
+
+    @objc private func backClicked() {
+        guard let listedDirectory else { return }
+        showFiles(in: listedDirectory)
     }
 
     /// The browser, already on screen or created now.
@@ -89,13 +167,19 @@ public final class PreviewPanel: NSView {
     /// Called when the panel is hidden, so a web preview does not keep a WebKit
     /// content process alive behind a panel nobody can see.
     public func clearContent() {
+        clearContent(keepingDirectory: false)
+    }
+
+    private func clearContent(keepingDirectory: Bool) {
         content?.prepareForRemoval()
         content?.removeFromSuperview()
         content = nil
         target = nil
+        if !keepingDirectory { listedDirectory = nil }
         titleLabel.stringValue = ""
         detailLabel.stringValue = ""
         toolTip = nil
+        syncBackButton()
         showEmptyState()
     }
 
@@ -141,6 +225,16 @@ public final class PreviewPanel: NSView {
         detailLabel.translatesAutoresizingMaskIntoConstraints = false
         detailLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
+        backButton.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back to files")
+        backButton.target = self
+        backButton.action = #selector(backClicked)
+        backButton.contentTintColor = PanelStyle.secondaryText
+        backButton.isBordered = false
+        backButton.bezelStyle = .inline
+        backButton.toolTip = "Back to the file list"
+        backButton.isHidden = true
+        backButton.translatesAutoresizingMaskIntoConstraints = false
+
         let close = NSButton(title: "", target: self, action: #selector(closeClicked))
         close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close preview")
         close.contentTintColor = PanelStyle.secondaryText
@@ -148,9 +242,14 @@ public final class PreviewPanel: NSView {
         close.bezelStyle = .inline
         close.translatesAutoresizingMaskIntoConstraints = false
 
+        header.addSubview(backButton)
         header.addSubview(titleLabel)
         header.addSubview(detailLabel)
         header.addSubview(close)
+
+        titleLeading = titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 12)
+        titleAfterBack = titleLabel.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 6)
+        titleLeading?.isActive = true
 
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: topAnchor),
@@ -163,7 +262,10 @@ public final class PreviewPanel: NSView {
             hairline.trailingAnchor.constraint(equalTo: trailingAnchor),
             hairline.heightAnchor.constraint(equalToConstant: 1),
 
-            titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 12),
+            backButton.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 8),
+            backButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            backButton.widthAnchor.constraint(equalToConstant: 16),
+
             titleLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: detailLabel.leadingAnchor, constant: -8),
 
