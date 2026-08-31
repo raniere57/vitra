@@ -155,13 +155,43 @@ final class RenderStateReader {
                 rowIterator, GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION, &selection
             ) == GHOSTTY_SUCCESS
 
+            // What the shell said this row is, straight from the core's own
+            // OSC 133 bookkeeping — no second parser on our side.
+            var raw: GhosttyRow = 0
+            if ghostty_render_state_row_get(rowIterator, GHOSTTY_RENDER_STATE_ROW_DATA_RAW, &raw) == GHOSTTY_SUCCESS {
+                var semantic: UInt32 = 0
+                if ghostty_row_get(raw, GHOSTTY_ROW_DATA_SEMANTIC_PROMPT, &semantic) == GHOSTTY_SUCCESS,
+                   let value = RowSemantic(rawValue: UInt8(truncatingIfNeeded: semantic)) {
+                    snapshot.setSemantic(value, row: row)
+                }
+            }
+
             var cells: GhosttyRenderStateRowCells? = rowCells
             guard ghostty_render_state_row_get(rowIterator, GHOSTTY_RENDER_STATE_ROW_DATA_CELLS, &cells) == GHOSTTY_SUCCESS
             else { continue }
 
+            // Which row a command sits on comes from the cells, not the row:
+            // the row only says a prompt is here, and a prompt row that printed
+            // nothing runs straight into the next one. Probing stops at the
+            // first typed cell, and only on rows the shell called a prompt.
+            var wantsInput = snapshot.rowSemantics[row] != .output
+
             var column = 0
             while ghostty_render_state_row_cells_next(rowCells), column < Int(snapshot.columns) {
                 defer { column += 1 }
+
+                if wantsInput {
+                    var rawCell: GhosttyCell = 0
+                    var content: UInt32 = 0
+                    if ghostty_render_state_row_cells_get(
+                        rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW, &rawCell
+                    ) == GHOSTTY_SUCCESS,
+                        ghostty_cell_get(rawCell, GHOSTTY_CELL_DATA_SEMANTIC_CONTENT, &content) == GHOSTTY_SUCCESS,
+                        content == GHOSTTY_CELL_SEMANTIC_INPUT.rawValue {
+                        snapshot.setHasInput(row: row)
+                        wantsInput = false
+                    }
+                }
 
                 var cell = RenderCell(foreground: defaultForeground, background: defaultBackground)
                 readText(into: &cell, snapshot: snapshot)

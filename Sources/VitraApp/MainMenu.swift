@@ -6,7 +6,10 @@ import VitraCore
 /// Built in code rather than a nib: a nib is one more file format, one more
 /// build step, and one more thing to keep in sync with the code that uses it.
 enum MainMenu {
-    static func build(keybindings: [String: String] = Config.defaultKeybindings) -> NSMenu {
+    static func build(
+        keybindings: [String: String] = Config.defaultKeybindings,
+        bookmarks: [Bookmark] = []
+    ) -> NSMenu {
         let mainMenu = NSMenu()
 
         let appMenuItem = NSMenuItem()
@@ -38,6 +41,45 @@ enum MainMenu {
         closeWindow.keyEquivalentModifierMask = [.command, .shift]
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
+
+        let folderMenuItem = NSMenuItem()
+        let folderMenu = NSMenu(title: "Folders")
+        folderMenu.addItem(withTitle: "Go to Folder…", action: #selector(AppDelegate.showFolderPalette(_:)), keyEquivalent: "p")
+        let openFolder = folderMenu.addItem(
+            withTitle: "New Tab in Folder…",
+            action: #selector(AppDelegate.openFolderInNewTab(_:)),
+            keyEquivalent: "o"
+        )
+        openFolder.keyEquivalentModifierMask = [.command, .shift]
+        let addFolder = folderMenu.addItem(
+            withTitle: "Add Current Folder",
+            action: #selector(AppDelegate.addCurrentFolder(_:)),
+            keyEquivalent: "d"
+        )
+        addFolder.keyEquivalentModifierMask = [.command, .control]
+
+        if !bookmarks.isEmpty {
+            folderMenu.addItem(.separator())
+            for (index, bookmark) in bookmarks.enumerated() {
+                // Cmd-Ctrl-1…9 for the first nine: Cmd-1 belongs to tab
+                // switching, and a favourite is not worth stealing it for.
+                let key = index < 9 ? String(index + 1) : ""
+                let item = folderMenu.addItem(
+                    withTitle: "\(bookmark.emoji)  \(bookmark.name)",
+                    action: #selector(AppDelegate.openBookmarkTab(_:)),
+                    keyEquivalent: key
+                )
+                item.keyEquivalentModifierMask = [.command, .control]
+                item.representedObject = bookmark.id.uuidString
+                item.toolTip = bookmark.displayPath
+                item.isEnabled = true
+            }
+        }
+
+        folderMenu.addItem(.separator())
+        folderMenu.addItem(withTitle: "Manage Folders…", action: #selector(AppDelegate.showFolders(_:)), keyEquivalent: "")
+        folderMenuItem.submenu = folderMenu
+        mainMenu.addItem(folderMenuItem)
 
         let editMenuItem = NSMenuItem()
         let editMenu = NSMenu(title: "Edit")

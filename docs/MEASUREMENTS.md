@@ -230,3 +230,47 @@ rewritten mid-session to `light`, SF Mono 15, padding 16. The window changed
 theme, typeface, size and padding without a restart, and the ANSI colours in
 already-printed output changed with it — a theme change dirties no cell, so the
 render state is forced to re-read rather than waiting for the next keystroke.
+
+## Folders
+
+One window, four favourites loaded, measured with `footprint` four seconds after
+launch:
+
+| State | phys_footprint |
+|---|---|
+| One window, no panel | 30 MB |
+| Peak during launch | 34 MB |
+
+The bookmark list is a few hundred bytes of JSON read once at launch, and the
+palette is built on first use and kept — a panel that is never opened costs
+nothing. Opening a favourite as a tab costs what any tab costs: a pty, a
+libghostty terminal and the scrollback it fills.
+
+### Where the shell starts
+
+`posix_spawn_file_actions_addchdir_np` puts the child in the folder before it
+execs, so nothing in the app process changes directory. Verified in the suite
+with `/bin/pwd` on a real pty, against the resolved path — `/var` is a symlink
+to `/private/var`, and `pwd` reports the physical one.
+
+## Command blocks
+
+| State | phys_footprint |
+|---|---|
+| One window, gutter on, idle after launch | 35 MB |
+
+The rails are an AppKit view drawn over the terminal, not geometry in the Metal
+path: they are redrawn only when the block list changes, which happens when a
+command starts or ends rather than on every keystroke. The one timer in the
+feature runs only while a command is running — it ticks the `running · 7.2s`
+clock ten times a second and is invalidated the moment the command ends, so an
+idle terminal still schedules nothing. The semantic rows come
+from libghostty's own OSC 133 bookkeeping (`GHOSTTY_ROW_DATA_SEMANTIC_PROMPT`),
+so there is no second parser and nothing to keep in sync.
+
+### The renderer was never the problem
+
+Checked before designing anything: an SGR test run inside Vitra paints 8-colour,
+bright, bold, 24-bit truecolour, reverse, underline and background attributes
+correctly. What the screenshot showed was macOS `ls` shipping without colour and
+no marks between commands - a missing feature, not a broken renderer.

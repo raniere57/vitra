@@ -101,16 +101,19 @@ public final class TerminalRenderer {
     }
 
     /// The pixel size needed to show `columns` x `rows` cells.
-    public func pixelSize(columns: Int, rows: Int, padding: CGFloat = 0) -> CGSize {
+    ///
+    /// `gutter` is extra space on the left only, where the command marks are
+    /// drawn — it is not padding, and the grid never extends into it.
+    public func pixelSize(columns: Int, rows: Int, padding: CGFloat = 0, gutter: CGFloat = 0) -> CGSize {
         CGSize(
-            width: CGFloat(columns) * metrics.cellWidth + padding * 2,
+            width: CGFloat(columns) * metrics.cellWidth + padding * 2 + gutter,
             height: CGFloat(rows) * metrics.cellHeight + padding * 2
         )
     }
 
     /// The largest grid that fits in `pixelSize`.
-    public func gridSize(for pixelSize: CGSize, padding: CGFloat = 0) -> (columns: Int, rows: Int) {
-        let usableWidth = max(0, pixelSize.width - padding * 2)
+    public func gridSize(for pixelSize: CGSize, padding: CGFloat = 0, gutter: CGFloat = 0) -> (columns: Int, rows: Int) {
+        let usableWidth = max(0, pixelSize.width - padding * 2 - gutter)
         let usableHeight = max(0, pixelSize.height - padding * 2)
         return (
             max(1, Int(usableWidth / metrics.cellWidth)),
@@ -124,6 +127,7 @@ public final class TerminalRenderer {
         snapshot: RenderSnapshot,
         cursorOn: Bool,
         padding: CGFloat,
+        gutter: CGFloat = 0,
         opacity: Double = 1,
         drawable: CAMetalDrawable,
         viewportSize: CGSize
@@ -132,6 +136,7 @@ public final class TerminalRenderer {
             snapshot: snapshot,
             cursorOn: cursorOn,
             padding: padding,
+            gutter: gutter,
             opacity: opacity,
             target: drawable.texture,
             viewportSize: viewportSize
@@ -146,6 +151,7 @@ public final class TerminalRenderer {
         snapshot: RenderSnapshot,
         cursorOn: Bool,
         padding: CGFloat,
+        gutter: CGFloat = 0,
         into target: MTLTexture
     ) {
         let size = CGSize(width: target.width, height: target.height)
@@ -153,6 +159,7 @@ public final class TerminalRenderer {
             snapshot: snapshot,
             cursorOn: cursorOn,
             padding: padding,
+            gutter: gutter,
             opacity: 1,
             target: target,
             viewportSize: size
@@ -166,11 +173,12 @@ public final class TerminalRenderer {
         snapshot: RenderSnapshot,
         cursorOn: Bool,
         padding: CGFloat,
+        gutter: CGFloat,
         opacity: Double,
         target: MTLTexture,
         viewportSize: CGSize
     ) -> MTLCommandBuffer? {
-        build(from: snapshot, cursorOn: cursorOn, padding: padding)
+        build(from: snapshot, cursorOn: cursorOn, padding: padding, gutter: gutter)
         // An empty instance list still needs the pass: the clear is what paints
         // the terminal background, and skipping it leaves the drawable undefined.
         let buffer: MTLBuffer? = uploadInstances() ? instanceBuffer : nil
@@ -211,12 +219,12 @@ public final class TerminalRenderer {
 
     /// Fills `instances` in draw order: backgrounds, then the cursor block, then
     /// glyphs, then decorations. Order in the buffer is order on screen.
-    private func build(from snapshot: RenderSnapshot, cursorOn: Bool, padding: CGFloat) {
+    private func build(from snapshot: RenderSnapshot, cursorOn: Bool, padding: CGFloat, gutter: CGFloat = 0) {
         instances.removeAll(keepingCapacity: true)
 
         let cellWidth = Float(metrics.cellWidth)
         let cellHeight = Float(metrics.cellHeight)
-        let originX = Float(padding)
+        let originX = Float(padding + gutter)
         let originY = Float(padding)
         let defaultBackground = snapshot.defaultBackground
 
@@ -265,7 +273,7 @@ public final class TerminalRenderer {
         }
 
         if let cursor, !cursorIsBlock {
-            appendThinCursor(cursor, cellWidth: cellWidth, cellHeight: cellHeight, padding: padding)
+            appendThinCursor(cursor, cellWidth: cellWidth, cellHeight: cellHeight, padding: padding, gutter: gutter)
         }
     }
 
@@ -360,9 +368,10 @@ public final class TerminalRenderer {
         _ cursor: CursorSnapshot,
         cellWidth: Float,
         cellHeight: Float,
-        padding: CGFloat
+        padding: CGFloat,
+        gutter: CGFloat = 0
     ) {
-        let x = Float(padding) + Float(cursor.column) * cellWidth
+        let x = Float(padding + gutter) + Float(cursor.column) * cellWidth
         let y = Float(padding) + Float(cursor.row) * cellHeight
         let thickness = max(1, Float(metrics.underlineThickness))
 

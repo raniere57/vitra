@@ -58,7 +58,8 @@ public final class PTY: @unchecked Sendable {
         executable: String,
         arguments: [String] = [],
         environment: [String: String],
-        size: TerminalSize
+        size: TerminalSize,
+        workingDirectory: String? = nil
     ) throws {
         // argv/envp are C arrays because posix_spawn takes them that way; they
         // are freed once the child has been started.
@@ -103,6 +104,15 @@ public final class PTY: @unchecked Sendable {
         posix_spawn_file_actions_addopen(&actions, 0, name, O_RDWR, 0)
         posix_spawn_file_actions_adddup2(&actions, 0, 1)
         posix_spawn_file_actions_adddup2(&actions, 0, 2)
+
+        // The child changes directory, not the app: chdir() in this process
+        // would move every pane at once and race with anything already running.
+        // A directory that has since been deleted is not fatal — the spawn fails
+        // with ENOENT and the caller reports it, which beats a shell in a
+        // directory the user did not ask for.
+        if let workingDirectory {
+            workingDirectory.withCString { posix_spawn_file_actions_addchdir_np(&actions, $0) }
+        }
 
         var attributes: posix_spawnattr_t?
         posix_spawnattr_init(&attributes)

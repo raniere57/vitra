@@ -10,6 +10,12 @@ import VitraRender
 /// happens only when the emulator reports the screen changed, when the cursor
 /// blinks, or when the view resizes, which is what keeps the app at zero CPU
 /// while idle.
+/// A view that is only ever decoration: it never takes a click, so a border
+/// drawn over the terminal cannot swallow a selection drag.
+private final class PassthroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 final class TerminalView: NSView, NSMenuItemValidation {
     let session: TerminalSession
 
@@ -36,6 +42,45 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     private let attachments: AttachmentStore
     private let chips = AttachmentChipView()
+
+    /// One rail per command, drawn in the left padding.
+    private let blockGutter = CommandBlockView()
+    private var showsCommandBlocks = true
+
+    /// How commands ended, newest first, as the shell reported them.
+    ///
+    /// Bounded because a session runs for days: only what can be on screen is
+    /// ever drawn, and the rest is history nothing asks for.
+    private var commandStatuses: [CommandStatus] = []
+
+    /// When the command now running started, and the timer that ticks its clock.
+    ///
+    /// The timer exists only while something is running: an idle terminal is
+    /// supposed to cost nothing, and a clock nobody is watching is exactly the
+    /// kind of thing that keeps a laptop awake.
+    private var commandStartedAt: Date?
+    private var runningTimer: Timer?
+
+    /// The width the marks take from the terminal, zero when they are off.
+    private var gutterWidth: CGFloat { showsCommandBlocks ? CommandBlockView.width : 0 }
+
+    /// Marks the pane holding the keyboard when a window has more than one.
+    ///
+    /// A bar on the leading edge rather than a ring around the pane: it says the
+    /// same thing without drawing a box around the text you are reading, and it
+    /// carries the folder's colour, so the mark and the rail agree.
+    private let focusBar = PassthroughView()
+
+    /// The colour of that bar — the folder's, when the window has one.
+    var focusTint: NSColor = .controlAccentColor {
+        didSet {
+            focusBar.layer?.backgroundColor = focusTint.withAlphaComponent(0.9).cgColor
+            // The rail on the command you are running now takes the same colour
+            // as the focus bar, so a pane's marks all say the same thing.
+            blockGutter.currentRailColor = focusTint.withAlphaComponent(0.8)
+            blockGutter.needsDisplay = true
+        }
+    }
     private var isDropTarget = false
 
     init(
@@ -72,6 +117,15 @@ final class TerminalView: NSView, NSMenuItemValidation {
         // Files dropped anywhere on the terminal become attachments.
         registerForDraggedTypes([.fileURL])
 
+        blockGutter.autoresizingMask = [.width, .height]
+        addSubview(blockGutter)
+
+        focusBar.wantsLayer = true
+        focusBar.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor
+        focusBar.autoresizingMask = [.height]
+        focusBar.isHidden = true
+        addSubview(focusBar)
+
         chips.translatesAutoresizingMaskIntoConstraints = false
         addSubview(chips)
         NSLayoutConstraint.activate([
@@ -90,6 +144,8 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     /// Stops all timers and the display link before the view is discarded.
     func prepareForRemoval() {
+        runningTimer?.invalidate()
+        runningTimer = nil
         blinkTimer?.cancel()
         blinkTimer = nil
         stopDisplayLink()
@@ -120,6 +176,21 @@ final class TerminalView: NSView, NSMenuItemValidation {
         opacity = config.opacity
         session.apply(theme: config.theme)
         session.setScrollback(lines: config.scrollbackLines)
+
+        // The rails take their colour from the theme, not from the system: a
+        // grey that reads as quiet on one background is invisible on another.
+        showsCommandBlocks = config.commandBlocks
+        blockGutter.isHidden = !config.commandBlocks
+        let foreground = NSColor(hex: config.theme.foreground.hex) ?? .white
+        blockGutter.railColor = foreground.withAlphaComponent(0.22)
+        blockGutter.labelColor = foreground.withAlphaComponent(0.45)
+        blockGutter.separatorColor = foreground.withAlphaComponent(0.10)
+        // Status colours come from the theme's own red and green, so a light
+        // theme does not get a neon rail beside every failed command.
+        blockGutter.failureColor = NSColor(hex: config.theme.palette[9].hex) ?? blockGutter.failureColor
+        blockGutter.successColor = NSColor(hex: config.theme.palette[10].hex) ?? blockGutter.successColor
+        blockGutter.runningColor = NSColor(hex: config.theme.palette[11].hex) ?? blockGutter.runningColor
+        blockGutter.needsDisplay = true
 
         if config.fontName != fontName || config.fontSize != Double(fontSize) {
             fontName = config.fontName
@@ -184,6 +255,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
         }
         needsRedraw = false
         updateDropHighlight()
+        updateCommandBlocks()
 
         guard let metalLayer, metalLayer.drawableSize.width > 0,
               let drawable = metalLayer.nextDrawable()
@@ -201,10 +273,67 @@ final class TerminalView: NSView, NSMenuItemValidation {
             snapshot: snapshot,
             cursorOn: focused ? cursorOn : true,
             padding: padding * scale,
+            gutter: gutterWidth * scale,
             opacity: opacity,
             drawable: drawable,
             viewportSize: metalLayer.drawableSize
         )
+    }
+
+    /// Hands the gutter this frame's command blocks.
+    private func updateCommandBlocks() {
+        guard showsCommandBlocks else { return }
+        if ProcessInfo.processInfo.environment["VITRA_DEBUG_BLOCKS"] != nil {
+            let b = snapshot.commandBlocks.map { "\($0.rows.lowerBound)-\($0.rows.upperBound)@\($0.commandRow)" }
+            let s = commandStatuses.map { "\(String(describing: $0.exitCode))" }
+            FileHandle.standardError.write(Data("[blocks] \(b) statuses \(s)\n".utf8))
+        }
+        blockGutter.frame = bounds
+        blockGutter.update(
+            blocks: snapshot.commandBlocks,
+            statuses: commandStatuses,
+            running: commandStartedAt.map { Date().timeIntervalSince($0) },
+            cellHeight: renderer.metrics.cellHeight / scale,
+            padding: padding
+        )
+    }
+
+    /// Records how the command that just finished ended.
+    func record(_ status: CommandStatus) {
+        commandStatuses.insert(status, at: 0)
+        if commandStatuses.count > 200 { commandStatuses.removeLast() }
+        commandStartedAt = nil
+        runningTimer?.invalidate()
+        runningTimer = nil
+        setNeedsRender()
+    }
+
+    /// Drops the running clock to one tick a second, once the command is long.
+    private func slowRunningTimer() {
+        guard runningTimer?.timeInterval != 1 else { return }
+        runningTimer?.invalidate()
+        runningTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateCommandBlocks() }
+        }
+    }
+
+    /// Starts the clock shown beside a command while it runs.
+    func commandStarted() {
+        commandStartedAt = Date()
+        runningTimer?.invalidate()
+        // Tenths while the command is short enough for tenths to matter, then
+        // once a second: a shell left open inside ssh should not wake the CPU
+        // ten times a second for an hour.
+        runningTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.updateCommandBlocks()
+                if let started = self.commandStartedAt, Date().timeIntervalSince(started) > 15 {
+                    self.slowRunningTimer()
+                }
+            }
+        }
+        setNeedsRender()
     }
 
     // MARK: - Geometry
@@ -247,7 +376,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
         let pixelSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         metalLayer.drawableSize = pixelSize
 
-        let grid = renderer.gridSize(for: pixelSize, padding: padding * scale)
+        let grid = renderer.gridSize(for: pixelSize, padding: padding * scale, gutter: gutterWidth * scale)
         session.resize(to: TerminalSize(
             columns: UInt16(grid.columns),
             rows: UInt16(grid.rows),
@@ -261,7 +390,12 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     /// The window size that shows exactly `columns` x `rows` cells.
     func idealSize(columns: Int, rows: Int) -> NSSize {
-        let pixels = renderer.pixelSize(columns: columns, rows: rows, padding: padding * scale)
+        let pixels = renderer.pixelSize(
+            columns: columns,
+            rows: rows,
+            padding: padding * scale,
+            gutter: gutterWidth * scale
+        )
         return NSSize(width: pixels.width / scale, height: pixels.height / scale)
     }
 
@@ -279,14 +413,32 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     override func becomeFirstResponder() -> Bool {
         updateBlinkTimer()
+        updateFocusIndicator()
         setNeedsRender()
         return true
     }
 
     override func resignFirstResponder() -> Bool {
         updateBlinkTimer()
+        // The border is drawn after the responder change lands, because AppKit
+        // asks the old responder to resign before the new one becomes first and
+        // reading `firstResponder` here would still name this pane.
+        DispatchQueue.main.async { [weak self] in self?.updateFocusIndicator() }
         setNeedsRender()
         return true
+    }
+
+    /// Whether this pane should show which one has the keyboard.
+    ///
+    /// Off for a lone pane: a border around the only thing on screen says
+    /// nothing, and a terminal has little enough chrome as it is.
+    var showsFocusIndicator = false {
+        didSet { updateFocusIndicator() }
+    }
+
+    private func updateFocusIndicator() {
+        focusBar.frame = NSRect(x: 0, y: 0, width: 2, height: bounds.height)
+        focusBar.isHidden = !(showsFocusIndicator && window?.firstResponder === self)
     }
 
     /// Runs the blink timer only while the window has focus.
@@ -328,7 +480,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
         let cellWidth = renderer.metrics.cellWidth / scale
         let cellHeight = renderer.metrics.cellHeight / scale
 
-        let column = Int(((point.x - padding) / cellWidth).rounded(.down))
+        let column = Int(((point.x - padding - gutterWidth) / cellWidth).rounded(.down))
         let row = Int(((point.y - padding) / cellHeight).rounded(.down))
         return (
             UInt16(clamping: min(max(0, column), Int(snapshot.columns) - 1)),
@@ -460,6 +612,11 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     override var acceptsFirstResponder: Bool { true }
 
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        updateFocusIndicator()
+    }
+
     /// Top-left origin, matching the terminal grid and the renderer, so a mouse
     /// point converts to a cell without flipping y at every call site.
     override var isFlipped: Bool { true }
@@ -561,7 +718,7 @@ extension TerminalView: @preconcurrency NSTextInputClient {
         let cellWidth = renderer.metrics.cellWidth / scale
         let cellHeight = renderer.metrics.cellHeight / scale
         let local = NSRect(
-            x: padding + CGFloat(cursor.column) * cellWidth,
+            x: padding + gutterWidth + CGFloat(cursor.column) * cellWidth,
             y: bounds.height - padding - CGFloat(cursor.row + 1) * cellHeight,
             width: cellWidth,
             height: cellHeight

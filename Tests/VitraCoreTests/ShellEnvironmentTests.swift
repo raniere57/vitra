@@ -48,3 +48,43 @@ import Testing
 @Test func resolvedTermIsOneOfTheTwoSupportedEntries() {
     #expect([ShellEnvironment.preferredTerm, ShellEnvironment.fallbackTerm].contains(ShellEnvironment.term))
 }
+
+@Test func zshGetsTheIntegrationShims() throws {
+    let environment = ShellEnvironment.childEnvironment(shell: "/bin/zsh", shellIntegration: true)
+
+    #expect(environment["ZDOTDIR"] == ShellIntegration.directory.path)
+    #expect(environment["VITRA_SHELL_INTEGRATION"] == "1")
+    // The shims defer to whatever the user's own zsh files are.
+    #expect(environment["VITRA_ZDOTDIR"] != nil)
+
+    let zshrc = ShellIntegration.directory.appendingPathComponent(".zshrc")
+    let contents = try String(contentsOf: zshrc, encoding: .utf8)
+    #expect(contents.contains("$VITRA_ZDOTDIR/.zshrc"))
+}
+
+@Test func anUnknownShellIsLeftAlone() {
+    let environment = ShellEnvironment.childEnvironment(shell: "/bin/bash", shellIntegration: true)
+
+    #expect(environment["ZDOTDIR"] == nil)
+    #expect(environment["VITRA_SHELL_INTEGRATION"] == nil)
+}
+
+@Test func integrationCanBeTurnedOff() {
+    let environment = ShellEnvironment.childEnvironment(shell: "/bin/zsh", shellIntegration: false)
+
+    #expect(environment["ZDOTDIR"] == nil)
+}
+
+/// The marks have to survive a second source: a zsh configuration that sources
+/// its own rc file twice would otherwise append them to the prompt twice.
+@Test func theIntegrationScriptGuardsAgainstBeingSourcedTwice() throws {
+    try ShellIntegration.install()
+    let script = try String(
+        contentsOf: ShellIntegration.directory.appendingPathComponent("vitra-integration.zsh"),
+        encoding: .utf8
+    )
+
+    #expect(script.contains("VITRA_INTEGRATION_LOADED"))
+    #expect(script.contains("133;B"))
+    #expect(script.contains("add-zsh-hook precmd"))
+}

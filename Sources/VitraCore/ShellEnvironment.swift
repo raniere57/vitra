@@ -55,6 +55,11 @@ public enum ShellEnvironment {
     /// would lie to the child, plus Vitra's own.
     public static func childEnvironment(
         term: String = ShellEnvironment.term,
+        shell: String? = nil,
+        shellIntegration: Bool = true,
+        blockSpacing: Bool = true,
+        colorPrompt: Bool = true,
+        colorDefaults: Bool = true,
         extra: [String: String] = [:]
     ) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
@@ -69,6 +74,24 @@ public enum ShellEnvironment {
         env["COLORTERM"] = "truecolor"
         env["TERM_PROGRAM"] = "vitra"
         env["TERM_PROGRAM_VERSION"] = Vitra.version
+
+        // BSD tools ship colourless: `ls` on macOS prints the same grey for a
+        // directory, a symlink and an executable unless CLICOLOR says otherwise.
+        // Only set when the user has not already decided.
+        if colorDefaults, env["CLICOLOR"] == nil { env["CLICOLOR"] = "1" }
+
+        // Before `extra`, so an explicit override still wins.
+        if shellIntegration {
+            let path = shell ?? loginShell()
+            for (key, value) in ShellIntegration.environment(
+                shell: path,
+                current: env,
+                blockSpacing: blockSpacing,
+                colorPrompt: colorPrompt
+            ) {
+                env[key] = value
+            }
+        }
 
         for (key, value) in extra { env[key] = value }
         return env

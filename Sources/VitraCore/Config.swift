@@ -15,6 +15,16 @@ public struct Config: Equatable, Sendable {
     public var blur: Bool = false
     public var padding: Double = 8
     public var scrollbackLines: Int = 10_000
+    /// Teaches the shell to mark where commands begin and end (OSC 133).
+    public var shellIntegration: Bool = true
+    /// Draws the gutter that separates one command from the next.
+    public var commandBlocks: Bool = true
+    /// A blank line before each prompt, so blocks are separated by space.
+    public var blockSpacing: Bool = true
+    /// Colours the stock zsh prompt. A prompt you have styled is left alone.
+    public var colorPrompt: Bool = true
+    /// Sets CLICOLOR, so `ls` and friends colour their output.
+    public var colorDefaults: Bool = true
     /// nil means the user's login shell.
     public var shell: String?
     /// Menu action name to key equivalent, as in `split_right = "d"`.
@@ -86,6 +96,11 @@ public struct Config: Equatable, Sendable {
             if let shell = terminal["shell"]?.stringValue, !shell.isEmpty {
                 config.shell = shell
             }
+            if let value = terminal["shell_integration"]?.boolValue { config.shellIntegration = value }
+            if let value = terminal["command_blocks"]?.boolValue { config.commandBlocks = value }
+            if let value = terminal["block_spacing"]?.boolValue { config.blockSpacing = value }
+            if let value = terminal["color_prompt"]?.boolValue { config.colorPrompt = value }
+            if let value = terminal["color_defaults"]?.boolValue { config.colorDefaults = value }
         }
 
         if let keys = root["keybindings"]?.tableValue {
@@ -195,6 +210,13 @@ public struct Config: Equatable, Sendable {
 
         [terminal]
         scrollback = \(scrollbackLines)
+        # marks where each command starts and ends, and draws the gutter for it
+        shell_integration = \(shellIntegration)
+        command_blocks = \(commandBlocks)
+        block_spacing = \(blockSpacing)
+        # colour the stock zsh prompt, and set CLICOLOR for ls and friends
+        color_prompt = \(colorPrompt)
+        color_defaults = \(colorDefaults)
         \(shellLine)
 
         [theme]

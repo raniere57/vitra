@@ -19,7 +19,9 @@ log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
 log "building release"
-(cd "$ROOT" && swift build -c release --product VitraApp)
+# VITRA_BUILD_FLAGS is how release.sh adds -Osize and dead stripping without
+# a second copy of this script.
+(cd "$ROOT" && swift build -c release --product VitraApp ${VITRA_BUILD_FLAGS:-})
 [[ -x "$BUILD/VitraApp" ]] || die "release binary not found at $BUILD/VitraApp"
 
 log "assembling $APP"

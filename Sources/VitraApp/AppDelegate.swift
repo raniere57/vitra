@@ -3,6 +3,7 @@ import Metal
 import VitraBridge
 import VitraCore
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windows: [TerminalWindowController] = []
     private var device: MTLDevice?
@@ -10,6 +11,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Files handed to the app before it had a window to show them in.
     private var pendingPreviews: [URL] = []
+
+    private let bookmarkStore = BookmarkStore()
+    private(set) var bookmarks: [Bookmark] = []
+    private let palette = FolderPalette()
+    private let foldersWindow = FoldersWindow()
 
     private var bridge: SocketServer?
     private var configWatcher: ConfigWatcher?
@@ -32,7 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.global(qos: .utility).async { store.purgeExpired() }
 
         loadConfiguration()
-        NSApp.mainMenu = MainMenu.build(keybindings: config.keybindings)
+        bookmarks = bookmarkStore.load()
+        rebuildMenu()
         if pendingPreviews.isEmpty { newWindow(nil) }
         showPendingPreviews()
         startBridge()
@@ -91,9 +98,92 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func configurationChanged(_ config: Config, _ problems: [String]) {
         self.config = config
         report(problems)
-        NSApp.mainMenu = MainMenu.build(keybindings: config.keybindings)
+        rebuildMenu()
         windows.forEach { $0.apply(config) }
         preferences.update(config: config)
+    }
+
+    private func rebuildMenu() {
+        NSApp.mainMenu = MainMenu.build(keybindings: config.keybindings, bookmarks: bookmarks)
+    }
+
+    // MARK: - Folders
+
+    /// `Cmd-P`: the quick switcher.
+    @objc func showFolderPalette(_ sender: Any?) {
+        guard !bookmarks.isEmpty else {
+            // Nothing to switch to yet, so the manager is the useful answer.
+            showFolders(sender)
+            return
+        }
+        palette.show(bookmarks: bookmarks) { [weak self] bookmark in
+            self?.openTab(for: bookmark)
+        }
+    }
+
+    @objc func showFolders(_ sender: Any?) {
+        foldersWindow.show(bookmarks: bookmarks) { [weak self] edited in
+            self?.setBookmarks(edited)
+        }
+    }
+
+    /// A folder opened once, without being kept.
+    @objc func openFolderInNewTab(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        openTab(for: Bookmark(name: url.lastPathComponent, path: url.path))
+    }
+
+    @objc func openBookmarkTab(_ sender: NSMenuItem) {
+        guard let identifier = sender.representedObject as? String,
+              let bookmark = bookmarks.first(where: { $0.id.uuidString == identifier })
+        else { return }
+        openTab(for: bookmark)
+    }
+
+    /// Stars the directory the focused shell is actually in.
+    ///
+    /// Read from the process rather than remembered from when the tab opened: by
+    /// the time this is used the user has usually `cd`'d somewhere, and that
+    /// somewhere is what they mean.
+    @objc func addCurrentFolder(_ sender: Any?) {
+        guard let url = currentController?.focusedPane?.session.currentDirectory else {
+            NSSound.beep()
+            return
+        }
+        if let existing = bookmarks.first(where: { $0.url.path == url.path }) {
+            // Already a favourite: show it rather than adding a duplicate the
+            // user would then have to find and delete.
+            showFolders(sender)
+            foldersWindow.update(bookmarks: bookmarks)
+            _ = existing
+            return
+        }
+        setBookmarks(bookmarks + [Bookmark(name: url.lastPathComponent, path: url.path)])
+        showFolders(sender)
+    }
+
+    private func setBookmarks(_ list: [Bookmark]) {
+        bookmarks = list
+        do {
+            try bookmarkStore.save(list)
+        } catch {
+            FileHandle.standardError.write(Data("vitra: could not save folders: \(error)\n".utf8))
+        }
+        rebuildMenu()
+        foldersWindow.update(bookmarks: list)
+        windows.forEach { $0.refreshRail() }
+    }
+
+    /// Opens a folder as a tab of the front window, which is what a folder
+    /// switcher is for: the windows stay together and the tab bar becomes the
+    /// list of what is open.
+    func openTab(for bookmark: Bookmark) {
+        makeWindow(asTabOf: currentController?.window, bookmark: bookmark)
     }
 
     private func report(_ problems: [String]) {
@@ -178,7 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ?? windows.last
     }
 
-    private func makeWindow(asTabOf sibling: NSWindow?) {
+    private func makeWindow(asTabOf sibling: NSWindow?, bookmark: Bookmark? = nil) {
         guard let device else { return }
         do {
             let controller = try TerminalWindowController(
@@ -187,7 +277,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 fontSize: 13,
                 command: Self.commandFromArguments(),
                 attachments: attachments,
-                config: config
+                config: config,
+                bookmark: bookmark
             )
             windows.append(controller)
 

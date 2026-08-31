@@ -36,18 +36,47 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     private var blurView: NSVisualEffectView?
     private var config: Config
 
+    /// The title bar button that opens and closes the preview panel.
+    private let panelButton = NSButton()
+
+    /// The folder this window was opened for, if it came from a favourite.
+    ///
+    /// It survives for the life of the window because it is what the title, the
+    /// accent stripe and every new pane here are derived from — a tab opened on
+    /// a project stays that project's tab even after the shell wanders off.
+    let bookmark: Bookmark?
+
+    /// The title bar breadcrumb: the folder, then where the shell has wandered.
+    private let folderButton = NSButton()
+    private let pathLabel = NSTextField(labelWithString: "")
+
+    /// The favourites, down the left edge.
+    private let rail = FolderRail()
+
+    /// Everything right of the rail: the panes, and the panel when it is open.
+    private let bodyView = NSView()
+
     init(
         device: MTLDevice,
         fontName: String,
         fontSize: CGFloat,
         command: [String]? = nil,
         attachments: AttachmentStore = AttachmentStore(),
-        config: Config = Config()
+        config: Config = Config(),
+        bookmark: Bookmark? = nil
     ) throws {
         self.device = device
+        self.bookmark = bookmark
         self.fontName = config.fontName
         self.fontSize = CGFloat(config.fontSize)
-        self.config = config
+        // A folder's theme wins over the global one, which is the whole point of
+        // setting it: the window that is on production should not look like the
+        // window that is on a scratch directory.
+        var windowConfig = config
+        if let name = bookmark?.theme, let theme = Theme.named(name) {
+            windowConfig.theme = theme
+        }
+        self.config = windowConfig
         self.command = command
         self.attachments = attachments
 
@@ -57,10 +86,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             backing: .buffered,
             defer: false
         )
-        window.title = "Vitra"
+        window.title = bookmark.map { "\($0.emoji) \($0.name)" } ?? "Vitra"
         // Native window tabbing: macOS supplies the tab bar, Cmd-Shift-[ and ],
         // drag-between-windows, and the + button, none of which is worth
         // reimplementing.
+        // The breadcrumb in the title bar already names the window, so the
+        // centred title would be the same words twice. Tabs keep using
+        // window.title, which is where that string is actually needed.
+        window.titleVisibility = .hidden
         window.tabbingMode = .preferred
         window.tabbingIdentifier = "dev.vitra.terminal"
         window.center()
@@ -72,20 +105,251 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         rootView.autoresizingMask = [.width, .height]
         window.contentView = rootView
 
-        paneContainer.frame = rootView.bounds
+        rail.frame = NSRect(x: 0, y: 0, width: FolderRail.width, height: rootView.bounds.height)
+        rail.autoresizingMask = [.height]
+        rail.onOpen = { bookmark in
+            (NSApp.delegate as? AppDelegate)?.openTab(for: bookmark)
+        }
+        rail.onMenu = { [weak self] button in self?.showFolderMenu(button) }
+        rootView.addSubview(rail)
+
+        bodyView.frame = NSRect(
+            x: FolderRail.width,
+            y: 0,
+            width: rootView.bounds.width - FolderRail.width,
+            height: rootView.bounds.height
+        )
+        bodyView.autoresizingMask = [.width, .height]
+        rootView.addSubview(bodyView)
+
+        paneContainer.frame = bodyView.bounds
         paneContainer.autoresizingMask = [.width, .height]
         pane.frame = paneContainer.bounds
         pane.autoresizingMask = [.width, .height]
         paneContainer.addSubview(pane)
-        rootView.addSubview(paneContainer)
+        bodyView.addSubview(paneContainer)
 
         window.delegate = self
         window.makeFirstResponder(pane)
-        apply(config)
+        installFolderControls(in: window)
+        installWindowControls(in: window)
+        apply(windowConfig)
+        refreshRail()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
+
+    /// Puts the panel toggle in the title bar.
+    ///
+    /// A title bar accessory rather than an NSToolbar: a toolbar would add a
+    /// second row, a delegate and an item registry for one button, and it would
+    /// give the user a customisation sheet with nothing to customise.
+    private func installPanelButton(in window: NSWindow) {
+        panelButton.image = NSImage(
+            systemSymbolName: "sidebar.right",
+            accessibilityDescription: "Preview panel"
+        )
+        panelButton.bezelStyle = .texturedRounded
+        panelButton.isBordered = false
+        panelButton.setButtonType(.pushOnPushOff)
+        panelButton.target = self
+        panelButton.action = #selector(togglePanelFromButton)
+        panelButton.toolTip = "Preview panel"
+        panelButton.frame = NSRect(x: 0, y: 0, width: 28, height: 22)
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 40, height: 22))
+        panelButton.frame.origin.x = 6
+        container.addSubview(panelButton)
+
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.view = container
+        accessory.layoutAttribute = .right
+        window.addTitlebarAccessoryViewController(accessory)
+    }
+
+    @objc private func togglePanelFromButton(_ sender: Any?) {
+        togglePanel()
+    }
+
+    /// The folder chip and the split buttons, at the left of the title bar.
+    ///
+    /// Everything here is also a menu command and a shortcut. The buttons exist
+    /// because a feature reachable only through a menu is a feature most people
+    /// never find, and the folder chip doubles as the label saying which folder
+    /// this window is.
+    private func installFolderControls(in window: NSWindow) {
+        // A breadcrumb, not a chip: the folder names the window, and the second
+        // half says where the shell has since wandered — the question a terminal
+        // with four panes actually raises.
+        folderButton.title = bookmark?.name ?? "Folders"
+        folderButton.font = .systemFont(ofSize: 12.5, weight: .medium)
+        folderButton.bezelStyle = .texturedRounded
+        folderButton.isBordered = false
+        folderButton.contentTintColor = .labelColor
+        folderButton.target = self
+        folderButton.action = #selector(showFolderMenu)
+        folderButton.toolTip = "Folders — open, favourite, manage (⌘P)"
+        folderButton.setContentHuggingPriority(.required, for: .horizontal)
+
+        pathLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        pathLabel.textColor = .tertiaryLabelColor
+        pathLabel.lineBreakMode = .byTruncatingHead
+        pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let row = NSStackView(views: [folderButton, pathLabel])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 2
+        row.edgeInsets = NSEdgeInsets(top: 0, left: 6, bottom: 0, right: 8)
+        row.frame = NSRect(x: 0, y: 0, width: 320, height: 28)
+
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.view = row
+        accessory.layoutAttribute = .leading
+        window.addTitlebarAccessoryViewController(accessory)
+        updateBreadcrumb()
+    }
+
+    /// Splitting and the panel, as one segmented cluster at the right.
+    ///
+    /// Grouped into a single tinted well rather than scattered: three loose
+    /// icons in a title bar read as clutter, one control reads as a control.
+    private func installWindowControls(in window: NSWindow) {
+        panelButton.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "Preview panel")
+        panelButton.bezelStyle = .texturedRounded
+        panelButton.isBordered = false
+        panelButton.setButtonType(.pushOnPushOff)
+        panelButton.target = self
+        panelButton.action = #selector(togglePanelFromButton)
+        panelButton.toolTip = "Preview panel (⇧⌘P)"
+        panelButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            panelButton.widthAnchor.constraint(equalToConstant: 30),
+            panelButton.heightAnchor.constraint(equalToConstant: 24),
+        ])
+
+        let splitRight = makeIconButton(
+            symbol: "square.split.2x1",
+            tooltip: "Split right (⌘D)",
+            action: #selector(splitRightFromButton)
+        )
+        let splitDown = makeIconButton(
+            symbol: "square.split.1x2",
+            tooltip: "Split down (⇧⌘D)",
+            action: #selector(splitDownFromButton)
+        )
+
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+
+        let cluster = NSStackView(views: [splitRight, splitDown, separator, panelButton])
+        cluster.orientation = .horizontal
+        cluster.alignment = .centerY
+        cluster.spacing = 3
+        cluster.edgeInsets = NSEdgeInsets(top: 2, left: 3, bottom: 2, right: 3)
+        cluster.wantsLayer = true
+        cluster.layer?.cornerRadius = 8
+        cluster.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor
+
+        let row = NSStackView(views: [cluster])
+        row.orientation = .horizontal
+        row.edgeInsets = NSEdgeInsets(top: 0, left: 6, bottom: 0, right: 10)
+        row.frame = NSRect(x: 0, y: 0, width: row.fittingSize.width, height: 28)
+        NSLayoutConstraint.activate([
+            separator.heightAnchor.constraint(equalToConstant: 15),
+            separator.widthAnchor.constraint(equalToConstant: 1),
+        ])
+
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.view = row
+        accessory.layoutAttribute = .trailing
+        window.addTitlebarAccessoryViewController(accessory)
+    }
+
+    /// Redraws the rail from the app's current favourites.
+    func refreshRail() {
+        rail.update(
+            bookmarks: (NSApp.delegate as? AppDelegate)?.bookmarks ?? [],
+            current: bookmark?.id
+        )
+        rail.apply(config)
+    }
+
+    /// Shows where the focused shell is, relative to the window's folder.
+    ///
+    /// Driven by focus and title changes rather than a timer: a shell that
+    /// changes directory says nothing, but it does redraw and retitle, and
+    /// polling the kernel on a clock is the idle cost this app exists to avoid.
+    private func updateBreadcrumb() {
+        guard let directory = focusedPane?.session.currentDirectory else {
+            pathLabel.stringValue = ""
+            return
+        }
+
+        let path = directory.path
+        if let root = bookmark?.url.path, path.hasPrefix(root) {
+            let relative = String(path.dropFirst(root.count))
+            pathLabel.stringValue = relative.isEmpty ? "" : "/" + relative.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        } else {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            pathLabel.stringValue = path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+        }
+    }
+
+    private func makeIconButton(symbol: String, tooltip: String, action: Selector) -> NSButton {
+        let button = NSButton()
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)
+        button.bezelStyle = .texturedRounded
+        button.isBordered = false
+        button.target = self
+        button.action = action
+        button.toolTip = tooltip
+        button.frame = NSRect(x: 0, y: 0, width: 28, height: 22)
+        return button
+    }
+
+    @objc private func splitRightFromButton(_ sender: Any?) { splitFocusedPane(vertical: true) }
+    @objc private func splitDownFromButton(_ sender: Any?) { splitFocusedPane(vertical: false) }
+
+    /// The favourites, as a menu hanging off the chip.
+    ///
+    /// Built on each click rather than kept: the list changes whenever a folder
+    /// is starred, and a stale menu is worse than no menu.
+    @objc private func showFolderMenu(_ sender: NSButton) {
+        let delegate = NSApp.delegate as? AppDelegate
+        let menu = NSMenu()
+
+        let goTo = menu.addItem(withTitle: "Go to Folder…", action: #selector(AppDelegate.showFolderPalette(_:)), keyEquivalent: "p")
+        goTo.target = delegate
+        let open = menu.addItem(withTitle: "New Tab in Folder…", action: #selector(AppDelegate.openFolderInNewTab(_:)), keyEquivalent: "")
+        open.target = delegate
+        let add = menu.addItem(withTitle: "Add Current Folder", action: #selector(AppDelegate.addCurrentFolder(_:)), keyEquivalent: "")
+        add.target = delegate
+
+        let bookmarks = delegate?.bookmarks ?? []
+        if !bookmarks.isEmpty {
+            menu.addItem(.separator())
+            for bookmark in bookmarks {
+                let item = menu.addItem(
+                    withTitle: "\(bookmark.emoji)  \(bookmark.name)",
+                    action: #selector(AppDelegate.openBookmarkTab(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = delegate
+                item.representedObject = bookmark.id.uuidString
+                item.toolTip = bookmark.displayPath
+                item.state = bookmark.id == self.bookmark?.id ? .on : .off
+            }
+        }
+
+        menu.addItem(.separator())
+        let manage = menu.addItem(withTitle: "Manage Folders…", action: #selector(AppDelegate.showFolders(_:)), keyEquivalent: "")
+        manage.target = delegate
+
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+    }
 
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
@@ -107,11 +371,20 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     private func makePane() throws -> TerminalView {
         let size = TerminalSize(columns: 80, rows: 24)
         let core = try GhosttyTerminalCore(size: size)
+        let executable = command?.first ?? config.shell ?? ShellEnvironment.loginShell()
         let session = try TerminalSession(
             core: core,
-            executable: command?.first ?? config.shell ?? ShellEnvironment.loginShell(),
+            executable: executable,
             arguments: command.map { Array($0.dropFirst()) } ?? ["-l"],
-            size: size
+            environment: ShellEnvironment.childEnvironment(
+                shell: executable,
+                shellIntegration: config.shellIntegration,
+                blockSpacing: config.blockSpacing,
+                colorPrompt: config.colorPrompt,
+                colorDefaults: config.colorDefaults
+            ),
+            size: size,
+            workingDirectory: bookmark?.exists == true ? bookmark?.url.path : nil
         )
         let pane = try TerminalView(
             session: session,
@@ -123,10 +396,21 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         try? pane.apply(config)
 
         session.onTitleChanged = { [weak self, weak pane] title in
-            guard let pane, self?.focusedPane === pane else { return }
-            self?.window?.title = title.isEmpty ? "Vitra" : title
+            guard let self, let pane, self.focusedPane === pane else { return }
+            // The emoji stays whatever the shell reports: it is how this tab is
+            // told apart from the other five, and the tab bar shows little else.
+            let prefix = self.bookmark.map { "\($0.emoji) " } ?? ""
+            self.window?.title = title.isEmpty ? (prefix.isEmpty ? "Vitra" : prefix.trimmingCharacters(in: .whitespaces)) : prefix + title
+            self.updateBreadcrumb()
         }
         session.onBell = { NSSound.beep() }
+        session.onCommandStarted = { [weak pane] in
+            pane?.commandStarted()
+        }
+        session.onCommandFinished = { [weak pane] status in
+            // Already on main: the session hops for this callback.
+            pane?.record(status)
+        }
         session.onPreviewRequest = { [weak self] target in
             // Arrives on the session's read queue; the panel is main-thread only.
             DispatchQueue.main.async { self?.preview(target) }
@@ -139,7 +423,19 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         panes.append(pane)
         // Only now, with every callback installed, is it safe to let output in.
         session.start()
+        refreshFocusIndicators()
         return pane
+    }
+
+    /// Turns the focus border on once a window holds more than one pane.
+    private func refreshFocusIndicators() {
+        let many = panes.count > 1
+        let tint = bookmark?.colorHex.flatMap { NSColor(hex: $0) } ?? .controlAccentColor
+        panes.forEach {
+            $0.focusTint = tint
+            $0.showsFocusIndicator = many
+        }
+        updateBreadcrumb()
     }
 
     var focusedPane: TerminalView? {
@@ -198,12 +494,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             ofDividerAt: 0
         )
         window.makeFirstResponder(newPane)
+        refreshFocusIndicators()
     }
 
     /// Removes a pane and collapses any split that is left with a single child.
     func close(_ pane: TerminalView) {
         panes.removeAll { $0 === pane }
         pane.prepareForRemoval()
+        refreshFocusIndicators()
 
         guard let window, let split = pane.superview as? NSSplitView else {
             // Last pane in the window: the window goes with it.
@@ -254,6 +552,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         if panel == nil { _ = openPanel() } else { closePanel() }
     }
 
+    /// Keeps the title bar button showing whether the panel is open, however it
+    /// was opened — a menu command, a dropped file or the agent.
+    private func syncPanelButton() {
+        panelButton.state = panel == nil ? .off : .on
+        panelButton.contentTintColor = panel == nil ? nil : .controlAccentColor
+    }
+
     @discardableResult
     private func openPanel() -> PreviewPanel {
         if let panel { return panel }
@@ -264,15 +569,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         let split = PaneSplitView()
         split.isVertical = true
         split.dividerStyle = .thin
-        split.frame = rootView.bounds
+        split.frame = bodyView.bounds
         split.autoresizingMask = [.width, .height]
 
         paneContainer.removeFromSuperview()
         split.addArrangedSubview(paneContainer)
         split.addArrangedSubview(panel)
         split.delegate = self
-        split.frame = rootView.bounds
-        rootView.addSubview(split)
+        split.frame = bodyView.bounds
+        bodyView.addSubview(split)
 
         // After layout: the split has no width of its own until the window has
         // sized it, and a divider placed before that collapses the terminal.
@@ -282,6 +587,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
         self.panel = panel
         self.panelSplit = split
+        syncPanelButton()
         return panel
     }
 
@@ -296,10 +602,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         paneContainer.frame = split.frame
         paneContainer.autoresizingMask = [.width, .height]
         split.removeFromSuperview()
-        rootView.addSubview(paneContainer)
+        bodyView.addSubview(paneContainer)
 
         self.panel = nil
         self.panelSplit = nil
+        syncPanelButton()
         window?.makeFirstResponder(focusedPane)
     }
 
@@ -336,6 +643,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             blurView = nil
         }
 
+        rail.apply(config)
+
         for pane in panes {
             do {
                 try pane.apply(config)
@@ -356,6 +665,21 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         min(proposed, splitView.bounds.width - PanelStyle.minimumWidth)
     }
 
+    /// A one-pixel divider is a one-pixel target. The drawn line stays thin and
+    /// the draggable band around it is widened, which is the difference between
+    /// a panel that resizes and a panel that looks fixed.
+    func splitView(
+        _ splitView: NSSplitView,
+        effectiveRect proposedEffectiveRect: NSRect,
+        forDrawnRect drawnRect: NSRect,
+        ofDividerAt dividerIndex: Int
+    ) -> NSRect {
+        drawnRect.insetBy(
+            dx: splitView.isVertical ? -PanelStyle.dividerGrab : 0,
+            dy: splitView.isVertical ? 0 : -PanelStyle.dividerGrab
+        )
+    }
+
     /// Growing the window gives the extra width to the terminal, which is what a
     /// side panel is expected to do.
     func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
@@ -366,6 +690,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     func windowDidBecomeKey(_ notification: Notification) {
         panes.forEach { $0.updateBlinkTimer() }
+        updateBreadcrumb()
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -398,6 +723,20 @@ private final class PaneSplitView: NSSplitView, NSSplitViewDelegate {
 
     override var dividerColor: NSColor { NSColor(white: 0.22, alpha: 1) }
     override var dividerThickness: CGFloat { 1 }
+
+    /// Same widened grab band as the panel's divider: the line is a hairline,
+    /// the target is not.
+    func splitView(
+        _ splitView: NSSplitView,
+        effectiveRect proposedEffectiveRect: NSRect,
+        forDrawnRect drawnRect: NSRect,
+        ofDividerAt dividerIndex: Int
+    ) -> NSRect {
+        drawnRect.insetBy(
+            dx: splitView.isVertical ? -PanelStyle.dividerGrab : 0,
+            dy: splitView.isVertical ? 0 : -PanelStyle.dividerGrab
+        )
+    }
 
     func splitView(_ splitView: NSSplitView, resizeSubviewsWithOldSize oldSize: NSSize) {
         let views = splitView.arrangedSubviews

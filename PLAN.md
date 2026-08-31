@@ -222,6 +222,28 @@ Legibilidade em tamanho pequeno: **três variantes de arte, não um downscale.**
 
 ---
 
+### Fase 7 — Pastas favoritas (entregue)
+
+Favoritos de diretório com emoji, cor, tema e tags, em `~/.vitra/bookmarks.json` (JSON, não TOML: o arquivo é escrito pelo app, não editado à mão, e não há comentário de usuário a preservar).
+
+- **Paleta `Cmd-P`** — busca por nome, caminho ou tag, termos em AND. `NSPanel` flutuante criado sob demanda; nenhuma sidebar permanente, porque a largura da janela pertence ao terminal.
+- **Aba por pasta** — o shell nasce no diretório via `posix_spawn_file_actions_addchdir_np`, não `chdir()` no processo do app: mudar o diretório do app moveria todos os panes de uma vez.
+- **Identidade por aba** — emoji no título (é o que a barra de abas mostra), cor como faixa de dois pixels sob a barra de título, tema do favorito sobrepondo o global.
+- **`Cmd-Ctrl-D`** — favorita o diretório em que o shell está *agora*, lido do processo com `proc_pidinfo`, não lembrado de quando a aba abriu.
+- **Janela Folders** — SwiftUI, edita nome, emoji, cor, tema e tags.
+
+Split view já existia desde a Fase 1: `Cmd-D` e `Cmd-Shift-D` dividem em colunas e linhas, aninhando à vontade.
+
+**Risco:** 🟢 baixo. O único ponto delicado foi o `chdir` do filho, coberto por teste com `/bin/pwd` num pty real.
+
+**Chrome (direção B, escolhida pelo usuário):** trilho de favoritos na borda esquerda (52 pt, emoji por pasta, a da janela acesa na cor dela), breadcrumb na barra de título (pasta + diretório atual do shell, atualizado por evento — nunca por timer), split e painel num único cluster à direita, e foco do pane como barra de 2 px na borda, na cor da pasta. Abas continuam nativas do macOS: o sublinhado do mock exigiria reimplementar tabbing, e é ele que dá arrastar-entre-janelas e `Cmd-Shift-[`/`]`.
+
+**Blocos de comando (gutter marks, escolhido pelo usuário):** shell integration OSC 133 via shims de `ZDOTDIR` em `~/.vitra/shell/zsh` (os arquivos do usuário são sourceados primeiro; nada dele é editado), semântica de linha lida direto do libghostty (`GHOSTTY_ROW_DATA_SEMANTIC_PROMPT` — sem segundo parser), e um trilho por bloco desenhado numa view AppKit sobre o terminal, redesenhada só quando a lista de blocos muda. Só zsh por enquanto. O status de saída não vem da linha (o core consome o `133;D`): a integração manda uma cópia no canal próprio do Vitra (`OSC 7337;vitra-block;code=…;ms=…`), e os status são casados com os blocos contando de baixo para cima — um por prompt, inclusive o prompt em que nada rodou. Com isso o trilho fica verde/vermelho/âmbar e a linha do comando ganha `exit 2` ou `running · 7.2s`.
+
+**Divisores:** linha de 1 px, faixa de arraste de ±5 px (`splitView(_:effectiveRect:forDrawnRect:ofDividerAt:)`). Sem isso o split e o painel pareciam de tamanho fixo — era o alvo, não o layout.
+
+---
+
 ## 5. Como eu vou medir os orçamentos (medir, não estimar)
 
 Nada de "deve estar em torno de". Todo número no relatório vem de um destes comandos, gravado em `docs/MEASUREMENTS.md` com data e hash do commit.

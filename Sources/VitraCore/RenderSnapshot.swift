@@ -88,6 +88,30 @@ public struct RenderCell: Sendable {
 ///
 /// Reused across frames on purpose: the storage grows to the size of the grid
 /// once and is then refilled in place, so a steady-state redraw allocates nothing.
+/// What a row is, as far as the shell told the terminal (OSC 133).
+///
+/// This is what makes a command block a block: without it a terminal has one
+/// undifferentiated stream of text and no way to say where a command's output
+/// starts or ends.
+/// One command on screen: where it sits, and which row you typed it on.
+public struct CommandBlock: Equatable, Sendable {
+    /// Every row of the block: the prompt, the command, and its output.
+    public var rows: Range<Int>
+    /// The row the command itself is on, which is where its status belongs.
+    public var commandRow: Int
+
+    public init(rows: Range<Int>, commandRow: Int) {
+        self.rows = rows
+        self.commandRow = commandRow
+    }
+}
+
+public enum RowSemantic: UInt8, Sendable {
+    case output = 0
+    case prompt = 1
+    case promptContinuation = 2
+}
+
 public final class RenderSnapshot {
     public private(set) var columns: UInt16 = 0
     public private(set) var rows: UInt16 = 0
@@ -97,6 +121,11 @@ public final class RenderSnapshot {
 
     /// UTF-8 bytes for every cell's grapheme cluster, addressed by cell offsets.
     public private(set) var text: [UInt8] = []
+
+    /// One entry per row: prompt, prompt continuation, or plain output.
+    public private(set) var rowSemantics: [RowSemantic] = []
+    /// Which rows carry cells the user typed, as marked by OSC 133 `B`.
+    public private(set) var rowHasInput: [Bool] = []
 
     public var defaultForeground: TerminalColor = .white
     public var defaultBackground: TerminalColor = .black
@@ -148,9 +177,13 @@ public final class RenderSnapshot {
             self.columns = columns
             self.rows = rows
             cells = Array(repeating: blank, count: count)
+            rowSemantics = Array(repeating: .output, count: Int(rows))
+            rowHasInput = Array(repeating: false, count: Int(rows))
         } else {
             // Keep the allocation; only the contents are stale.
             for index in cells.indices { cells[index] = blank }
+            for index in rowSemantics.indices { rowSemantics[index] = .output }
+            for index in rowHasInput.indices { rowHasInput[index] = false }
         }
         text.removeAll(keepingCapacity: true)
         cursor = nil
@@ -168,5 +201,58 @@ public final class RenderSnapshot {
 
     public func setCell(_ cell: RenderCell, column: Int, row: Int) {
         cells[row * Int(columns) + column] = cell
+    }
+
+    public func setSemantic(_ semantic: RowSemantic, row: Int) {
+        guard row >= 0, row < rowSemantics.count else { return }
+        rowSemantics[row] = semantic
+    }
+
+    /// Marks the row as carrying typed input: it is the row of a command.
+    public func setHasInput(row: Int) {
+        guard row >= 0, row < rowHasInput.count else { return }
+        rowHasInput[row] = true
+    }
+
+    /// The command blocks visible on screen.
+    ///
+    /// A block starts on a prompt row and runs to the row before the next one,
+    /// so a command and everything it printed are one range. Continuation rows
+    /// belong to the block they continue, never to a new one.
+    public var commandBlocks: [CommandBlock] {
+        var blocks: [CommandBlock] = []
+        var start: Int?
+        var promptEnd: Int?
+        var commandRow: Int?
+
+        func close(at row: Int) {
+            guard let open = start, open < row else { return }
+            blocks.append(CommandBlock(rows: open ..< row, commandRow: commandRow ?? promptEnd ?? open))
+        }
+
+        for (row, semantic) in rowSemantics.enumerated() {
+            guard semantic != .output else { continue }
+            let continuesPrompt = start != nil && row <= (promptEnd ?? -1) + 1
+            // A prompt row that does not continue the one above starts a block.
+            // So does a fresh prompt inside a run of prompt rows: a command that
+            // printed nothing leaves its row touching the next prompt, and
+            // merging the two would shift every status below it by one.
+            if !continuesPrompt || (semantic == .prompt && commandRow != nil) {
+                close(at: row)
+                start = row
+                commandRow = nil
+            }
+            promptEnd = row
+            // The first typed row, not the last: a command long enough to wrap
+            // owns every row it wraps onto, and its status belongs on the line
+            // it starts on.
+            if commandRow == nil, row < rowHasInput.count, rowHasInput[row] { commandRow = row }
+        }
+        // The last block ends where the text does, not at the bottom of the
+        // pane: a rail running down forty blank rows says a command is still
+        // printing when it is not.
+        let end = cursor.map { min(Int($0.row) + 1, rowSemantics.count) } ?? rowSemantics.count
+        close(at: end)
+        return blocks
     }
 }

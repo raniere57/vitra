@@ -20,6 +20,12 @@ public final class TerminalSession: @unchecked Sendable {
 
     /// A file the program asked the panel to show, via `ESC ] 7337`.
     public var onPreviewRequest: (@Sendable (PreviewTarget) -> Void)?
+
+    /// How the command that just finished ended, from the shell integration.
+    public var onCommandFinished: (@Sendable (CommandStatus) -> Void)?
+
+    /// A command just started running.
+    public var onCommandStarted: (@Sendable () -> Void)?
     public var onExit: (@Sendable (Int32?) -> Void)?
 
     private let pty: PTY
@@ -38,7 +44,8 @@ public final class TerminalSession: @unchecked Sendable {
         executable: String = ShellEnvironment.loginShell(),
         arguments: [String] = ["-l"],
         environment: [String: String] = ShellEnvironment.childEnvironment(),
-        size: TerminalSize
+        size: TerminalSize,
+        workingDirectory: String? = nil
     ) throws {
         self.core = core
         self.size = size
@@ -47,7 +54,8 @@ public final class TerminalSession: @unchecked Sendable {
             executable: executable,
             arguments: arguments,
             environment: environment,
-            size: size
+            size: size,
+            workingDirectory: workingDirectory
         )
 
         core.onWritePTY = { [pty] bytes in
@@ -64,6 +72,12 @@ public final class TerminalSession: @unchecked Sendable {
         }
 
     }
+
+    /// Where the foreground job is running, or the shell if nothing is.
+    ///
+    /// Read from the kernel rather than tracked: a shell that `cd`s tells nobody,
+    /// and asking the process is the only answer that is never stale.
+    public var currentDirectory: URL? { pty.workingDirectory }
 
     /// Starts reading the child's output.
     ///
@@ -249,9 +263,26 @@ public final class TerminalSession: @unchecked Sendable {
     /// Paths are resolved against the foreground job's working directory, so a
     /// program can ask for a file by the name it just wrote.
     private func scanForPreviewRequests(_ bytes: UnsafeRawBufferPointer) {
-        guard let handler = onPreviewRequest else { return }
+        guard onPreviewRequest != nil || onCommandFinished != nil || onCommandStarted != nil else { return }
         oscScanner.scan(bytes) { [weak self] payload in
-            guard let self,
+            guard let self else { return }
+
+            // Two things share this channel: a program asking for a preview, and
+            // the shell reporting how a command ended.
+            switch CommandStatus.Event.parse(payload: payload) {
+            case .started:
+                guard let handler = self.onCommandStarted else { return }
+                DispatchQueue.main.async { handler() }
+                return
+            case let .finished(status):
+                guard let handler = self.onCommandFinished else { return }
+                DispatchQueue.main.async { handler(status) }
+                return
+            case nil:
+                break
+            }
+
+            guard let handler = self.onPreviewRequest,
                   let target = PreviewTarget.parse(payload: payload, relativeTo: self.pty.workingDirectory)
             else { return }
             handler(target)

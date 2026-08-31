@@ -19,6 +19,21 @@ swift test
 scripts/build-app.sh --install   # builds dist/Vitra.app and copies it to /Applications
 ```
 
+## Release
+
+```bash
+scripts/make-icon.sh             # draws the icon and packs dist/AppIcon.icns
+scripts/release.sh               # size-optimised build, ad-hoc signature, dist/Vitra-<version>.dmg
+```
+
+The disk image is signed ad-hoc, not notarised: there is no Developer ID behind
+this build, so Gatekeeper refuses a copy that arrived with the quarantine flag.
+Clearing it is one command, and worth understanding rather than pasting:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Vitra.app
+```
+
 ## The CLI
 
 `vitra` ships inside the app bundle. Link it onto your PATH:
@@ -29,6 +44,66 @@ ln -s /Applications/Vitra.app/Contents/Helpers/vitra /usr/local/bin/vitra
 
 ```bash
 vitra open report.html    # show a file in the preview panel
+```
+
+## Folders
+
+Favourite directories live in `~/.vitra/bookmarks.json`, written by the app.
+Each one carries an emoji, an optional colour, an optional theme and any number
+of tags, and opening one starts a tab whose shell is already there.
+
+Nothing here is hidden behind a shortcut. The favourites live on a **rail** down
+the left edge - one click per folder, the window's own folder lit in its colour -
+and `+` at the bottom opens the rest (go to, open, star, manage). The title bar
+carries a **breadcrumb**: the folder, then where the focused shell has since
+wandered. Splitting and the preview panel sit in one cluster at the right.
+
+With more than one pane, the pane holding the keyboard carries a bar on its
+leading edge, in the folder's colour. Panes and the preview panel are resized by
+dragging the dividers: the line is a hairline, the grab band is five pixels
+either side of it.
+
+- `Cmd-P` is the quick switcher: type part of a name, a path or a tag and press
+  Return. Terms are ANDed, so `api work` narrows rather than widens.
+- `Cmd-Ctrl-D` stars whatever directory the focused shell is in right now, read
+  from the process rather than from wherever the tab started.
+- **Folders ▸ Manage Folders…** is where names, emoji, colours, themes and tags
+  are edited.
+
+A folder's theme wins over the one in the configuration, which is the point of
+setting it: a tab on production should not look like a tab on a scratch
+directory. Its colour becomes a two-pixel stripe under that window's title bar,
+and its emoji prefixes the title, which is what the tab bar shows.
+
+## Command blocks
+
+The shell tells Vitra where each command starts and ends (OSC 133), and the
+gutter draws it: a rail per command in its own column — green when the command
+succeeded, red when it failed, amber while it runs — and, on the line you typed
+the command on, its exit code and how long it took (`exit 127`, `running · 8.1s`;
+a fast success is not labelled, because a column of `0.0s` is a column nobody
+reads). The rail spans the command and its output, and starts at the command
+itself, so the blank line between blocks stays blank.
+
+A command that runs for more than half a minute — a shell inside `ssh`, an
+editor — stops being amber and goes grey: it is still running, and it says so,
+but it is no longer an alert, and its clock drops to one tick a second.
+
+That needs shell integration, which Vitra installs by pointing `ZDOTDIR` at
+`~/.vitra/shell/zsh` - shims that source your own `.zshenv`, `.zprofile`,
+`.zshrc` and `.zlogin` first and then add the marks. Nothing of yours is edited.
+zsh only for now. The same integration puts a blank line before each prompt so
+the blocks are separated by space, sets `CLICOLOR` so `ls` and friends colour
+their output, and colours the prompt **only if you have not styled it yourself**.
+Each part is switchable:
+
+```toml
+[terminal]
+shell_integration = true   # emit the marks
+command_blocks = true      # draw the gutter
+block_spacing = true       # a blank line before each prompt
+color_prompt = true        # colour a stock, uncoloured prompt
+color_defaults = true      # CLICOLOR for ls and friends
 ```
 
 ## Attaching files
@@ -138,6 +213,10 @@ stays, and the reason is printed.
 | `Cmd-D` / `Cmd-Shift-D` | split right / down |
 | `Cmd-W` | close pane |
 | `Cmd-Shift-P` | preview panel |
+| `Cmd-P` | go to folder |
+| `Cmd-Shift-O` | new tab in a folder |
+| `Cmd-Ctrl-D` | add the current folder |
+| `Cmd-Ctrl-1`…`9` | open the first nine folders |
 | `Cmd-K` | clear |
 | `Cmd-C` / `Cmd-V` | copy / paste |
 

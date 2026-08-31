@@ -16,6 +16,12 @@ public enum PanelStyle {
     public static let defaultWidth: CGFloat = 420
     public static let minimumWidth: CGFloat = 260
 
+    /// How far either side of a divider still counts as grabbing it.
+    ///
+    /// The line itself is one pixel, which is right to look at and impossible to
+    /// hit; the pointer gets a band five times that.
+    public static let dividerGrab: CGFloat = 5
+
     public static func monospaced(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
         NSFont.monospacedSystemFont(ofSize: size, weight: weight)
     }

@@ -11,7 +11,8 @@ private func capture(
     // Generous because the suite runs tests in parallel: under contention a
     // shell can take seconds to start, and a short timeout turns that into a
     // flaky failure that looks like a real bug.
-    timeout: TimeInterval = 20
+    timeout: TimeInterval = 20,
+    workingDirectory: String? = nil
 ) throws -> (output: String, status: Int32?) {
     let collected = Output()
     let finished = DispatchSemaphore(value: 0)
@@ -19,7 +20,8 @@ private func capture(
         executable: executable,
         arguments: arguments,
         environment: ShellEnvironment.childEnvironment(),
-        size: size
+        size: size,
+        workingDirectory: workingDirectory
     )
     pty.startReading(
         on: DispatchQueue(label: "test.pty"),
@@ -138,5 +140,30 @@ private final class Output: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+@Test func theChildStartsInTheRequestedDirectory() throws {
+    let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("vitra-cwd-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let result = try capture("/bin/pwd", [], workingDirectory: directory.path)
+
+    // /bin/pwd reports the physical path, so the expectation is resolved too:
+    // /var is a symlink to /private/var on macOS.
+    #expect(result.output.contains(directory.resolvingSymlinksInPath().path))
+    #expect(result.status == 0)
+}
+
+@Test func aMissingWorkingDirectoryFailsToSpawn() {
+    #expect(throws: PTYError.self) {
+        _ = try PTY(
+            executable: "/bin/pwd",
+            environment: [:],
+            size: .default,
+            workingDirectory: "/nonexistent-\(UUID().uuidString)"
+        )
     }
 }
