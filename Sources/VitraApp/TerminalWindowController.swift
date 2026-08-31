@@ -361,6 +361,24 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     ///
     /// Without Cmd this is a `cd` typed into the terminal you are looking at —
     /// the shell moves, the sidebars follow it, and nothing new is opened.
+    /// A link clicked in a pane: the panel by default, the browser on Command.
+    ///
+    /// The panel is the point - a link in a terminal is usually something to
+    /// glance at, and glancing at it in the window it came from beats losing
+    /// the window. Command is the escape hatch to a real browser.
+    private func open(_ url: URL, external: Bool) {
+        guard !external else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        // A file is a preview; anything else is a page.
+        if url.isFileURL, let target = PreviewTarget.resolve(path: url.path) {
+            preview(target)
+            return
+        }
+        browser().load(url) { _ in }
+    }
+
     /// Takes the terminal along with the file list, when it can be taken.
     ///
     /// Browsing the panel is not a request to run anything: a pane with a
@@ -553,6 +571,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         }
         session.onBell = { NSSound.beep() }
         pane.onFocused = { [weak self] in self?.refreshDirectory() }
+        pane.onOpenLink = { [weak self] url, external in self?.open(url, external: external) }
         session.onCommandStarted = { [weak pane] in
             pane?.commandStarted()
         }

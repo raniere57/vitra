@@ -424,6 +424,9 @@ final class TerminalView: NSView, NSMenuItemValidation {
     /// Called when this pane takes the keyboard, so the window can point the
     /// sidebars at the folder this shell is in rather than the last one's.
     var onFocused: (() -> Void)?
+    /// A link the user clicked: the flag is true when they held Command, which
+    /// means their browser rather than the panel.
+    var onOpenLink: ((URL, Bool) -> Void)?
 
     /// Whether this pane should show which one has the keyboard.
     ///
@@ -485,10 +488,28 @@ final class TerminalView: NSView, NSMenuItemValidation {
         )
     }
 
+    /// The link under a mouse event, if the pointer is on one.
+    private func link(for event: NSEvent) -> URL? {
+        let position = cell(for: event)
+        let row = Int(position.row)
+        guard row < Int(snapshot.rows) else { return nil }
+
+        // One character per column, blanks included, so what comes back is in
+        // the same coordinates the click arrived in.
+        var characters: [Character] = []
+        characters.reserveCapacity(Int(snapshot.columns))
+        for column in 0 ..< Int(snapshot.columns) {
+            let cell = snapshot[column, row]
+            characters.append(snapshot.text(of: cell)?.first ?? " ")
+        }
+        return TerminalLink.match(in: characters, at: Int(position.column))?.url
+    }
+
     override func mouseDown(with event: NSEvent) {
         // Clicking a pane focuses it; with splits there is more than one.
         if window?.firstResponder !== self { window?.makeFirstResponder(self) }
         let position = cell(for: event)
+        pressedCell = position
         session.beginSelection(column: position.column, row: position.row, clickCount: event.clickCount)
     }
 
@@ -505,6 +526,36 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     override func mouseUp(with event: NSEvent) {
         session.endSelection()
+
+        // A click, not a drag: the pointer never left the cell it went down in,
+        // so nothing was being selected and a link under it was meant.
+        let position = cell(for: event)
+        let moved = pressedCell.map { $0 != position } ?? true
+        pressedCell = nil
+        guard !moved, event.clickCount == 1, let url = link(for: event) else { return }
+        session.clearSelection()
+        onOpenLink?(url, event.modifierFlags.contains(.command))
+    }
+
+    /// The pointing hand over a link, the I-beam everywhere else.
+    override func mouseMoved(with event: NSEvent) {
+        if link(for: event) != nil { NSCursor.pointingHand.set() } else { NSCursor.iBeam.set() }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let linkTracking { removeTrackingArea(linkTracking) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        linkTracking = area
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        NSCursor.arrow.set()
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -525,6 +576,8 @@ final class TerminalView: NSView, NSMenuItemValidation {
     }
 
     private var scrollAccumulator: CGFloat = 0
+    private var pressedCell: (column: UInt16, row: UInt16)?
+    private var linkTracking: NSTrackingArea?
 
     // MARK: - Clipboard
 
@@ -618,9 +671,30 @@ final class TerminalView: NSView, NSMenuItemValidation {
     /// point converts to a cell without flipping y at every call site.
     override var isFlipped: Bool { true }
 
+    /// The macOS line-editing chords, in the bytes a shell understands.
+    ///
+    /// Command is not a terminal modifier - there is no escape sequence for it -
+    /// so a terminal either translates these or the whole Mac convention stops
+    /// working inside it. Every shell's line editor already has the moves;
+    /// these are the keys the rest of the system uses to ask for them.
+    private static let commandChords: [UInt16: String] = [
+        51: "\u{15}",   // Backspace: kill to the start of the line (Ctrl-U)
+        117: "\u{0B}",  // Forward delete: kill to the end of it (Ctrl-K)
+        123: "\u{01}",  // Left: start of the line (Ctrl-A)
+        124: "\u{05}",  // Right: end of the line (Ctrl-E)
+    ]
+
     override func keyDown(with event: NSEvent) {
         // Command belongs to the app, not the terminal: it drives the menu.
-        guard !event.modifierFlags.contains(.command) else {
+        if event.modifierFlags.contains(.command) {
+            let others: NSEvent.ModifierFlags = [.option, .control, .shift]
+            if event.modifierFlags.isDisjoint(with: others),
+               let chord = Self.commandChords[event.keyCode] {
+                session.send(text: chord)
+                session.scrollToBottom()
+                session.clearSelection()
+                return
+            }
             super.keyDown(with: event)
             return
         }

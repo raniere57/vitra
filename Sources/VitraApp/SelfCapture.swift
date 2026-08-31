@@ -96,6 +96,45 @@ enum SelfCapture {
             }
         }
 
+        // A click at a point in the window, so behaviour that only a pointer can
+        // reach - a link in the grid - can be checked from an automated run.
+        if let point = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_CLICK"] {
+            let parts = point.split(separator: ",").compactMap { Double($0) }
+            if parts.count >= 2 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.75) {
+                    guard let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible })
+                    else { return }
+                    let modifiers: NSEvent.ModifierFlags =
+                        ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_CLICK_COMMAND"] != nil ? [.command] : []
+                    let location = NSPoint(x: parts[0], y: parts[1])
+                    // Handed to the view rather than the window: a synthetic
+                    // event has no real hit-testing behind it, and the pane is
+                    // the only thing a click in the grid can mean.
+                    let pane = window.contentView?.hitTest(location) as? TerminalView
+                        ?? (window.firstResponder as? TerminalView)
+                    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                        guard let event = NSEvent.mouseEvent(
+                            with: type,
+                            location: location,
+                            modifierFlags: modifiers,
+                            timestamp: ProcessInfo.processInfo.systemUptime,
+                            windowNumber: window.windowNumber,
+                            context: nil,
+                            eventNumber: 0,
+                            clickCount: 1,
+                            pressure: type == .leftMouseDown ? 1 : 0
+                        ) else { continue }
+                        if let pane {
+                            if type == .leftMouseDown { pane.mouseDown(with: event) } else { pane.mouseUp(with: event) }
+                        } else {
+                            window.sendEvent(event)
+                        }
+                    }
+                    FileHandle.standardError.write(Data("[self-shot] clicked \(location)\n".utf8))
+                }
+            }
+        }
+
         // Scrollback moved before the shot: a wheel gesture cannot be faked from
         // a headless run, and scrolling is the one behaviour a screenshot of the
         // live screen can never show.

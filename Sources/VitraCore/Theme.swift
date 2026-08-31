@@ -31,7 +31,9 @@ public struct Theme: Equatable, Sendable {
         name: "dark",
         background: TerminalColor(hex: "#0d0d11")!,
         foreground: TerminalColor(hex: "#d6d6dd")!,
-        cursor: TerminalColor(hex: "#e8e8ef")!,
+        // Not the text colour: a near-white block after near-white text reads
+        // as another character rather than as where the next one lands.
+        cursor: TerminalColor(hex: "#7cc0ff")!,
         palette: [
             "#15151a", "#e05561", "#8cc265", "#d6a75c",
             "#5aa5e0", "#c07ce8", "#4fb8b0", "#c0c0c8",
@@ -45,7 +47,7 @@ public struct Theme: Equatable, Sendable {
         name: "light",
         background: TerminalColor(hex: "#faf9f6")!,
         foreground: TerminalColor(hex: "#2b2b33")!,
-        cursor: TerminalColor(hex: "#2b2b33")!,
+        cursor: TerminalColor(hex: "#2b6cb0")!,
         palette: [
             "#3b3b45", "#c0392f", "#4a7d33", "#9a6a12",
             "#2b6cb0", "#7b3fa0", "#177f78", "#d8d6d0",

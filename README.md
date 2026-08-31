@@ -152,6 +152,22 @@ the pane — Claude Code, vim, less — nothing is typed at it: the tty says who
 holds the terminal, and the list moves on its own. The same rule decides what a
 folder in the left sidebar does: `cd` in a free pane, a new tab in a busy one.
 
+## Links
+
+A URL in the output is a link: one click opens it in the preview panel — a page
+you glance at without leaving the window — and `Cmd`-click hands it to your
+browser. The pointer turns into a hand over one. Scheme-less `www.` hosts count,
+a full stop at the end of a sentence does not, and a bracket the link never
+opened is left behind.
+
+## Keys the Mac already has
+
+`Cmd-Backspace`, `Cmd-Delete`, `Cmd-←` and `Cmd-→` do in a shell what they do
+everywhere else on the Mac: clear the line back, clear it forward, jump to the
+start, jump to the end. Command is not a terminal modifier — no escape sequence
+carries it — so these are translated into the control characters every line
+editor already answers to.
+
 ## Scrolling
 
 The wheel and the trackpad scroll the scrollback, and a thin thumb appears on
