@@ -115,6 +115,16 @@ enum MainMenu {
             keyEquivalent: key("sessions_sidebar", keybindings)
         )
         toggleSessions.keyEquivalentModifierMask = [.command, .option]
+
+        viewMenu.addItem(.separator())
+        // Cmd-+ is typed as Cmd-Shift-=, and Cmd-= without the shift is what
+        // most hands actually do, so both reach the same action.
+        viewMenu.addItem(withTitle: "Zoom In", action: #selector(AppDelegate.zoomIn(_:)), keyEquivalent: "+")
+        let zoomInPlain = viewMenu.addItem(withTitle: "Zoom In", action: #selector(AppDelegate.zoomIn(_:)), keyEquivalent: "=")
+        zoomInPlain.isHidden = true
+        zoomInPlain.keyEquivalentModifierMask = [.command]
+        viewMenu.addItem(withTitle: "Zoom Out", action: #selector(AppDelegate.zoomOut(_:)), keyEquivalent: "-")
+        viewMenu.addItem(withTitle: "Actual Size", action: #selector(AppDelegate.actualSize(_:)), keyEquivalent: "0")
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 

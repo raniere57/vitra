@@ -378,7 +378,9 @@ instead of hanging.
 
 `~/.vitra/config.toml`, written on first launch. Saving it applies to every open
 window immediately — font, theme, opacity, padding, scrollback and shell, with no
-restart. `Cmd-,` opens a settings window that edits the same file.
+restart. `Cmd-,` opens a settings window that edits the same file, and `Cmd-+`
+and `Cmd--` write the font size into it — zooming is a setting like any other,
+so it survives a restart and reaches every window at once.
 
 ```toml
 [font]
@@ -421,6 +423,7 @@ stays, and the reason is printed.
 | `Cmd-Shift-O` | new tab in a folder |
 | `Cmd-Ctrl-D` | add the current folder |
 | `Cmd-Ctrl-1`…`9` | open the first nine folders |
+| `Cmd-+` / `Cmd--` / `Cmd-0` | font bigger, smaller, back to 13pt |
 | `Cmd-K` | clear |
 | `Cmd-C` / `Cmd-V` | copy / paste |
 

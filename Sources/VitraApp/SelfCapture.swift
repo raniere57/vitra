@@ -75,8 +75,16 @@ enum SelfCapture {
         // other keys that carry no character.
         if let chord = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_CHORD"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.7) {
-                let parts = chord.split(separator: "+")
-                guard let code = parts.last.flatMap({ UInt16($0) }) else { return }
+                // "command+=" carries a character; "shift+116" a key code. The
+                // last field is one or the other.
+                let parts = chord.split(separator: "+", omittingEmptySubsequences: false)
+                // A single character is a character ("command+0"); two digits or
+                // more is a key code ("shift+116"), which is how the keys that
+                // carry no character are named.
+                let last = String(parts.last ?? "")
+                let asCode = last.count > 1 ? UInt16(last) : nil
+                let code = asCode ?? 0
+                let characters = asCode == nil ? last : ""
                 var flags: NSEvent.ModifierFlags = []
                 if parts.contains("shift") { flags.insert(.shift) }
                 if parts.contains("command") { flags.insert(.command) }
@@ -89,11 +97,14 @@ enum SelfCapture {
                     timestamp: ProcessInfo.processInfo.systemUptime,
                     windowNumber: NSApp.keyWindow?.windowNumber ?? 0,
                     context: nil,
-                    characters: "",
-                    charactersIgnoringModifiers: "",
+                    characters: characters,
+                    charactersIgnoringModifiers: characters,
                     isARepeat: false,
                     keyCode: code
                 ) else { return }
+                // A Command chord belongs to the menu, which is what turns it
+                // into an action; anything else goes straight to the pane.
+                if flags.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
                 let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible })
                 (window?.firstResponder as? TerminalView)?.keyDown(with: event)
             }

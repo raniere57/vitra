@@ -225,6 +225,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The sizes zooming will stop at, in points.
+    private static let zoomLimits: ClosedRange<Double> = 8...32
+
+    @MainActor
+    @objc func zoomIn(_ sender: Any?) { zoom(to: config.fontSize + 1) }
+
+    @MainActor
+    @objc func zoomOut(_ sender: Any?) { zoom(to: config.fontSize - 1) }
+
+    @MainActor
+    @objc func actualSize(_ sender: Any?) { zoom(to: Config().fontSize) }
+
+    /// Changes the font size everywhere, through the file like every other
+    /// setting: a zoom that only lived in memory would be undone by the next
+    /// save from the preferences window.
+    @MainActor
+    private func zoom(to size: Double) {
+        let wanted = min(max(size, Self.zoomLimits.lowerBound), Self.zoomLimits.upperBound)
+        guard wanted != config.fontSize else { return }
+        var edited = config
+        edited.fontSize = wanted
+        try? edited.toml().write(to: Config.path, atomically: true, encoding: .utf8)
+        configurationChanged(edited, [])
+    }
+
     /// Serves MCP tool calls that `vitra mcp` forwards over the unix socket.
     @MainActor
     private func startBridge() {
