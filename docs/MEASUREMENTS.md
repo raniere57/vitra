@@ -177,3 +177,29 @@ Reproduce:
 printf '\033]7337;file=%s\a' "$PWD/page.html"   # inside Vitra
 ps -axo pid,rss,comm | grep WebKit.WebContent   # before and after Cmd-Shift-P
 ```
+
+## Phase 4 — browser and MCP
+
+| State | phys_footprint | peak |
+|---|---|---|
+| idle, bridge listening, no browser | **33 MB** | 36 MB |
+| browser open on a local page | **41 MB** | 45 MB |
+| that page's `WebKit.WebContent` process | **16 MB** | – |
+
+57 MB across both processes with a page loaded and automated, against a 150 MB
+budget. The unix socket costs nothing measurable: it is one listening descriptor
+and a dispatch source, and `vitra mcp` is a separate short-lived process that
+exists only while the agent's client holds it open.
+
+### Isolation, verified rather than asserted
+
+The claim that automation cannot be seen by the page was checked by asking both
+sides the same question:
+
+```
+browser_console  →  [log] page world sees __vitra as: undefined
+browser_eval     →  object
+```
+
+The page's own script, running in the page world, cannot see the ref registry
+that `browser_click` and `browser_type` depend on.

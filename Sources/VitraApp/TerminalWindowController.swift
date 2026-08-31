@@ -227,6 +227,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         openPanel().show(target)
     }
 
+    /// The browser in the side panel, opening the panel if it is closed.
+    func browser() -> BrowserView {
+        openPanel().browser()
+    }
+
     /// `Cmd-Shift-P`: opens the panel, or closes it and releases its contents.
     func togglePanel() {
         if panel == nil { _ = openPanel() } else { closePanel() }

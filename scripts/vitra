@@ -3,6 +3,7 @@
 # vitra — talk to the running Vitra from inside it.
 #
 #   vitra open <file>...   show files in the preview panel
+#   vitra mcp              serve the MCP tools on stdio (spawned by an agent)
 #
 # Files are handed to the app as open requests, which the front window turns
 # into previews. Vitra is launched if it is not already running.
@@ -10,8 +11,14 @@
 set -eu
 
 usage() {
-  echo "usage: vitra open <file>..." >&2
+  echo "usage: vitra open <file>... | vitra mcp" >&2
   exit 64
+}
+
+# The app binary sits beside this script's directory, inside the bundle.
+app_binary() {
+  dirname="$(cd "$(dirname "$0")" && pwd)"
+  echo "$dirname/../MacOS/Vitra"
 }
 
 [ $# -ge 1 ] || usage
@@ -24,6 +31,9 @@ case "$1" in
       [ -e "$file" ] || { echo "vitra: no such file: $file" >&2; exit 66; }
     done
     exec open -a Vitra "$@"
+    ;;
+  mcp)
+    exec "$(app_binary)" mcp
     ;;
   *)
     usage

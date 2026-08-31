@@ -55,11 +55,48 @@ vitra open shot.png
 printf '\033]7337;file=%s\a' "$PWD/shot.png"   # from any program in the terminal
 ```
 
-…and the MCP `preview_file` tool, once the embedded server lands.
+…and the MCP `preview_file` tool.
 
 Relative paths are resolved against the working directory of the job in the
 foreground. Only existing regular files open: symlinks are followed first, and
 directories and devices are refused.
+
+## The MCP server
+
+Vitra serves eight tools to an agent running inside it:
+
+```bash
+claude mcp add vitra -- vitra mcp
+```
+
+| Tool | What it does |
+|---|---|
+| `preview_file` | show a file in the panel |
+| `browser_open` | load a URL in the browser panel |
+| `browser_snapshot` | list the visible, usable elements, each with a ref |
+| `browser_click` | click a ref |
+| `browser_type` | type into a ref, optionally submitting |
+| `browser_eval` | run JavaScript and get the result |
+| `browser_screenshot` | save a PNG and return its path |
+| `browser_console` | read the page's console output |
+
+`vitra mcp` is the same binary with no GUI. The agent's client spawns it, and it
+forwards tool calls to the running window over `~/.vitra/vitra.sock`, which is
+created with mode 0600. It lives and dies with the agent's session; nothing runs
+in the background. With no window open, the tools answer "Vitra is not running"
+instead of hanging.
+
+### What the tools cannot do
+
+- **No shell.** No tool runs a command. The terminal is yours.
+- **No file access beyond what you name.** `preview_file` resolves symlinks and
+  refuses anything that is not an existing regular file. Web pages are loaded
+  with read access to the single file being shown, not to its directory.
+- **No reach into the page's JavaScript.** `browser_snapshot`, `browser_click`,
+  `browser_type` and `browser_eval` run in a WebKit isolated world: they see the
+  DOM, the page does not see them. Verified, not assumed — a page asking for
+  `typeof window.__vitra` gets `undefined` while the same expression in the
+  isolated world answers `object`.
 
 ## Keys
 

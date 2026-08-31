@@ -56,6 +56,34 @@ public final class PreviewPanel: NSView {
         content = view
     }
 
+    /// The browser, already on screen or created now.
+    ///
+    /// Opening a file preview replaces it, which is what makes WebKit leave
+    /// memory when the agent is finished with a page.
+    public func browser() -> BrowserView {
+        if let existing = content as? BrowserView { return existing }
+
+        clearContent()
+        emptyState?.removeFromSuperview()
+        emptyState = nil
+
+        let browser = BrowserView(frame: contentContainer.bounds)
+        browser.autoresizingMask = [.width, .height]
+        browser.onPageChanged = { [weak self] title, host in
+            self?.titleLabel.stringValue = title.isEmpty ? "Browser" : title
+            self?.detailLabel.stringValue = host
+        }
+        contentContainer.addSubview(browser)
+        content = browser
+
+        titleLabel.stringValue = "Browser"
+        detailLabel.stringValue = ""
+        return browser
+    }
+
+    /// The browser if it is what the panel is showing, otherwise nil.
+    public var currentBrowser: BrowserView? { content as? BrowserView }
+
     /// Drops the current preview and everything it holds open.
     ///
     /// Called when the panel is hidden, so a web preview does not keep a WebKit

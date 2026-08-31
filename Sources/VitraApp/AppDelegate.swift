@@ -1,5 +1,6 @@
 import AppKit
 import Metal
+import VitraBridge
 import VitraCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -9,6 +10,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Files handed to the app before it had a window to show them in.
     private var pendingPreviews: [URL] = []
+
+    private var bridge: SocketServer?
+
+    /// The window MCP tools act on.
+    var frontController: TerminalWindowController? { currentController }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let device = MTLCreateSystemDefaultDevice() else {
@@ -25,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = MainMenu.build()
         if pendingPreviews.isEmpty { newWindow(nil) }
         showPendingPreviews()
+        startBridge()
         SelfCapture.scheduleIfRequested()
     }
 
@@ -45,6 +52,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func splitVertically(_ sender: Any?) {
         currentController?.splitFocusedPane(vertical: false)
+    }
+
+    /// Serves MCP tool calls that `vitra mcp` forwards over the unix socket.
+    @MainActor
+    private func startBridge() {
+        let server = MCPServer(executor: GUIToolExecutor(runner: ToolRunner(app: self)))
+        let socket = SocketServer { request in await server.handle(request) }
+        do {
+            try socket.start()
+            bridge = socket
+        } catch {
+            // Not fatal: a terminal that cannot serve tools is still a terminal.
+            FileHandle.standardError.write(Data("vitra: bridge unavailable: \(error)\n".utf8))
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        bridge?.stop()
     }
 
     @objc func togglePreviewPanel(_ sender: Any?) {
