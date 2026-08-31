@@ -120,7 +120,18 @@ public enum ClaudeSessionStore {
             .sorted { $0.modified > $1.modified }
             .prefix(limit)
 
-        let all = files.compactMap { session(at: $0.url, modified: $0.modified, index: index) }
+        var seen: Set<String> = []
+        let all = files
+            .filter { !index.superseded.contains($0.url.deletingPathExtension().lastPathComponent) }
+            .compactMap { session(at: $0.url, modified: $0.modified, index: index) }
+            .filter { session in
+                // A session the app knows is listed as the app lists it. One it
+                // does not know can be the same conversation resumed twice, two
+                // files with the same opening prompt: the newest is the one to
+                // reopen, and the files are already newest first.
+                guard index[session.id] == nil else { return true }
+                return seen.insert(session.projectPath + "\u{0}" + session.title).inserted
+            }
         let hidden = all.filter(\.isArchived).count
         return Listing(
             sessions: includeArchived ? all : all.filter { !$0.isArchived },
@@ -144,7 +155,7 @@ public enum ClaudeSessionStore {
     static func session(
         at url: URL,
         modified: Date,
-        index: [String: SessionIndexEntry] = [:]
+        index: SessionIndex = .empty
     ) -> ClaudeSession? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
@@ -169,12 +180,20 @@ public enum ClaudeSessionStore {
         // and the one they renamed by hand when they renamed anything.
         let id = url.deletingPathExtension().lastPathComponent
         let entry = index[id]
-        let title = entry?.title
+
+        // What a compaction leaves behind is not a session: it opens with a
+        // summary the CLI wrote, not with anything the user said. The app lists
+        // the conversation once, under the id still running; only when the app
+        // itself points at this file is it the conversation and not a fragment.
+        if headFields.isContinuation, entry == nil { return nil }
+
+        guard let title = entry?.title
             ?? tailFields.title
             ?? headFields.title
             ?? tailFields.prompt
             ?? headFields.prompt
-            ?? id
+        // Nothing said, nothing named: a uuid in the list is a row nobody clicks.
+        else { return nil }
 
         return ClaudeSession(
             id: id,
@@ -189,7 +208,12 @@ public enum ClaudeSessionStore {
         var title: String?
         var cwd: String?
         var prompt: String?
+        /// The first thing said here was the CLI summarising an older session.
+        var isContinuation = false
     }
+
+    /// How a compacted session opens, verbatim.
+    private static let continuationMarker = "This session is being continued from a previous conversation"
 
     /// Scans whole JSON lines out of a slice, ignoring the partial ones the
     /// slice necessarily starts or ends with.
@@ -211,7 +235,11 @@ public enum ClaudeSessionStore {
                 fields.prompt = readable(prompt)
             }
             if fields.prompt == nil, object["type"] as? String == "user" {
-                fields.prompt = userText(in: object).flatMap(readable)
+                let text = userText(in: object)
+                if fields.title == nil, text?.hasPrefix(continuationMarker) == true {
+                    fields.isContinuation = true
+                }
+                fields.prompt = text.flatMap(readable)
             }
         }
         return fields

@@ -198,3 +198,89 @@ private func makeStore() throws -> URL {
     #expect(session.projectName == "farol")
     #expect(session.worktree == nil)
 }
+
+/// Writes the little JSON the desktop app keeps beside each session.
+private func writeIndexEntry(
+    in store: URL,
+    cliSessionId: String,
+    title: String? = nil,
+    isArchived: Bool = false,
+    priorCliSessionIds: [String] = []
+) throws {
+    var object: [String: Any] = [
+        "cliSessionId": cliSessionId,
+        "isArchived": isArchived,
+        "priorCliSessionIds": priorCliSessionIds,
+    ]
+    if let title { object["title"] = title }
+    try JSONSerialization.data(withJSONObject: object)
+        .write(to: store.appendingPathComponent("local_\(cliSessionId).json"))
+}
+
+@Test func aSupersededSegmentIsNotListedBesideTheSessionThatReplacedIt() throws {
+    let store = try makeStore()
+    defer { try? FileManager.default.removeItem(at: store) }
+    let now = Date()
+    _ = try writeSession(
+        in: store,
+        project: "-Users-me-Dev-farol",
+        id: "before-compaction",
+        lines: [["type": "user", "cwd": "/Users/me/Dev/farol", "message": ["content": "começa aqui"]]],
+        modified: now.addingTimeInterval(-3600)
+    )
+    _ = try writeSession(
+        in: store,
+        project: "-Users-me-Dev-farol",
+        id: "still-running",
+        lines: [["type": "user", "cwd": "/Users/me/Dev/farol", "message": ["content": "continua"]]],
+        modified: now
+    )
+    try writeIndexEntry(
+        in: store,
+        cliSessionId: "still-running",
+        title: "Farol",
+        priorCliSessionIds: ["before-compaction"]
+    )
+
+    let sessions = ClaudeSessionStore.recent(in: store, indexDirectory: store).sessions
+
+    #expect(sessions.map(\.id) == ["still-running"])
+}
+
+@Test func whatACompactionLeftBehindIsNotListedAsASession() throws {
+    let store = try makeStore()
+    defer { try? FileManager.default.removeItem(at: store) }
+    _ = try writeSession(
+        in: store,
+        project: "-Users-me-Dev-farol",
+        id: "fragment",
+        lines: [
+            [
+                "type": "user",
+                "cwd": "/Users/me/Dev/farol",
+                "message": ["content": "This session is being continued from a previous conversation that ran out of context."],
+            ],
+        ]
+    )
+
+    #expect(ClaudeSessionStore.recent(in: store, indexDirectory: store).sessions.isEmpty)
+}
+
+@Test func theSameConversationResumedTwiceIsListedOnce() throws {
+    let store = try makeStore()
+    defer { try? FileManager.default.removeItem(at: store) }
+    let now = Date()
+    for (id, age) in [("first-run", -7200.0), ("resumed", 0.0)] {
+        _ = try writeSession(
+            in: store,
+            project: "-Users-me-Dev-farol",
+            id: id,
+            lines: [["type": "user", "cwd": "/Users/me/Dev/farol", "message": ["content": "arruma o importador"]]],
+            modified: now.addingTimeInterval(age)
+        )
+    }
+
+    let sessions = ClaudeSessionStore.recent(in: store, indexDirectory: store).sessions
+
+    #expect(sessions.map(\.id) == ["resumed"])
+}

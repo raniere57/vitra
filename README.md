@@ -113,6 +113,15 @@ older dated — because four sessions of the same project are told apart by *whe
 and not by "4 days ago". A session run in a worktree gets the worktree as a chip
 beside the date.
 
+A compaction or a resume starts a *new* transcript, so one conversation can
+leave a dozen files behind — which is why the list showed twenty-five sessions
+of a project the app lists ten of. The app's index names the ids it has replaced
+(`priorCliSessionIds`) and those are dropped; a transcript the index never heard
+of is dropped too when it opens with the CLI's own "This session is being
+continued…" summary, and two files with the same opening prompt in the same
+project collapse to the newest — the one worth reopening. What survives is a
+conversation, not a segment of one.
+
 Sessions archived in the desktop app stay out of the list. The app keeps one
 small JSON per session in `~/Library/Application Support/Claude/`, and that is
 the only place `isArchived` — and the title the user gave the session — exists;

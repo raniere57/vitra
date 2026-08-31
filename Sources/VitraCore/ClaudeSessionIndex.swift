@@ -17,6 +17,27 @@ public struct SessionIndexEntry: Sendable, Equatable {
     }
 }
 
+/// The whole index, as the sidebar needs it.
+public struct SessionIndex: Sendable {
+    public let entries: [String: SessionIndexEntry]
+    /// Session ids the app has since replaced.
+    ///
+    /// A compaction, or a resume, starts a new transcript and pushes the old id
+    /// into `priorCliSessionIds`. Those files are fragments of a conversation
+    /// the app lists once, under the id that is still live - listing them too is
+    /// what turned ten sessions of a project into twenty-five.
+    public let superseded: Set<String>
+
+    public static let empty = SessionIndex(entries: [:], superseded: [])
+
+    public init(entries: [String: SessionIndexEntry], superseded: Set<String>) {
+        self.entries = entries
+        self.superseded = superseded
+    }
+
+    public subscript(id: String) -> SessionIndexEntry? { entries[id] }
+}
+
 public enum ClaudeSessionIndex {
     public static var directory: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -29,14 +50,15 @@ public enum ClaudeSessionIndex {
     /// after its own id, so the mapping runs through `cliSessionId`. A missing
     /// or unreadable index is not an error: it means the app was never used
     /// here, and every transcript is simply shown.
-    public static func load(from directory: URL = ClaudeSessionIndex.directory) -> [String: SessionIndexEntry] {
+    public static func load(from directory: URL = ClaudeSessionIndex.directory) -> SessionIndex {
         var entries: [String: SessionIndexEntry] = [:]
+        var superseded: Set<String> = []
         let manager = FileManager.default
         guard let walker = manager.enumerator(
             at: directory,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
-        ) else { return entries }
+        ) else { return .empty }
 
         for case let url as URL in walker {
             guard url.pathExtension == "json", url.lastPathComponent.hasPrefix("local_") else { continue }
@@ -50,7 +72,9 @@ public enum ClaudeSessionIndex {
                 title: title,
                 isArchived: object["isArchived"] as? Bool ?? false
             )
+            superseded.formUnion((object["priorCliSessionIds"] as? [String] ?? []).filter { !$0.isEmpty })
         }
-        return entries
+        // An id that is live somewhere wins over being another entry's past.
+        return SessionIndex(entries: entries, superseded: superseded.subtracting(entries.keys))
     }
 }
