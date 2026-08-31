@@ -65,14 +65,17 @@ import Testing
 @Test func anUnknownShellIsLeftAlone() {
     let environment = ShellEnvironment.childEnvironment(shell: "/bin/bash", shellIntegration: true)
 
-    #expect(environment["ZDOTDIR"] == nil)
+    // Not `== nil`: a user with their own ZDOTDIR keeps it. What must never
+    // happen is the shims being pointed at for a shell that cannot read them.
+    #expect(environment["ZDOTDIR"] != ShellIntegration.directory.path)
     #expect(environment["VITRA_SHELL_INTEGRATION"] == nil)
 }
 
 @Test func integrationCanBeTurnedOff() {
     let environment = ShellEnvironment.childEnvironment(shell: "/bin/zsh", shellIntegration: false)
 
-    #expect(environment["ZDOTDIR"] == nil)
+    #expect(environment["ZDOTDIR"] != ShellIntegration.directory.path)
+    #expect(environment["VITRA_SHELL_INTEGRATION"] == nil)
 }
 
 /// The marks have to survive a second source: a zsh configuration that sources
@@ -87,4 +90,28 @@ import Testing
     #expect(script.contains("VITRA_INTEGRATION_LOADED"))
     #expect(script.contains("133;B"))
     #expect(script.contains("add-zsh-hook precmd"))
+}
+
+/// A Vitra opened from inside Vitra inherits ZDOTDIR pointing at the shims.
+/// Taken at face value it makes `.zshenv` source itself, and zsh answers with
+/// "job table full or recursion limit exceeded" once per startup file.
+@Test func shimsNeverDeferToThemselves() {
+    let shims = ShellIntegration.directory.path
+    let environment = ShellIntegration.environment(
+        shell: "/bin/zsh",
+        current: ["ZDOTDIR": shims, "VITRA_ZDOTDIR": "/Users/someone", "HOME": "/Users/someone"]
+    )
+
+    #expect(environment["ZDOTDIR"] == shims)
+    #expect(environment["VITRA_ZDOTDIR"] == "/Users/someone")
+}
+
+/// Nested with nothing remembered, home is the honest fallback.
+@Test func aNestedShellWithoutAnOriginalFallsBackToHome() {
+    let environment = ShellIntegration.environment(
+        shell: "/bin/zsh",
+        current: ["ZDOTDIR": ShellIntegration.directory.path, "HOME": "/Users/someone"]
+    )
+
+    #expect(environment["VITRA_ZDOTDIR"] == "/Users/someone")
 }

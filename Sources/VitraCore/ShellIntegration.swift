@@ -38,7 +38,15 @@ public enum ShellIntegration {
         guard supports(shell: shell), (try? install()) != nil else { return [:] }
 
         // Where the user's own zsh files live, so the shims can defer to them.
-        let original = current["ZDOTDIR"] ?? current["HOME"]
+        //
+        // A Vitra launched from inside Vitra - or anything started from one of
+        // its shells - already carries ZDOTDIR pointing at the shims. Taking
+        // that as "the user's own files" makes `.zshenv` source itself, and zsh
+        // says so once per file: "job table full or recursion limit exceeded".
+        // The answer the nested case already knows is VITRA_ZDOTDIR.
+        let inherited = current["ZDOTDIR"]
+        let original = (inherited == directory.path ? current["VITRA_ZDOTDIR"] : inherited)
+            ?? current["HOME"]
             ?? FileManager.default.homeDirectoryForCurrentUser.path
 
         return [

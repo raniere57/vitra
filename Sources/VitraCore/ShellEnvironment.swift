@@ -70,6 +70,20 @@ public enum ShellEnvironment {
             env.removeValue(forKey: stale)
         }
 
+        // Vitra's own integration variables describe the pane this process was
+        // launched from, not the one being opened - a Vitra started from inside
+        // Vitra inherits them, and so does anything else launched from one of
+        // its shells. They are set again below when this pane wants them; the
+        // user's real zsh directory is kept, since that is the one thing here
+        // the shims cannot work out for themselves.
+        let inheritedZDOTDIR = env["VITRA_ZDOTDIR"]
+        for own in ["VITRA_SHELL_INTEGRATION", "VITRA_ZDOTDIR", "VITRA_BLOCK_SPACING", "VITRA_PROMPT_COLOR"] {
+            env.removeValue(forKey: own)
+        }
+        if env["ZDOTDIR"] == ShellIntegration.directory.path {
+            env["ZDOTDIR"] = inheritedZDOTDIR
+        }
+
         env["TERM"] = term
         env["COLORTERM"] = "truecolor"
         env["TERM_PROGRAM"] = "vitra"

@@ -75,9 +75,16 @@ pid_t vitra_spawn_on_tty(
     if (dup2(fd, 0) < 0 || dup2(fd, 1) < 0 || dup2(fd, 2) < 0) child_failed();
     if (fd > 2) close(fd);
 
-    // Nothing the app had open belongs to the shell — including the pty's own
-    // master, which a shell would otherwise pass on to everything it runs.
+    // Nothing the app had open belongs to the shell - the pty's own master
+    // above all, which a shell would otherwise hand to everything it runs.
+    // The loop is bounded rather than run to getdtablesize(): a GUI process on
+    // macOS carries a file limit of about a million, and closing a million
+    // descriptors one by one is most of a second of the shell's startup.
+    // Descriptors are handed out lowest-first, so a few hundred open files
+    // never reach four figures - and this app's own are close-on-exec anyway.
+    // (Darwin has no closefrom.)
     int limit = getdtablesize();
+    if (limit > 4096 || limit < 0) limit = 4096;
     for (int i = 3; i < limit; i++) {
         if (i != child_report_fd) close(i);
     }

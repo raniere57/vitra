@@ -86,6 +86,12 @@ public final class PTY: @unchecked Sendable {
             throw PTYError.openFailed(errno: errno)
         }
 
+        // Neither descriptor belongs to anything the shell will run: close-on-exec
+        // is what keeps the app's pty out of every child process, and it is
+        // cheaper than a child closing a million descriptors by hand.
+        _ = fcntl(master, F_SETFD, FD_CLOEXEC)
+        _ = fcntl(slave, F_SETFD, FD_CLOEXEC)
+
         // ttyname() returns a pointer into per-thread storage that the next call
         // overwrites, so the path is copied before it is handed to the spawn.
         guard let name = ttyname(slave).map({ strdup($0) }) else {
