@@ -130,6 +130,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         sidebar.onOpenDirectory = { [weak self] url, newTab in
             self?.openDirectory(url, newTab: newTab)
         }
+        sidebar.onOpenRemote = { bookmark in
+            (NSApp.delegate as? AppDelegate)?.openTab(for: bookmark)
+        }
         sidebar.onSessionsLoaded = { [weak self] in
             self?.refreshDirectory()
         }
@@ -496,6 +499,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// grounds that the window was named elsewhere, which left the title bar
     /// saying nothing at all about the most useful thing it knows.
     private func breadcrumb() -> String {
+        // A remote tab's local shell is sitting in the home directory while the
+        // user is on another machine; the favourite is the honest answer.
+        if let bookmark, bookmark.isRemote { return bookmark.displayPath }
         guard let directory = focusedPane?.session.currentDirectory else {
             return bookmark?.name ?? ""
         }

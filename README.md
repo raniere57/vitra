@@ -30,7 +30,9 @@ em qualquer outro terminal.
 - **Sessões** — cada conversa do Claude Code na máquina, agrupada por projeto,
   pesquisável, retomada numa aba nova. A que você está é marcada.
 - **Pastas** — diretórios favoritos num trilho na borda esquerda, cada um com
-  ícone, cor e tema próprios; um clique abre uma aba já lá.
+  ícone, cor e tema próprios; um clique abre uma aba já lá. Um favorito também
+  pode ser um **servidor SSH**: o clique abre a aba já conectada, no diretório
+  que você anotou.
 - **Anexos** — solte um arquivo ou cole uma imagem e o caminho é digitado no
   prompt. Bytes nunca chegam perto do pty.
 - **Painel de visualização** — HTML, Markdown, imagens, PDFs e um navegador de
@@ -98,6 +100,15 @@ vitra open relatorio.html    # mostra um arquivo no painel de visualização
 Os diretórios favoritos vivem em `~/.vitra/bookmarks.json`, escrito pelo app.
 Cada um carrega um emoji, uma cor opcional, um tema opcional e quantas etiquetas
 você quiser, e abrir um começa uma aba cujo shell já está lá.
+
+Um favorito pode morar em outra máquina. Preencha o **SSH host** na janela de
+pastas — `usuário@máquina`, ou um apelido do seu `~/.ssh/config` — e o campo do
+diretório passa a ser o diretório de lá. Clicar nele abre uma aba que roda
+`ssh -t <host> 'cd "<diretório>" && exec "$SHELL" -l'`: um shell de login
+naquela pasta, no servidor, e a barra de título mostra `host:/diretório`. Nada é
+lido do disco daqui — o caminho de um favorito remoto nunca é tratado como
+caminho local — e a autenticação continua sendo a do seu ssh: o Vitra não guarda
+senha nem chave, só a linha que ele digita.
 
 Nada aqui fica escondido atrás de um atalho. Os favoritos vivem num **trilho** na
 borda esquerda — um clique por pasta, a pasta da própria janela acesa na cor

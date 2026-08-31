@@ -206,6 +206,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// switcher is for: the windows stay together and the tab bar becomes the
     /// list of what is open.
     func openTab(for bookmark: Bookmark, running command: String? = nil, session: String? = nil) {
+        // A remote favourite opens a local shell that immediately becomes an
+        // ssh session; the working directory stays home, because the path in
+        // the favourite belongs to the other machine.
+        let command = command ?? bookmark.remoteCommand
         makeWindow(asTabOf: currentController?.window, bookmark: bookmark, running: command, session: session)
     }
 

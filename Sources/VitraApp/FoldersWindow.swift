@@ -83,6 +83,15 @@ final class FoldersModel: ObservableObject {
         commit()
     }
 
+    /// A server, added empty. There is no panel to pick a machine with, so the
+    /// editor's fields are where it gets filled in.
+    func addRemote() {
+        let bookmark = Bookmark(name: "New server", path: "", host: "hostname")
+        bookmarks.append(bookmark)
+        selection = bookmark.id
+        commit()
+    }
+
     func remove() {
         guard let selection else { return }
         bookmarks.removeAll { $0.id == selection }
@@ -141,6 +150,8 @@ struct FoldersView: View {
 
             HStack(spacing: 0) {
                 Button(action: model.add) { Image(systemName: "plus") }
+                Button(action: model.addRemote) { Image(systemName: "network") }
+                    .help("Add an SSH server")
                 Button(action: model.remove) { Image(systemName: "minus") }
                     .disabled(model.selection == nil)
                 Spacer()
@@ -182,11 +193,27 @@ struct FolderEditor: View {
         Form {
             Section {
                 TextField("Name", text: $bookmark.name)
-                LabeledContent("Path") {
-                    Text(bookmark.displayPath)
+                TextField("SSH host", text: hostBinding, prompt: Text("user@host, or an ssh alias"))
+                if bookmark.isRemote {
+                    // Editable, because the directory is on the other machine:
+                    // there is nothing here to pick it from.
+                    TextField("Directory", text: $bookmark.path, prompt: Text("/srv/app"))
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(bookmark.exists ? .secondary : Color.red)
-                        .textSelection(.enabled)
+                    if let command = bookmark.remoteCommand {
+                        LabeledContent("Opens") {
+                            Text(command.trimmingCharacters(in: .newlines))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                } else {
+                    LabeledContent("Path") {
+                        Text(bookmark.displayPath)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(bookmark.exists ? .secondary : Color.red)
+                            .textSelection(.enabled)
+                    }
                 }
             }
 
@@ -244,7 +271,17 @@ struct FolderEditor: View {
         .onAppear { tagText = bookmark.tags.joined(separator: ", ") }
         .onDisappear(perform: commitTags)
         .onChange(of: bookmark.name) { _, _ in onCommit() }
+        .onChange(of: bookmark.path) { _, _ in onCommit() }
         .onChange(of: bookmark.emoji) { _, _ in onCommit() }
+    }
+
+    /// The host as a plain string: empty means the favourite is a local folder,
+    /// which is what `nil` means on the model.
+    private var hostBinding: Binding<String> {
+        Binding(
+            get: { bookmark.host ?? "" },
+            set: { bookmark.host = $0.isEmpty ? nil : $0; onCommit() }
+        )
     }
 
     private var themeBinding: Binding<String> {

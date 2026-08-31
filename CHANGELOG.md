@@ -5,6 +5,13 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+- Um favorito pode ser um **servidor SSH**. Preenchendo o campo de host na
+  janela de pastas, o favorito passa a apontar para outra máquina, aparece no
+  trilho e na árvore como qualquer pasta, e clicar nele abre uma aba rodando
+  `ssh -t <host> 'cd "<diretório>" && exec "$SHELL" -l'`. O caminho de um
+  favorito remoto nunca é usado como diretório local, e a barra de título mostra
+  `host:/diretório`.
+
 - A barra de título sempre nomeia a pasta. Antes ela ficava vazia justamente no
   caso mais comum — o shell parado na raiz da pasta da janela —, que era quando
   ela tinha mais a dizer.

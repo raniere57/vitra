@@ -69,3 +69,42 @@ import Testing
 
     #expect(BookmarkStore(path: path).load().isEmpty)
 }
+
+@Test("a remote favourite opens an ssh session in its directory")
+func remoteBookmarkRunsSSH() throws {
+    let path = "/home/darlan/it's here"
+    let bookmark = Bookmark(name: "Vannak", path: path, host: "VANNAK")
+    #expect(bookmark.isRemote)
+    #expect(bookmark.exists == false)
+    #expect(bookmark.displayPath == "VANNAK:\(path)")
+
+    // What ssh is handed is one word, whatever the path holds: the local shell
+    // is asked to print it in ssh's place.
+    let command = try #require(bookmark.remoteCommand)
+    #expect(command.hasPrefix("ssh -t VANNAK "))
+    let script = command
+        .replacingOccurrences(of: "ssh -t VANNAK ", with: "printf %s ")
+        .trimmingCharacters(in: .newlines)
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/sh")
+    process.arguments = ["-c", script]
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    try process.run()
+    let printed = String(
+        data: pipe.fileHandleForReading.readDataToEndOfFile(),
+        encoding: .utf8
+    )
+    process.waitUntilExit()
+    #expect(printed == "cd \"\(path)\" && exec \"$SHELL\" -l")
+}
+
+@Test("a remote favourite without a directory is a bare login")
+func remoteBookmarkWithoutDirectory() throws {
+    #expect(Bookmark(name: "Box", path: "", host: "box").remoteCommand == "ssh box\n")
+}
+
+@Test("a local favourite has no command")
+func localBookmarkHasNoCommand() throws {
+    #expect(Bookmark(name: "Dev", path: "~/Dev").remoteCommand == nil)
+}

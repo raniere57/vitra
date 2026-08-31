@@ -34,6 +34,12 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
         set { tree.onOpen = newValue }
     }
 
+    /// A remote favourite in the tree was chosen.
+    var onOpenRemote: ((Bookmark) -> Void)? {
+        get { tree.onOpenRemote }
+        set { tree.onOpenRemote = newValue }
+    }
+
     /// What the expanded half of the sidebar is showing.
     enum Mode { case folders, sessions }
 

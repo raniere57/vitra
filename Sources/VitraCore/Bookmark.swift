@@ -21,6 +21,10 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
     /// look alike.
     public var theme: String?
     public var tags: [String]
+    /// An SSH destination — `user@host`, or an alias from `~/.ssh/config` — when
+    /// the favourite is a machine rather than a directory on this one. `path` is
+    /// then the directory over there, and nothing local is ever read from it.
+    public var host: String?
 
     public init(
         id: UUID = UUID(),
@@ -30,7 +34,8 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
         icon: String? = nil,
         colorHex: String? = nil,
         theme: String? = nil,
-        tags: [String] = []
+        tags: [String] = [],
+        host: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -40,6 +45,31 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
         self.colorHex = colorHex
         self.theme = theme
         self.tags = tags
+        self.host = host
+    }
+
+    /// Whether this favourite lives on another machine.
+    public var isRemote: Bool { !(host ?? "").isEmpty }
+
+    /// The line a tab opened on this favourite runs, or nil for a local folder.
+    ///
+    /// `-t` because ssh only allocates a terminal for a bare login, and a login
+    /// shell after the `cd` because ssh would otherwise disconnect the moment
+    /// the `cd` returned. The single quotes keep `$SHELL` for the far side.
+    public var remoteCommand: String? {
+        guard let host, isRemote else { return nil }
+        let directory = path.trimmingCharacters(in: .whitespaces)
+        guard !directory.isEmpty else { return "ssh \(host)\n" }
+        // Double quotes inside, single quotes outside: the far side expands
+        // `$SHELL`, this side expands nothing, and the line stays readable —
+        // which matters, because the user watches it run.
+        let escaped = directory
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "$", with: "\\$")
+            .replacingOccurrences(of: "`", with: "\\`")
+        let remote = "cd \"\(escaped)\" && exec \"$SHELL\" -l"
+        return "ssh -t " + host + " " + ShellQuote.quote(remote) + "\n"
     }
 
     /// The symbol drawn for this folder.
@@ -49,12 +79,13 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
     /// has to re-pick anything, and a folder that had a rocket keeps one.
     public var symbolName: String {
         if let icon, !icon.isEmpty { return icon }
+        if isRemote { return "server.rack" }
         return Self.symbolsForEmoji[emoji] ?? "folder.fill"
     }
 
     /// The twelve the picker offers, in the order it offers them.
     public static let symbols = [
-        "folder.fill", "paperplane.fill", "testtube.2", "ladybug.fill",
+        "folder.fill", "server.rack", "paperplane.fill", "testtube.2", "ladybug.fill",
         "wrench.and.screwdriver.fill", "shippingbox.fill", "globe", "lock.fill",
         "gearshape.fill", "note.text", "paintpalette.fill", "archivebox.fill",
     ]
@@ -73,6 +104,9 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
     }
 
     public var exists: Bool {
+        // A remote favourite has no local directory; asking the network on
+        // every redraw is not worth the answer.
+        guard !isRemote else { return false }
         var isDirectory: ObjCBool = false
         let found = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
         return found && isDirectory.boolValue
@@ -80,6 +114,7 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
 
     /// A path shortened for display: the home directory as `~`.
     public var displayPath: String {
+        if let host, isRemote { return path.isEmpty ? host : "\(host):\(path)" }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let full = url.path
         return full.hasPrefix(home) ? "~" + full.dropFirst(home.count) : full

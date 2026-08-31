@@ -12,6 +12,9 @@ import VitraCore
 final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// A folder was chosen: `newTab` is true when Cmd was held.
     var onOpen: ((URL, Bool) -> Void)?
+    /// A remote favourite was chosen. It has no local directory to `cd` into,
+    /// so it always opens a tab.
+    var onOpenRemote: ((Bookmark) -> Void)?
 
     private let outline = NSOutlineView()
     private let scroll = NSScrollView()
@@ -31,17 +34,22 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
         let label: String
         /// An SF Symbol, for the roots — favourites and home carry one.
         let symbol: String?
+        /// Set on a remote favourite, which is a leaf: there is no local disk
+        /// under it to list.
+        let remote: Bookmark?
         private(set) var children: [Node]?
 
-        init(url: URL, label: String? = nil, symbol: String? = nil) {
+        init(url: URL, label: String? = nil, symbol: String? = nil, remote: Bookmark? = nil) {
             self.url = url
             self.label = label ?? url.lastPathComponent
             self.symbol = symbol
+            self.remote = remote
         }
 
         /// The subdirectories, read the first time they are asked for.
         func loadedChildren() -> [Node] {
             if let children { return children }
+            if remote != nil { children = []; return [] }
             let loaded = DirectoryListing.directories(of: url).map { Node(url: $0.url) }
             children = loaded
             return loaded
@@ -87,7 +95,14 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
 
     /// The folders the tree starts from: the favourites, and home.
     func setRoots(_ bookmarks: [Bookmark]) {
-        var roots = bookmarks.filter(\.exists).map { Node(url: $0.url, label: $0.name, symbol: $0.symbolName) }
+        var roots = bookmarks.filter { $0.exists || $0.isRemote }.map { bookmark in
+            Node(
+                url: bookmark.url,
+                label: bookmark.name,
+                symbol: bookmark.symbolName,
+                remote: bookmark.isRemote ? bookmark : nil
+            )
+        }
         let home = FileManager.default.homeDirectoryForCurrentUser
         if !roots.contains(where: { $0.url.path == home.path }) {
             roots.append(Node(url: home, label: "Home", symbol: "house.fill"))
@@ -206,6 +221,10 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
     @objc private func rowClicked() {
         let row = outline.clickedRow
         guard row >= 0, let node = outline.item(atRow: row) as? Node else { return }
+        if let remote = node.remote {
+            onOpenRemote?(remote)
+            return
+        }
         onOpen?(node.url, NSEvent.modifierFlags.contains(.command))
     }
 
