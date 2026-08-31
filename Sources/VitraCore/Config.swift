@@ -39,6 +39,7 @@ public struct Config: Equatable, Sendable {
         "close_pane": "w",
         "preview_panel": "p",
         "folder_sidebar": "s",
+        "sessions_sidebar": "c",
         "clear": "k",
     ]
 

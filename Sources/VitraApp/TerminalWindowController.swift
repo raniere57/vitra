@@ -46,15 +46,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// a project stays that project's tab even after the shell wanders off.
     let bookmark: Bookmark?
 
-    /// The title bar breadcrumb: the folder, then where the shell has wandered.
-    private let folderButton = NSButton()
+    /// The title bar breadcrumb: where the focused shell is.
     private let pathLabel = NSTextField(labelWithString: "")
 
     /// The favourites down the left edge, and the folder tree beside them.
     private let sidebar = FolderSidebar()
     private var sidebarSplit: NSSplitView?
-    /// The title bar button that expands and collapses the sidebar.
+    /// The title bar buttons that open the sidebar on folders and on sessions.
     private let sidebarButton = NSButton()
+    private let sessionsButton = NSButton()
 
     /// Everything right of the rail: the panes, and the panel when it is open.
     private let bodyView = NSView()
@@ -114,6 +114,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         sidebar.onMenu = { [weak self] button in self?.showFolderMenu(button) }
         sidebar.onOpenDirectory = { [weak self] url, newTab in
             self?.openDirectory(url, newTab: newTab)
+        }
+        sidebar.onOpenSession = { [weak self] session in
+            self?.openSession(session)
         }
         sidebar.onDismissSearch = { [weak self] in
             guard let self else { return }
@@ -196,16 +199,6 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         // A breadcrumb, not a chip: the folder names the window, and the second
         // half says where the shell has since wandered — the question a terminal
         // with four panes actually raises.
-        folderButton.title = bookmark?.name ?? "Folders"
-        folderButton.font = .systemFont(ofSize: 12.5, weight: .medium)
-        folderButton.bezelStyle = .texturedRounded
-        folderButton.isBordered = false
-        folderButton.contentTintColor = .labelColor
-        folderButton.target = self
-        folderButton.action = #selector(showFolderMenu)
-        folderButton.toolTip = "Folders — open, favourite, manage (⌘P)"
-        folderButton.setContentHuggingPriority(.required, for: .horizontal)
-
         pathLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         pathLabel.textColor = .tertiaryLabelColor
         pathLabel.lineBreakMode = .byTruncatingHead
@@ -220,7 +213,19 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         sidebarButton.toolTip = "Folders sidebar (⌥⌘S)"
         sidebarButton.setContentHuggingPriority(.required, for: .horizontal)
 
-        let row = NSStackView(views: [sidebarButton, folderButton, pathLabel])
+        sessionsButton.image = NSImage(
+            systemSymbolName: "bubble.left.and.bubble.right",
+            accessibilityDescription: "Claude Code sessions"
+        )
+        sessionsButton.bezelStyle = .texturedRounded
+        sessionsButton.isBordered = false
+        sessionsButton.setButtonType(.pushOnPushOff)
+        sessionsButton.target = self
+        sessionsButton.action = #selector(toggleSessionsFromButton)
+        sessionsButton.toolTip = "Claude Code sessions (⌥⌘C)"
+        sessionsButton.setContentHuggingPriority(.required, for: .horizontal)
+
+        let row = NSStackView(views: [sidebarButton, sessionsButton, pathLabel])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 2
@@ -302,7 +307,35 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     /// Expands the sidebar to the folder tree, or collapses it to the rail.
     func toggleSidebar() {
-        setSidebar(expanded: !sidebar.isExpanded)
+        show(.folders)
+    }
+
+    /// The same sidebar, showing the Claude Code sessions on this machine.
+    func toggleSessions() {
+        show(.sessions)
+    }
+
+    /// Opens the sidebar on `mode`, or closes it when it is already there.
+    private func show(_ mode: FolderSidebar.Mode) {
+        if sidebar.isExpanded, sidebar.mode == mode {
+            setSidebar(expanded: false)
+            return
+        }
+        sidebar.setMode(mode)
+        setSidebar(expanded: true)
+    }
+
+    /// Resumes a session in the pane that has the keyboard.
+    ///
+    /// `--resume` only lists the sessions of the directory it runs in, so the
+    /// directory is part of the line: the shell arrives where the session was.
+    private func openSession(_ session: ClaudeSession) {
+        guard let pane = focusedPane else { return }
+        pane.session.send(text: ClaudeSessionStore.resumeCommand(for: session))
+        window?.makeFirstResponder(pane)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.refreshDirectory()
+        }
     }
 
     private func setSidebar(expanded: Bool) {
@@ -321,8 +354,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     }
 
     private func syncSidebarButton() {
-        sidebarButton.state = sidebar.isExpanded ? .on : .off
-        sidebarButton.contentTintColor = sidebar.isExpanded ? .controlAccentColor : nil
+        let onFolders = sidebar.isExpanded && sidebar.mode == .folders
+        let onSessions = sidebar.isExpanded && sidebar.mode == .sessions
+        sidebarButton.state = onFolders ? .on : .off
+        sidebarButton.contentTintColor = onFolders ? .controlAccentColor : nil
+        sessionsButton.state = onSessions ? .on : .off
+        sessionsButton.contentTintColor = onSessions ? .controlAccentColor : nil
     }
 
     /// A folder was chosen in the sidebar or the file list.
@@ -398,6 +435,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     }
 
     @objc private func toggleSidebarFromButton(_ sender: Any?) { toggleSidebar() }
+
+    @objc private func toggleSessionsFromButton(_ sender: Any?) { toggleSessions() }
 
     @objc private func splitRightFromButton(_ sender: Any?) { splitFocusedPane(vertical: true) }
     @objc private func splitDownFromButton(_ sender: Any?) { splitFocusedPane(vertical: false) }

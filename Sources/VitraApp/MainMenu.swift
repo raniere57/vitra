@@ -106,6 +106,13 @@ enum MainMenu {
             keyEquivalent: key("folder_sidebar", keybindings)
         )
         toggleSidebar.keyEquivalentModifierMask = [.command, .option]
+
+        let toggleSessions = viewMenu.addItem(
+            withTitle: "Claude Code Sessions",
+            action: #selector(AppDelegate.toggleSessionsSidebar(_:)),
+            keyEquivalent: key("sessions_sidebar", keybindings)
+        )
+        toggleSessions.keyEquivalentModifierMask = [.command, .option]
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 

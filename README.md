@@ -93,6 +93,22 @@ A window opens filled — the screen minus the menu bar and the Dock, the green
 button's "Fill" rather than full screen, so the menu bar and every other window
 stay where they are.
 
+## Sessions
+
+`Opt-Cmd-C`, or the second button in the title bar, opens the same sidebar on
+the **Claude Code sessions of this machine** — the store the CLI and the desktop
+app share, `~/.claude/projects/`. Clicking one types
+`cd <project> && claude --resume <id>` into the pane that has the keyboard, so
+the conversation reopens where it was, in the terminal you are already looking
+at. The filter field searches titles and project names.
+
+Titles come from the transcript's own `custom-title`, falling back to the prompt
+the session started from, or to the slash command when that is all it was. Only
+the newest transcripts are read, and only 32 KB from the head and 64 KB from the
+tail of each: a session file runs to tens of megabytes and the sidebar needs one
+line out of it. The read happens off the main thread, the first time the list is
+shown — never at launch.
+
 ## Command blocks
 
 The shell tells Vitra where each command starts and ends (OSC 133), and the
@@ -238,6 +254,7 @@ stays, and the reason is printed.
 | `Cmd-W` | close pane |
 | `Cmd-Shift-P` | preview panel |
 | `Opt-Cmd-S` | folder sidebar |
+| `Opt-Cmd-C` | sessions sidebar |
 | `Cmd-P` | go to folder |
 | `Cmd-Shift-O` | new tab in a folder |
 | `Cmd-Ctrl-D` | add the current folder |

@@ -62,6 +62,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         currentController?.toggleSidebar()
     }
 
+    /// Opens the sidebar on the Claude Code sessions of this machine.
+    @objc func toggleSessionsSidebar(_ sender: Any?) {
+        currentController?.toggleSessions()
+    }
+
     @objc func splitHorizontally(_ sender: Any?) {
         currentController?.splitFocusedPane(vertical: true)
     }

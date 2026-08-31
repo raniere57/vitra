@@ -34,10 +34,21 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
         set { tree.onOpen = newValue }
     }
 
+    /// What the expanded half of the sidebar is showing.
+    enum Mode { case folders, sessions }
+
     private(set) var isExpanded = false
+    private(set) var mode: Mode = .folders
+
+    /// A Claude Code session was chosen; it resumes in the focused pane.
+    var onOpenSession: ((ClaudeSession) -> Void)? {
+        get { sessions.onOpen }
+        set { sessions.onOpen = newValue }
+    }
 
     private let rail = FolderRail()
     private let tree = DirectoryTreeView()
+    private let sessions = SessionListView()
     private let divider = NSBox()
     private let search = NSSearchField()
 
@@ -61,10 +72,14 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
         search.delegate = self
         search.translatesAutoresizingMaskIntoConstraints = false
 
+        sessions.translatesAutoresizingMaskIntoConstraints = false
+        sessions.isHidden = true
+
         addSubview(rail)
         addSubview(divider)
         addSubview(search)
         addSubview(tree)
+        addSubview(sessions)
 
         NSLayoutConstraint.activate([
             rail.topAnchor.constraint(equalTo: topAnchor),
@@ -85,6 +100,11 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
             tree.trailingAnchor.constraint(equalTo: trailingAnchor),
             tree.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 6),
             tree.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            sessions.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+            sessions.trailingAnchor.constraint(equalTo: trailingAnchor),
+            sessions.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 6),
+            sessions.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
 
         setExpanded(false)
@@ -93,22 +113,49 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
 
+    /// Switches what the expanded half shows, loading it if it is new.
+    func setMode(_ mode: Mode) {
+        guard mode != self.mode else { return }
+        self.mode = mode
+        clearSearch()
+        applyMode()
+    }
+
+    private func applyMode() {
+        let showsSessions = isExpanded && mode == .sessions
+        tree.isHidden = !isExpanded || mode != .folders
+        sessions.isHidden = !showsSessions
+        search.placeholderString = mode == .folders ? "Filter folders" : "Filter sessions"
+        if showsSessions { sessions.load() }
+    }
+
     func setExpanded(_ expanded: Bool) {
-        guard expanded != isExpanded || tree.isHidden == expanded else { return }
+        guard expanded != isExpanded || tree.isHidden == (expanded && mode == .folders) else { return }
         isExpanded = expanded
-        tree.isHidden = !expanded
         divider.isHidden = !expanded
         search.isHidden = !expanded
+        applyMode()
         // Collapsing hides the field, so a filter left behind would go on
-        // hiding folders from a tree nobody can see to clear it.
-        if !expanded, !search.stringValue.isEmpty {
-            search.stringValue = ""
-            tree.setFilter("")
-        }
+        // hiding rows from a list nobody can see to clear it.
+        if !expanded { clearSearch() }
+    }
+
+    private func clearSearch() {
+        guard !search.stringValue.isEmpty else { return }
+        search.stringValue = ""
+        tree.setFilter("")
+        sessions.setFilter("")
     }
 
     @objc private func searchChanged() {
-        tree.setFilter(search.stringValue)
+        filterChanged()
+    }
+
+    private func filterChanged() {
+        switch mode {
+        case .folders: tree.setFilter(search.stringValue)
+        case .sessions: sessions.setFilter(search.stringValue)
+        }
     }
 
     /// Focuses the filter field, for the shortcut and for expanding by menu.
@@ -124,24 +171,23 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
 
     /// Shows which folder the focused terminal is in.
     func reveal(_ directory: URL?) {
-        guard isExpanded else { return }
+        guard isExpanded, mode == .folders else { return }
         tree.reveal(directory)
     }
 
     /// Live-updates as the field is typed in; the action alone fires late.
     func controlTextDidChange(_ notification: Notification) {
-        tree.setFilter(search.stringValue)
+        filterChanged()
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
         case #selector(NSResponder.cancelOperation(_:)):
-            search.stringValue = ""
-            tree.setFilter("")
+            clearSearch()
             onDismissSearch?()
             return true
         case #selector(NSResponder.insertNewline(_:)):
-            tree.openFirstMatch()
+            if mode == .folders { tree.openFirstMatch() }
             return true
         default:
             return false
@@ -153,5 +199,6 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
         layer?.backgroundColor = background.blended(withFraction: 0.04, of: .white)?.cgColor
         rail.apply(config)
         tree.apply(config)
+        sessions.apply(config)
     }
 }
