@@ -25,6 +25,13 @@ public struct Config: Equatable, Sendable {
     public var colorPrompt: Bool = true
     /// Sets CLICOLOR, so `ls` and friends colour their output.
     public var colorDefaults: Bool = true
+    /// What the cursor looks like, whatever the program running asks for.
+    ///
+    /// `.auto` is the program's own choice; anything else wins over it. The
+    /// default is a bar because it stands exactly where the next character
+    /// lands, and a block leaves that ambiguous: it covers the character after
+    /// the insertion point rather than marking the point itself.
+    public var cursorStyle: CursorStyleSetting = .bar
     /// nil means the user's login shell.
     public var shell: String?
     /// Menu action name to key equivalent, as in `split_right = "d"`.
@@ -103,6 +110,16 @@ public struct Config: Equatable, Sendable {
             if let value = terminal["block_spacing"]?.boolValue { config.blockSpacing = value }
             if let value = terminal["color_prompt"]?.boolValue { config.colorPrompt = value }
             if let value = terminal["color_defaults"]?.boolValue { config.colorDefaults = value }
+            if let value = terminal["cursor_style"]?.stringValue {
+                if let style = CursorStyleSetting(rawValue: value) {
+                    config.cursorStyle = style
+                } else {
+                    problems.append(
+                        "terminal.cursor_style must be one of: "
+                            + CursorStyleSetting.allCases.map(\.rawValue).joined(separator: ", ")
+                    )
+                }
+            }
         }
 
         if let keys = root["keybindings"]?.tableValue {
@@ -219,6 +236,8 @@ public struct Config: Equatable, Sendable {
         # colour the stock zsh prompt, and set CLICOLOR for ls and friends
         color_prompt = \(colorPrompt)
         color_defaults = \(colorDefaults)
+        # auto follows the program; bar, block, underline and hollow overrule it
+        cursor_style = "\(cursorStyle.rawValue)"
         \(shellLine)
 
         [theme]

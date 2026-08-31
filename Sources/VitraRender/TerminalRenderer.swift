@@ -387,7 +387,10 @@ public final class TerminalRenderer {
 
         switch cursor.style {
         case .bar:
-            solid(SIMD2(x, y), SIMD2(thickness, cellHeight))
+            // An underline's thickness is one hairline, which is the right
+            // weight under a glyph and far too little beside one: a bar that
+            // thin is lost among the stems of the text it stands in.
+            solid(SIMD2(x, y), SIMD2(max(thickness * 2, cellWidth * 0.18), cellHeight))
         case .underline:
             solid(SIMD2(x, y + cellHeight - thickness), SIMD2(cellWidth, thickness))
         case .blockHollow, .block:

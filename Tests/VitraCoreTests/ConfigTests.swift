@@ -104,10 +104,28 @@ struct ConfigTests {
         config.shell = "/bin/bash"
         config.theme = .light
         config.keybindings["split_right"] = "e"
+        config.cursorStyle = .underline
 
         let (reloaded, problems) = Config.parse(config.toml())
         #expect(problems.isEmpty)
         #expect(reloaded == config)
+    }
+
+    @Test func theCursorStyleIsReadAndAnUnknownOneIsReported() {
+        let (config, problems) = Config.parse("""
+        [terminal]
+        cursor_style = "block"
+        """)
+        #expect(config.cursorStyle == .block)
+        #expect(problems.isEmpty)
+
+        let (fallback, complaints) = Config.parse("""
+        [terminal]
+        cursor_style = "sparkle"
+        """)
+        // A typo leaves the default in place rather than taking the cursor away.
+        #expect(fallback.cursorStyle == .bar)
+        #expect(complaints.count == 1)
     }
 
     @Test func the256ColourPaletteIsGeneratedFromTheSixteen() {

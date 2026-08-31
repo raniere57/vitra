@@ -60,6 +60,34 @@ enum SelfCapture {
 
         // Keystrokes sent to whatever holds the keyboard, so chrome that only
         // reacts to typing — the sidebar's filter field — can be checked too.
+        // Named keys, as "shift+116" — the only way to reach Page Up and the
+        // other keys that carry no character.
+        if let chord = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_CHORD"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.7) {
+                let parts = chord.split(separator: "+")
+                guard let code = parts.last.flatMap({ UInt16($0) }) else { return }
+                var flags: NSEvent.ModifierFlags = []
+                if parts.contains("shift") { flags.insert(.shift) }
+                if parts.contains("command") { flags.insert(.command) }
+                if parts.contains("option") { flags.insert(.option) }
+                if parts.contains("control") { flags.insert(.control) }
+                guard let event = NSEvent.keyEvent(
+                    with: .keyDown,
+                    location: .zero,
+                    modifierFlags: flags,
+                    timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: NSApp.keyWindow?.windowNumber ?? 0,
+                    context: nil,
+                    characters: "",
+                    charactersIgnoringModifiers: "",
+                    isARepeat: false,
+                    keyCode: code
+                ) else { return }
+                let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible })
+                (window?.firstResponder as? TerminalView)?.keyDown(with: event)
+            }
+        }
+
         if let keys = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_KEYS"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.7) {
                 for character in keys {
@@ -147,6 +175,36 @@ enum SelfCapture {
                     return
                 }
                 pane.session.scroll(lines: lines)
+            }
+        }
+
+        // The wheel, as the trackpad delivers it: posted to the app so AppKit's
+        // own routing decides which view sees it, which is the half of the
+        // path that calling scrollWheel(with:) directly would skip.
+        if let points = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_WHEEL"].flatMap(Int32.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.8) {
+                guard let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible }),
+                      let pane = window.firstResponder as? TerminalView,
+                      let scroll = CGEvent(
+                          scrollWheelEvent2Source: nil,
+                          units: .pixel,
+                          wheelCount: 1,
+                          wheel1: points,
+                          wheel2: 0,
+                          wheel3: 0
+                      )
+                else {
+                    FileHandle.standardError.write(Data("[self-shot] no pane to wheel\n".utf8))
+                    return
+                }
+                // Posted rather than called: the point of the measurement is
+                // whether AppKit routes a wheel event to the pane at all.
+                let centre = pane.convert(NSPoint(x: pane.bounds.midX, y: pane.bounds.midY), to: nil)
+                let onScreen = window.convertPoint(toScreen: centre)
+                let height = NSScreen.screens.first?.frame.height ?? 0
+                scroll.location = CGPoint(x: onScreen.x, y: height - onScreen.y)
+                guard let routed = NSEvent(cgEvent: scroll) else { return }
+                NSApp.postEvent(routed, atStart: false)
             }
         }
 

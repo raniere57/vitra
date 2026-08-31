@@ -29,6 +29,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     private var blinkTimer: DispatchSourceTimer?
     private var cursorOn = true
+    private var cursorStyle: CursorStyleSetting = .bar
 
     /// Paused whenever there is nothing to draw, which is most of the time.
     private var displayLink: CADisplayLink?
@@ -185,6 +186,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
         // The rails take their colour from the theme, not from the system: a
         // grey that reads as quiet on one background is invisible on another.
         showsCommandBlocks = config.commandBlocks
+        cursorStyle = config.cursorStyle
         blockGutter.isHidden = !config.commandBlocks
         let foreground = NSColor(hex: config.theme.foreground.hex) ?? .white
         scrollIndicator.color = foreground.withAlphaComponent(0.30)
@@ -270,9 +272,13 @@ final class TerminalView: NSView, NSMenuItemValidation {
         // An unfocused terminal shows a hollow cursor rather than none: it still
         // marks the position without claiming to accept input.
         let focused = window?.isKeyWindow ?? false
-        if !focused, var cursor = snapshot.cursor {
-            cursor.style = .blockHollow
-            snapshot.cursor = cursor
+        if var cursor = snapshot.cursor {
+            // Unfocused wins over both: a hollow cursor still marks the position
+            // without claiming to accept input.
+            if let style = focused ? cursorStyle.style : .blockHollow {
+                cursor.style = style
+                snapshot.cursor = cursor
+            }
         }
 
         renderer.draw(
@@ -684,7 +690,27 @@ final class TerminalView: NSView, NSMenuItemValidation {
         124: "\u{05}",  // Right: end of the line (Ctrl-E)
     ]
 
+    /// Page keys that scroll the terminal instead of reaching the program.
+    ///
+    /// Shift is what every terminal uses to say "this one is for you, not for
+    /// what is running", and it is the only way back through the scrollback
+    /// that does not need a hand on the trackpad.
+    private func scrolled(by event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.shift) else { return false }
+        let page = max(1, Int(snapshot.rows) - 2)
+        switch event.keyCode {
+        case 116: session.scroll(lines: -page)   // Page Up
+        case 121: session.scroll(lines: page)    // Page Down
+        case 115: session.scroll(lines: -Int(snapshot.scroll.total))  // Home
+        case 119: session.scrollToBottom()       // End
+        default: return false
+        }
+        return true
+    }
+
     override func keyDown(with event: NSEvent) {
+        if scrolled(by: event) { return }
+
         // Command belongs to the app, not the terminal: it drives the menu.
         if event.modifierFlags.contains(.command) {
             let others: NSEvent.ModifierFlags = [.option, .control, .shift]

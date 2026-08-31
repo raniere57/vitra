@@ -176,6 +176,22 @@ the bottom, which is where a terminal spends its life. The position comes from
 the terminal itself, once per frame it already draws: no scroll view, no timer,
 nothing running while nothing scrolls. Typing puts the live screen back.
 
+`Shift+Page Up` and `Shift+Page Down` move by a screen without a hand on the
+trackpad, and `Shift+Home` and `Shift+End` go to the top of the scrollback and
+back to the live screen. Shift is what says the key is for the terminal and not
+for the program running in it, so an application that uses the page keys keeps
+getting them unshifted.
+
+## The cursor
+
+A bar, not a block, and that is a decision rather than a default: a block covers
+the character after the insertion point, so it shows you a letter when what you
+wanted was the gap the next letter goes into. `terminal.cursor_style` takes
+`bar`, `block`, `underline`, `hollow` or `auto`; `auto` hands the choice back to
+whatever program is running. A pane that is not the key window always shows a
+hollow block — the position is still worth knowing, the claim on your typing is
+not.
+
 ## Command blocks
 
 The shell tells Vitra where each command starts and ends (OSC 133), and the
@@ -298,11 +314,12 @@ padding = 10
 
 [terminal]
 scrollback = 10000
+cursor_style = "bar"   # bar, block, underline, hollow, or auto
 # shell = "/bin/zsh"
 
 [theme]
 name = "dark"          # dark or light
-cursor = "#e8e8ef"     # override any single colour
+cursor = "#7cc0ff"     # override any single colour
 palette = [ ... ]      # or all sixteen
 
 [keybindings]

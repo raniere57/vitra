@@ -38,6 +38,27 @@ public enum CursorStyle: Sendable {
     case underline
 }
 
+/// The cursor the user asked for, which is not always the one the program asks
+/// for. `auto` defers to the program; every other case overrides it.
+public enum CursorStyleSetting: String, CaseIterable, Sendable {
+    case auto
+    case bar
+    case block
+    case underline
+    case hollow
+
+    /// The style to draw, or nil to leave the program's choice alone.
+    public var style: CursorStyle? {
+        switch self {
+        case .auto: nil
+        case .bar: .bar
+        case .block: .block
+        case .underline: .underline
+        case .hollow: .blockHollow
+        }
+    }
+}
+
 public struct CursorSnapshot: Sendable {
     public var column: UInt16
     public var row: UInt16
