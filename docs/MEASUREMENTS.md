@@ -135,10 +135,41 @@ child's setup between `fork()` and `execve()` was written in Swift, and the
 Swift runtime takes locks that another thread can hold at fork time.
 
 This was a production bug, not a test artifact: the app forks from a
-multithreaded AppKit process every time a pane opens. `PTY` now uses
+multithreaded AppKit process every time a pane opens. `PTY` moved to
 `posix_spawn` with `POSIX_SPAWN_SETSID` and a file action that opens the slave
-by path, which keeps the controlling terminal and never runs Swift in a forked
-child. 98 tests, 8 consecutive clean runs.
+by path, on the assumption that an open without `O_NOCTTY` acquires the
+controlling terminal. 98 tests, 8 consecutive clean runs.
+
+### The assumption was wrong, and measuring found it
+
+Chasing a different bug — a session clicked in the sidebar being typed into
+Claude Code's chat box instead of a shell — the pane was asked who held its
+terminal:
+
+```
+[pty] tty=/dev/ttys007 fg=0 sid=-1 shell=50388 shellpgid=50388
+```
+
+`sid=-1`: the tty had **no session**. macOS does not hand out a controlling
+terminal on open — that is the System V behaviour Linux implements. On BSD it
+takes an explicit `ioctl(TIOCSCTTY)`, which is what `login_tty()` does and what
+`posix_spawn` has no file action for. Every consequence followed from that one
+missing line: the shell never turned on job control, `Ctrl-C` reached nobody,
+`TIOCSWINSZ` delivered `SIGWINCH` to process group 0 — so a program kept
+drawing at the old width after the preview panel closed — and `tcgetpgrp`
+answered 0, which is why nothing could tell a busy pane from an idle one.
+
+The fix keeps both properties: `Sources/CVitraSpawn` is thirty lines of C that
+`fork`s, calls `setsid` + `TIOCSCTTY`, and `execve`s. No Swift runs in the
+child, and failures before `exec` come back through a close-on-exec pipe so a
+missing executable still throws instead of silently exiting 127.
+
+```
+[pty] tty=/dev/ttys007 fg=52297 sid=51848 shell=51848 shellpgid=51848
+```
+
+201 tests. Two of them now assert what was never asserted before: the child
+owns the terminal's session, and a job it starts shows up in the foreground.
 
 ## Phase 3 — preview panel
 

@@ -28,13 +28,14 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
     final class Node {
         let url: URL
         let label: String
-        let emoji: String?
+        /// An SF Symbol, for the roots — favourites and home carry one.
+        let symbol: String?
         private(set) var children: [Node]?
 
-        init(url: URL, label: String? = nil, emoji: String? = nil) {
+        init(url: URL, label: String? = nil, symbol: String? = nil) {
             self.url = url
             self.label = label ?? url.lastPathComponent
-            self.emoji = emoji
+            self.symbol = symbol
         }
 
         /// The subdirectories, read the first time they are asked for.
@@ -83,10 +84,10 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
 
     /// The folders the tree starts from: the favourites, and home.
     func setRoots(_ bookmarks: [Bookmark]) {
-        var roots = bookmarks.filter(\.exists).map { Node(url: $0.url, label: $0.name, emoji: $0.emoji) }
+        var roots = bookmarks.filter(\.exists).map { Node(url: $0.url, label: $0.name, symbol: $0.symbolName) }
         let home = FileManager.default.homeDirectoryForCurrentUser
         if !roots.contains(where: { $0.url.path == home.path }) {
-            roots.append(Node(url: home, label: "Home", emoji: "🏠"))
+            roots.append(Node(url: home, label: "Home", symbol: "house.fill"))
         }
         self.roots = roots
         outline.reloadData()
@@ -235,11 +236,17 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
         let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView
             ?? Self.makeCell(identifier: identifier)
 
-        let label = node.emoji.map { "\($0)  \(node.label)" } ?? node.label
+        let label = node.label
         cell.textField?.stringValue = isFiltering ? "\(label)  —  \(Self.parentLabel(of: node.url))" : label
-        cell.textField?.font = node.emoji == nil
+        cell.textField?.font = node.symbol == nil
             ? .systemFont(ofSize: 11.5)
             : .systemFont(ofSize: 11.5, weight: .medium)
+        // Roots carry the favourite's own symbol; everything below is a folder.
+        cell.imageView?.image = NSImage(
+            systemSymbolName: node.symbol ?? "folder",
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .regular))
+        cell.imageView?.contentTintColor = .secondaryLabelColor
         cell.textField?.textColor = node.url.path == current?.path ? .labelColor : .secondaryLabelColor
         cell.toolTip = node.url.path
         return cell
@@ -256,6 +263,11 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
         let cell = NSTableCellView()
         cell.identifier = identifier
 
+        let icon = NSImageView()
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(icon)
+        cell.imageView = icon
+
         let label = NSTextField(labelWithString: "")
         label.lineBreakMode = .byTruncatingTail
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -263,7 +275,10 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
         cell.textField = label
 
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
+            icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
+            icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 14),
+            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
             label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
             label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])

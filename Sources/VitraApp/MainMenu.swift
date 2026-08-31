@@ -65,10 +65,12 @@ enum MainMenu {
                 // switching, and a favourite is not worth stealing it for.
                 let key = index < 9 ? String(index + 1) : ""
                 let item = folderMenu.addItem(
-                    withTitle: "\(bookmark.emoji)  \(bookmark.name)",
+                    withTitle: bookmark.name,
                     action: #selector(AppDelegate.openBookmarkTab(_:)),
                     keyEquivalent: key
                 )
+                item.image = NSImage(systemSymbolName: bookmark.symbolName, accessibilityDescription: nil)?
+                    .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .regular))
                 item.keyEquivalentModifierMask = [.command, .control]
                 item.representedObject = bookmark.id.uuidString
                 item.toolTip = bookmark.displayPath

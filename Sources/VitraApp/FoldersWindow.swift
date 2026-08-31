@@ -115,7 +115,9 @@ struct FoldersView: View {
             List(selection: $model.selection) {
                 ForEach(model.bookmarks) { bookmark in
                     HStack(spacing: 8) {
-                        Text(bookmark.emoji)
+                        Image(systemName: bookmark.symbolName)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(bookmark.name).font(.system(size: 12, weight: .medium))
                             Text(bookmark.displayPath)
@@ -174,7 +176,7 @@ struct FolderEditor: View {
         "#5aa5e0", "#c07ce8", "#9aa0aa", "#f0f0f5",
     ]
 
-    private static let emojis = ["📁", "🚀", "🧪", "🐛", "🔧", "📦", "🌐", "🔒", "⚙️", "📝", "🎨", "🗄️"]
+
 
     var body: some View {
         Form {
@@ -189,15 +191,17 @@ struct FolderEditor: View {
             }
 
             Section("Icon") {
-                LabeledContent("Emoji") {
-                    TextField("", text: $bookmark.emoji)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 60)
-                }
-                LazyVGrid(columns: Array(repeating: GridItem(.fixed(28)), count: 12), spacing: 4) {
-                    ForEach(Self.emojis, id: \.self) { emoji in
-                        Button(emoji) { bookmark.emoji = emoji; onCommit() }
-                            .buttonStyle(.borderless)
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(28)), count: 6), spacing: 6) {
+                    ForEach(Bookmark.symbols, id: \.self) { symbol in
+                        Button {
+                            bookmark.icon = symbol
+                            onCommit()
+                        } label: {
+                            Image(systemName: symbol)
+                                .frame(width: 22, height: 22)
+                                .foregroundStyle(bookmark.symbolName == symbol ? Color.accentColor : .secondary)
+                        }
+                        .buttonStyle(.borderless)
                     }
                 }
             }

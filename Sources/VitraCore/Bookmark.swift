@@ -12,6 +12,9 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
     /// resolves.
     public var path: String
     public var emoji: String
+    /// An SF Symbol name. The rail, the menu and the palette draw this; the
+    /// emoji stays behind it for the window title, where a glyph is text.
+    public var icon: String?
     /// `#rrggbb`, used to mark the window this folder opened in.
     public var colorHex: String?
     /// A theme name for terminals opened here, so production and staging never
@@ -24,6 +27,7 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
         name: String,
         path: String,
         emoji: String = "📁",
+        icon: String? = nil,
         colorHex: String? = nil,
         theme: String? = nil,
         tags: [String] = []
@@ -32,10 +36,36 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
         self.name = name
         self.path = path
         self.emoji = emoji
+        self.icon = icon
         self.colorHex = colorHex
         self.theme = theme
         self.tags = tags
     }
+
+    /// The symbol drawn for this folder.
+    ///
+    /// Favourites made before icons existed carry an emoji and nothing else, so
+    /// the twelve the picker offered map onto the twelve it offers now: nobody
+    /// has to re-pick anything, and a folder that had a rocket keeps one.
+    public var symbolName: String {
+        if let icon, !icon.isEmpty { return icon }
+        return Self.symbolsForEmoji[emoji] ?? "folder.fill"
+    }
+
+    /// The twelve the picker offers, in the order it offers them.
+    public static let symbols = [
+        "folder.fill", "paperplane.fill", "testtube.2", "ladybug.fill",
+        "wrench.and.screwdriver.fill", "shippingbox.fill", "globe", "lock.fill",
+        "gearshape.fill", "note.text", "paintpalette.fill", "archivebox.fill",
+    ]
+
+    private static let symbolsForEmoji: [String: String] = [
+        "📁": "folder.fill", "🚀": "paperplane.fill", "🧪": "testtube.2",
+        "🐛": "ladybug.fill", "🔧": "wrench.and.screwdriver.fill",
+        "📦": "shippingbox.fill", "🌐": "globe", "🔒": "lock.fill",
+        "⚙️": "gearshape.fill", "📝": "note.text", "🎨": "paintpalette.fill",
+        "🗄️": "archivebox.fill", "🏠": "house.fill", "⬇️": "arrow.down.circle.fill",
+    ]
 
     /// The directory, with `~` expanded and symlinks left alone.
     public var url: URL {

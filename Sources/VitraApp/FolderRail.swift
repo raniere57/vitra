@@ -29,10 +29,12 @@ final class FolderRail: NSView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
+        // Centred on the rail rather than stretched across it: a stack pinned to
+        // both edges left its buttons on the left of a 52pt column, which is the
+        // gutter that showed on the right of every icon.
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
         ])
     }
 
@@ -72,8 +74,12 @@ final class FolderRail: NSView {
 
     private func button(for bookmark: Bookmark, index: Int) -> NSButton {
         let button = RailButton()
-        button.title = bookmark.emoji
-        button.font = .systemFont(ofSize: 16)
+        button.image = NSImage(systemSymbolName: bookmark.symbolName, accessibilityDescription: bookmark.name)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 15, weight: .regular))
+        // NSButton's stock title is the word "Button": an icon-only rail button
+        // has to be told it has no title, or that word is what the rail shows.
+        button.title = ""
+        button.imagePosition = .imageOnly
         button.isBordered = false
         button.wantsLayer = true
         button.layer?.cornerRadius = 9
@@ -96,7 +102,8 @@ final class FolderRail: NSView {
             : NSColor.clear.cgColor
         button.layer?.borderWidth = isCurrent ? 1 : 0
         button.layer?.borderColor = accent.withAlphaComponent(0.5).cgColor
-        button.alphaValue = isCurrent ? 1 : 0.55
+        button.contentTintColor = isCurrent ? accent : .secondaryLabelColor
+        button.alphaValue = isCurrent ? 1 : 0.8
         return button
     }
 

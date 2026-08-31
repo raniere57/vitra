@@ -54,7 +54,10 @@ of tags, and opening one starts a tab whose shell is already there.
 
 Nothing here is hidden behind a shortcut. The favourites live on a **rail** down
 the left edge - one click per folder, the window's own folder lit in its colour -
-and `+` at the bottom opens the rest (go to, open, star, manage). The title bar
+and `+` at the bottom opens the rest (go to, open, star, manage). Favourites are
+drawn as SF Symbols rather than emoji — one weight, one size, one column — and
+the picker in the folders window is that same set; a favourite made before icons
+existed keeps the glyph its emoji stood for. The title bar
 carries a **breadcrumb**: the folder, then where the focused shell has since
 wandered. Two bare buttons sit before it — folders and sessions — each lit only
 while its sidebar is open; splitting and the preview panel sit in one cluster at

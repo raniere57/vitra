@@ -202,3 +202,26 @@ private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
     }
     return condition()
 }
+
+/// Job control lives or dies on this: macOS gives out a controlling terminal
+/// only for an explicit TIOCSCTTY, and without one the tty has no session, the
+/// shell never enables job control, Ctrl-C reaches nobody and a resize delivers
+/// SIGWINCH to nobody.
+@Test func theChildOwnsTheTerminalSession() throws {
+    let pty = try PTY(
+        executable: "/bin/sh",
+        arguments: ["-i"],
+        environment: ShellEnvironment.childEnvironment(),
+        size: .default
+    )
+    defer {
+        pty.terminate()
+        pty.reap(blocking: true)
+    }
+    pty.startReading(on: DispatchQueue(label: "test.session"), onData: { _ in }, onEOF: {})
+
+    // The child acquires the terminal on its own schedule, so this waits for
+    // it rather than racing it.
+    #expect(waitUntil(timeout: 10) { tcgetsid(pty.masterFD) == pty.processID })
+    #expect(waitUntil(timeout: 10) { tcgetpgrp(pty.masterFD) == pty.processID })
+}

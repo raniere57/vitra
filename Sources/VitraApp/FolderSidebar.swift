@@ -70,6 +70,11 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
         search.target = self
         search.action = #selector(searchChanged)
         search.delegate = self
+        // Collapsed, the whole sidebar is 52pt wide and the field is hidden -
+        // but its constraints are not, and a field that refuses to be narrower
+        // than its text squeezed the rail to 31pt and left every icon off
+        // centre. Nothing here needs the field to keep its width.
+        search.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         search.translatesAutoresizingMaskIntoConstraints = false
 
         sessions.translatesAutoresizingMaskIntoConstraints = false
@@ -92,20 +97,31 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
             divider.bottomAnchor.constraint(equalTo: bottomAnchor),
             divider.widthAnchor.constraint(equalToConstant: 1),
 
-            search.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 8),
-            search.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             search.topAnchor.constraint(equalTo: topAnchor, constant: 10),
 
-            tree.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
-            tree.trailingAnchor.constraint(equalTo: trailingAnchor),
             tree.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 6),
             tree.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            sessions.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
-            sessions.trailingAnchor.constraint(equalTo: trailingAnchor),
             sessions.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 6),
             sessions.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+
+        // Collapsed, the sidebar is 52pt wide — the rail and nothing else. The
+        // expanded half is hidden but still laid out, and a required rail plus a
+        // required half do not fit in 52pt: the solver was dropping the rail's
+        // width and leaving a 31pt rail with every icon off centre. The half
+        // gives way instead; it is invisible while it does.
+        for constraint in [
+            search.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 8),
+            search.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            tree.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+            tree.trailingAnchor.constraint(equalTo: trailingAnchor),
+            sessions.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+            sessions.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ] {
+            constraint.priority = .defaultHigh
+            constraint.isActive = true
+        }
 
         setExpanded(false)
     }

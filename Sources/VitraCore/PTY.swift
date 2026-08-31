@@ -1,3 +1,4 @@
+import CVitraSpawn
 import Darwin
 import Foundation
 
@@ -94,54 +95,20 @@ public final class PTY: @unchecked Sendable {
         }
         defer { free(name) }
 
-        var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-
-        // Opened by path, after SETSID and without O_NOCTTY: that is what makes
-        // this tty the child's controlling terminal. Inheriting a descriptor
-        // would not — a controlling terminal is acquired by opening one.
-        posix_spawn_file_actions_addopen(&actions, 0, name, O_RDWR, 0)
-        posix_spawn_file_actions_adddup2(&actions, 0, 1)
-        posix_spawn_file_actions_adddup2(&actions, 0, 2)
-
-        // The child changes directory, not the app: chdir() in this process
-        // would move every pane at once and race with anything already running.
-        // A directory that has since been deleted is not fatal — the spawn fails
-        // with ENOENT and the caller reports it, which beats a shell in a
-        // directory the user did not ask for.
-        if let workingDirectory {
-            workingDirectory.withCString { posix_spawn_file_actions_addchdir_np(&actions, $0) }
+        // posix_spawn cannot do this part: macOS hands out a controlling
+        // terminal only for an explicit TIOCSCTTY, and there is no file action
+        // for an ioctl. Without one the shell has no session on its tty and
+        // never turns on job control — Ctrl-C reaches nobody and the terminal
+        // cannot tell whether a program is running in it. The C helper is what
+        // keeps Swift out of the window between fork and execve.
+        let pid = workingDirectory.withCStringOrNil { directory in
+            vitra_spawn_on_tty(path, argv, envp, name, directory)
         }
-
-        var attributes: posix_spawnattr_t?
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
-
-        // CLOEXEC_DEFAULT closes every descriptor the file actions do not name,
-        // so nothing the app had open — including this pty's own master — leaks
-        // into the shell and from there into everything the user runs.
-        posix_spawnattr_setflags(&attributes, Int16(
-            POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT
-                | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
-        ))
-
-        // A GUI process ignores SIGPIPE and may block signals; shells expect
-        // default dispositions and an empty mask.
-        var all = sigset_t()
-        sigfillset(&all)
-        posix_spawnattr_setsigdefault(&attributes, &all)
-        var empty = sigset_t()
-        sigemptyset(&empty)
-        posix_spawnattr_setsigmask(&attributes, &empty)
-
-        var pid: pid_t = 0
-        let result = posix_spawn(&pid, path, &actions, &attributes, argv, envp)
-        guard result == 0 else {
+        guard pid > 0 else {
+            let failure = errno
             Darwin.close(master)
             Darwin.close(slave)
-            // posix_spawn reports through its return value, not errno.
-            throw PTYError.spawnFailed(errno: result)
+            throw PTYError.spawnFailed(errno: failure)
         }
 
         self.masterFD = master
@@ -318,5 +285,13 @@ public final class PTY: @unchecked Sendable {
         var index = 0
         while let entry = array[index] { free(entry); index += 1 }
         array.deallocate()
+    }
+}
+
+private extension Optional where Wrapped == String {
+    /// Runs `body` with a C string, or with nil when there is no string.
+    func withCStringOrNil<T>(_ body: (UnsafePointer<CChar>?) -> T) -> T {
+        guard let self else { return body(nil) }
+        return self.withCString { body($0) }
     }
 }

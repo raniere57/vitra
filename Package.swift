@@ -18,7 +18,8 @@ let package = Package(
             publicHeadersPath: "include",
             linkerSettings: [.unsafeFlags([ghosttyArchive])]
         ),
-        .target(name: "VitraCore"),
+        .target(name: "CVitraSpawn", publicHeadersPath: "include"),
+        .target(name: "VitraCore", dependencies: ["CVitraSpawn"]),
         .target(name: "VitraPanel", dependencies: ["VitraCore"]),
         .target(name: "VitraBridge", dependencies: ["VitraCore"]),
         .target(name: "VitraGhostty", dependencies: ["CGhosttyVT", "VitraCore"]),

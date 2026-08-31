@@ -171,8 +171,10 @@ final class FolderPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate,
         mark.layer?.backgroundColor = (bookmark.colorHex.flatMap { NSColor(hex: $0) } ?? .clear).cgColor
         mark.layer?.cornerRadius = 1.5
 
-        let emoji = NSTextField(labelWithString: bookmark.emoji)
-        emoji.font = .systemFont(ofSize: 20)
+        let emoji = NSImageView()
+        emoji.image = NSImage(systemSymbolName: bookmark.symbolName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 15, weight: .regular))
+        emoji.contentTintColor = .secondaryLabelColor
 
         let name = NSTextField(labelWithString: bookmark.name)
         name.font = .systemFont(ofSize: 13, weight: .medium)
