@@ -3,6 +3,11 @@
 Every release, what changed in it, and the measurements behind the claims.
 Dates are the day the disk image was built.
 
+## Unreleased
+
+- Double-clicking the preview panel's divider maximises it over the whole
+  window; `Esc` restores the split.
+
 ## 0.1.0 - 2026-08-31
 
 First public build. A terminal that hosts CLI coding agents.

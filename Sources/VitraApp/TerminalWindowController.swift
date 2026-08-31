@@ -31,6 +31,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// user browsed there while something was running.
     private var panelBrowsedAway = false
 
+    /// The width the panes had before the panel took the whole window, and the
+    /// monitor that watches for the Escape that gives it back.
+    private var panelRestoreWidth: CGFloat?
+    private var panelEscapeMonitor: Any?
+
     /// The window's permanent content view.
     ///
     /// Everything else lives inside it, so a translucent window can keep a
@@ -936,14 +941,56 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         let width = split.bounds.width
         split.setPosition(max(width / 2, width - PanelStyle.defaultWidth), ofDividerAt: 0)
 
+        split.onDividerDoubleClick = { [weak self] in self?.togglePanelMaximized() }
+
         self.panel = panel
         self.panelSplit = split
         syncPanelButton()
         return panel
     }
 
+    /// Double-clicking the panel's divider gives it the whole window, and
+    /// Escape gives the terminal its half back.
+    ///
+    /// The panes are hidden rather than squeezed: the divider cannot go past
+    /// the width the terminal is guaranteed, and a pane resized to nothing
+    /// would reflow every line it holds twice for a view nobody is reading.
+    private func togglePanelMaximized() {
+        isPanelMaximized ? restorePanel() : maximizePanel()
+    }
+
+    private var isPanelMaximized: Bool { panelRestoreWidth != nil }
+
+    private func maximizePanel() {
+        guard panelSplit != nil, !isPanelMaximized else { return }
+        panelRestoreWidth = paneContainer.frame.width
+        paneContainer.isHidden = true
+        panelSplit?.adjustSubviews()
+        // Escape reaches this before the web view, which would otherwise stop
+        // a page load with it and never tell us.
+        panelEscapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return event }
+            self?.restorePanel()
+            return nil
+        }
+    }
+
+    private func restorePanel() {
+        guard let width = panelRestoreWidth else { return }
+        if let monitor = panelEscapeMonitor {
+            NSEvent.removeMonitor(monitor)
+            panelEscapeMonitor = nil
+        }
+        panelRestoreWidth = nil
+        paneContainer.isHidden = false
+        panelSplit?.adjustSubviews()
+        panelSplit?.setPosition(width, ofDividerAt: 0)
+        window?.makeFirstResponder(focusedPane)
+    }
+
     private func closePanel() {
         guard let panel, let split = panelSplit else { return }
+        restorePanel()
         // Releasing the content is the point: a web preview holds a WebKit
         // content process open until its view is dropped.
         panel.clearContent()
@@ -1112,6 +1159,34 @@ private final class PaneSplitView: NSSplitView, NSSplitViewDelegate {
 
     override var dividerColor: NSColor { NSColor(white: 0.22, alpha: 1) }
     override var dividerThickness: CGFloat { 1 }
+
+    /// Called when a divider is double-clicked, which AppKit otherwise spends
+    /// on collapsing a subview this split view never collapses.
+    var onDividerDoubleClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let onDivider = (0..<max(arrangedSubviews.count - 1, 0)).contains { index in
+            let drawn = dividerRect(at: index)
+            return drawn.insetBy(
+                dx: isVertical ? -PanelStyle.dividerGrab : 0,
+                dy: isVertical ? 0 : -PanelStyle.dividerGrab
+            ).contains(point)
+        }
+        guard event.clickCount == 2, onDivider, let handler = onDividerDoubleClick else {
+            super.mouseDown(with: event)
+            return
+        }
+        handler()
+    }
+
+    /// Where a divider is drawn, which AppKit knows and does not expose.
+    private func dividerRect(at index: Int) -> NSRect {
+        let before = arrangedSubviews[index].frame
+        return isVertical
+            ? NSRect(x: before.maxX, y: bounds.minY, width: dividerThickness, height: bounds.height)
+            : NSRect(x: bounds.minX, y: before.maxY, width: bounds.width, height: dividerThickness)
+    }
 
     /// Same widened grab band as the panel's divider: the line is a hairline,
     /// the target is not.

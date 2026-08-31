@@ -383,6 +383,11 @@ Relative paths are resolved against the working directory of the job in the
 foreground. Only existing regular files open: symlinks are followed first, and
 directories and devices are refused.
 
+
+Double-clicking the divider gives the panel the whole window, and `Esc` gives
+the terminal its half back. The panes are hidden rather than squeezed to
+nothing: a pane resized to a sliver would reflow every line it holds, twice,
+for a view nobody is reading.
 ## The MCP server
 
 Vitra serves eight tools to an agent running inside it:

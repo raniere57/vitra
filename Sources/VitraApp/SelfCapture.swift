@@ -73,8 +73,9 @@ enum SelfCapture {
         // reacts to typing — the sidebar's filter field — can be checked too.
         // Named keys, as "shift+116" — the only way to reach Page Up and the
         // other keys that carry no character.
+        // After the click: a chord is usually what undoes what the click did.
         if let chord = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_CHORD"] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.7) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.85) {
                 // "command+=" carries a character; "shift+116" a key code. The
                 // last field is one or the other.
                 let parts = chord.split(separator: "+", omittingEmptySubsequences: false)
@@ -105,6 +106,12 @@ enum SelfCapture {
                 // A Command chord belongs to the menu, which is what turns it
                 // into an action; anything else goes straight to the pane.
                 if flags.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
+                // "post+53" goes through the application's own event stream,
+                // which is the only way to reach an event monitor.
+                if parts.contains("post") {
+                    NSApp.postEvent(event, atStart: true)
+                    return
+                }
                 let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible })
                 (window?.firstResponder as? TerminalView)?.keyDown(with: event)
             }
@@ -181,12 +188,15 @@ enum SelfCapture {
                     else { return }
                     let modifiers: NSEvent.ModifierFlags =
                         ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_CLICK_COMMAND"] != nil ? [.command] : []
+                    // A third field is the click count, which is how the
+                    // double-click gestures - maximising the panel - are tested.
+                    let clicks = parts.count >= 3 ? Int(parts[2]) : 1
                     let location = NSPoint(x: parts[0], y: parts[1])
                     // Handed to the view rather than the window: a synthetic
                     // event has no real hit-testing behind it, and the pane is
                     // the only thing a click in the grid can mean.
-                    let pane = window.contentView?.hitTest(location) as? TerminalView
-                        ?? (window.firstResponder as? TerminalView)
+                    let hit = window.contentView?.hitTest(location)
+                    let pane = hit as? TerminalView ?? (window.firstResponder as? TerminalView)
                     for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                         guard let event = NSEvent.mouseEvent(
                             with: type,
@@ -196,11 +206,15 @@ enum SelfCapture {
                             windowNumber: window.windowNumber,
                             context: nil,
                             eventNumber: 0,
-                            clickCount: 1,
+                            clickCount: clicks,
                             pressure: type == .leftMouseDown ? 1 : 0
                         ) else { continue }
-                        if let pane {
-                            if type == .leftMouseDown { pane.mouseDown(with: event) } else { pane.mouseUp(with: event) }
+                        // The pane when the click is in the grid; otherwise the
+                        // view actually under the point, because a synthetic
+                        // event carries no hit-testing of its own.
+                        let target: NSView? = (hit is TerminalView) ? pane : (hit ?? pane)
+                        if let target {
+                            if type == .leftMouseDown { target.mouseDown(with: event) } else { target.mouseUp(with: event) }
                         } else {
                             window.sendEvent(event)
                         }
