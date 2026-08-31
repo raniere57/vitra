@@ -13,6 +13,9 @@ Dates are the day the disk image was built.
   wreckage. A pane's size now reaches the program only while the pane is
   visible and wider than 100 points.
 - Fixed: the split's divider is no longer drawn over the maximised panel.
+- A tool call now starts Vitra when it is not running, instead of failing with
+  "open Vitra and try again". The helper asks the system to open the bundle it
+  is running out of, and runs the binary itself where the system will not.
 - `browser_back` and `browser_forward`: history in the browser panel, each
   waiting for the page to actually change before answering.
 - `browser_click` and `browser_type` with submit now wait out whatever

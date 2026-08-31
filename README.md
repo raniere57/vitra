@@ -408,6 +408,10 @@ claude mcp add vitra -- vitra mcp
 | `browser_screenshot` | save a PNG and return its path |
 | `browser_console` | read the page's console output |
 
+A tool call made while Vitra is closed opens it: the helper that serves the
+tools lives inside the bundle, so it asks the system to open that exact copy,
+and runs the binary itself in a session where the system will not.
+
 `vitra mcp` is the same binary with no GUI. The agent's client spawns it, and it
 forwards tool calls to the running window over `~/.vitra/vitra.sock`, which is
 created with mode 0600. It lives and dies with the agent's session; nothing runs

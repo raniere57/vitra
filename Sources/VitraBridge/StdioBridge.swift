@@ -51,6 +51,32 @@ public enum StdioBridge {
 
 /// Runs tool calls in the GUI, over the socket.
 struct RemoteExecutor: ToolExecutor {
+    /// How long Vitra is given to come up and start answering.
+    private static let startupTimeout: TimeInterval = 20
+
+    /// Sends the call, starting Vitra first if nothing is listening.
+    ///
+    /// An agent asking to open a page should not have to ask a person to open
+    /// the app: a tool call is a good enough reason to launch it. Everything
+    /// after the launch is the same path a running app takes.
+    private static func send(_ request: JSONRPC.Request) throws -> JSONRPC.Response {
+        do {
+            return try SocketClient.send(request)
+        } catch SocketError.notRunning {
+            guard AppLauncher.launch() else {
+                throw ToolError("Vitra is not running and could not be started.")
+            }
+            let deadline = Date().addingTimeInterval(startupTimeout)
+            while Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.25)
+                if let response = try? SocketClient.send(request) { return response }
+            }
+            throw ToolError("Vitra was started but did not answer in time.")
+        } catch let error as SocketError {
+            throw ToolError("\(error). Open Vitra and try again.")
+        }
+    }
+
     func run(tool: String, arguments: JSONValue) async throws -> String {
         let request = JSONRPC.Request(
             id: .number(1),
@@ -58,12 +84,7 @@ struct RemoteExecutor: ToolExecutor {
             params: ["name": .string(tool), "arguments": arguments]
         )
 
-        let response: JSONRPC.Response
-        do {
-            response = try SocketClient.send(request)
-        } catch let error as SocketError {
-            throw ToolError("\(error). Open Vitra and try again.")
-        }
+        let response = try Self.send(request)
 
         if let error = response.error { throw ToolError(error.message) }
 
