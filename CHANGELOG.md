@@ -7,6 +7,12 @@ Dates are the day the disk image was built.
 
 - Double-clicking the preview panel's divider maximises it over the whole
   window; `Esc` restores the split.
+- Fixed: a pane no longer follows a layout down to a sliver. Maximising the
+  panel used to resize the shell to a couple of columns, which made whatever
+  was running reflow every line it held; Escape brought back a window of
+  wreckage. A pane's size now reaches the program only while the pane is
+  visible and wider than 100 points.
+- Fixed: the split's divider is no longer drawn over the maximised panel.
 
 ## 0.1.0 - 2026-08-31
 

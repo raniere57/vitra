@@ -985,6 +985,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         paneContainer.isHidden = false
         panelSplit?.adjustSubviews()
         panelSplit?.setPosition(width, ofDividerAt: 0)
+        panes.forEach { $0.becameVisible() }
         window?.makeFirstResponder(focusedPane)
     }
 
@@ -1159,6 +1160,13 @@ private final class PaneSplitView: NSSplitView, NSSplitViewDelegate {
 
     override var dividerColor: NSColor { NSColor(white: 0.22, alpha: 1) }
     override var dividerThickness: CGFloat { 1 }
+
+    /// No divider when there is nothing on both sides of it: hiding a subview
+    /// leaves AppKit drawing the line it was dragging.
+    override func drawDivider(in rect: NSRect) {
+        guard arrangedSubviews.filter({ !$0.isHidden }).count > 1 else { return }
+        super.drawDivider(in: rect)
+    }
 
     /// Called when a divider is double-clicked, which AppKit otherwise spends
     /// on collapsing a subview this split view never collapses.

@@ -101,6 +101,11 @@ final class TerminalView: NSView, NSMenuItemValidation {
     }
     private var isDropTarget = false
 
+    /// The narrowest a pane can get before its size stops reaching the program.
+    /// Narrower than any split this window allows, so only a transient layout —
+    /// or a hidden pane — ever falls under it.
+    private static let minimumLiveWidth: CGFloat = 100
+
     /// How thick the focus ring is drawn, in points.
     private static let focusRingWidth: CGFloat = 1
 
@@ -417,8 +422,22 @@ final class TerminalView: NSView, NSMenuItemValidation {
         updateDrawableSize()
     }
 
+    /// Brings the pane back after it was hidden — by the panel taking the whole
+    /// window, say. It deliberately did not resize while it could not be seen,
+    /// so the size and the drawable are caught up here in one go.
+    func becameVisible() {
+        updateDrawableSize()
+        setNeedsRender()
+    }
+
     private func updateDrawableSize() {
-        guard let metalLayer, bounds.width > 0, bounds.height > 0 else { return }
+        // A hidden pane, or one momentarily squeezed to a sliver by a layout
+        // pass, keeps the size it had: following it down would make the program
+        // reflow every line it holds, and growing back does not undo that.
+        guard let metalLayer, bounds.height > 0,
+              bounds.width >= TerminalView.minimumLiveWidth,
+              !isHiddenOrHasHiddenAncestor
+        else { return }
 
         metalLayer.contentsScale = scale
         let pixelSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
