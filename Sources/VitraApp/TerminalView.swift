@@ -36,6 +36,13 @@ final class TerminalView: NSView, NSMenuItemValidation {
     /// this is what the sessions sidebar marks as "you are here".
     var claudeSession: String?
 
+    /// The last title the program in this pane set, kept per pane rather than
+    /// per window: an unfocused split has a title too, and it is how a session
+    /// nobody launched from the sidebar is recognised.
+    private(set) var programTitle = ""
+
+    func recordTitle(_ title: String) { programTitle = title }
+
     /// Paused whenever there is nothing to draw, which is most of the time.
     private var displayLink: CADisplayLink?
     private var needsRedraw = true

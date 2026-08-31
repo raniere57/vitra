@@ -143,6 +143,44 @@ public enum ClaudeSessionStore {
     ///
     /// The directory comes first because `--resume` only lists the sessions of
     /// the directory it is run in.
+    /// The session a terminal is showing, recognised by the title it wears.
+    ///
+    /// Claude Code names the terminal after the conversation and decorates it
+    /// with a status glyph that changes while it works, so the comparison is
+    /// made on the letters alone. The directory is what keeps two projects with
+    /// a session called "Marketing" apart, and the newest wins when a project
+    /// has the same conversation twice.
+    public static func matching(
+        title: String,
+        directory: String?,
+        in sessions: [ClaudeSession]
+    ) -> ClaudeSession? {
+        let wanted = plainTitle(title)
+        // Two letters is not a name, it is a coincidence waiting to happen.
+        guard wanted.count >= 3 else { return nil }
+        return sessions
+            .filter { plainTitle($0.title) == wanted && belongs(directory, to: $0) }
+            .max { $0.modified < $1.modified }
+    }
+
+    /// Whether a terminal sitting in `directory` is inside a session's project.
+    /// A worktree runs under the project it belongs to, and a session's own path
+    /// can be the worktree while the terminal is at the root.
+    private static func belongs(_ directory: String?, to session: ClaudeSession) -> Bool {
+        guard let directory else { return true }
+        return directory == session.projectPath
+            || directory.hasPrefix(session.projectPath + "/")
+            || session.projectPath.hasPrefix(directory + "/")
+    }
+
+    /// A title with its decoration taken off: the glyph in front, the spaces
+    /// around it, and the case.
+    private static func plainTitle(_ title: String) -> String {
+        String(title.drop { !$0.isLetter && !$0.isNumber })
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
     public static func resumeCommand(for session: ClaudeSession) -> String {
         "cd " + ShellQuote.quote(session.projectPath) + " && claude --resume " + session.id + "\n"
     }

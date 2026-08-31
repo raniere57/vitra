@@ -52,6 +52,17 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
 
     /// Marks the session the focused pane is running.
     func setCurrentSession(_ id: String?) { sessions.setCurrent(id) }
+
+    /// The session list finished reading.
+    var onSessionsLoaded: (() -> Void)? {
+        get { sessions.onLoaded }
+        set { sessions.onLoaded = newValue }
+    }
+
+    /// The id of the session with this title in this folder, if there is one.
+    func session(named title: String, in directory: String?) -> String? {
+        sessions.session(named: title, in: directory)
+    }
     private let divider = NSBox()
     private let search = NSSearchField()
 

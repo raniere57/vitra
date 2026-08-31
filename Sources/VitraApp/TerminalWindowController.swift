@@ -118,6 +118,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         sidebar.onOpenDirectory = { [weak self] url, newTab in
             self?.openDirectory(url, newTab: newTab)
         }
+        sidebar.onSessionsLoaded = { [weak self] in
+            self?.refreshDirectory()
+        }
         sidebar.onOpenSession = { [weak self] session in
             self?.openSession(session)
         }
@@ -429,7 +432,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         let directory = focusedPane?.session.currentDirectory
         updateBreadcrumb()
         sidebar.reveal(directory)
-        sidebar.setCurrentSession(focusedPane?.claudeSession)
+        sidebar.setCurrentSession(currentSession)
         if let directory, let panel {
             if panel.isListingFiles {
                 // Browsed somewhere else on purpose while the pane was busy: a
@@ -441,6 +444,20 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
                 panel.rememberDirectory(directory)
             }
         }
+    }
+
+    /// The Claude Code session the focused pane is in, as far as it can be told.
+    ///
+    /// Told outright when the sidebar started it. Otherwise recognised: Claude
+    /// Code names the terminal after the conversation, so a pane running a
+    /// program in a folder that has sessions is matched to the one whose title
+    /// the pane is wearing. That covers the sessions started by hand, resumed
+    /// from inside Claude Code, or begun by a compaction — which is most of
+    /// them, and all of the ones the mark was missing.
+    private var currentSession: String? {
+        guard let pane = focusedPane, pane.session.isRunningProgram else { return nil }
+        if let explicit = pane.claudeSession { return explicit }
+        return sidebar.session(named: pane.programTitle, in: pane.session.currentDirectory?.path)
     }
 
     /// Shows where the focused shell is, relative to the window's folder.
@@ -570,6 +587,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         try? pane.apply(config)
 
         session.onTitleChanged = { [weak self, weak pane] title in
+            pane?.recordTitle(title)
             guard let self, let pane, self.focusedPane === pane else { return }
             // The emoji stays whatever the shell reports: it is how this tab is
             // told apart from the other five, and the tab bar shows little else.

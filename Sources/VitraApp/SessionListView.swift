@@ -11,6 +11,10 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
     /// which is the whole point: the sidebar drives the terminal you are in.
     var onOpen: ((ClaudeSession) -> Void)?
 
+    /// The list finished reading. Whoever marks the current session asks again
+    /// here: the answer is a lookup in a list that did not exist a moment ago.
+    var onLoaded: (() -> Void)?
+
     private let table = NSTableView()
     private let scroll = NSScrollView()
     private let status = NSTextField(labelWithString: "Reading sessions…")
@@ -161,6 +165,7 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
                     self.status.stringValue = "No sessions in ~/.claude/projects"
                 }
                 self.syncArchivedFooter()
+                self.onLoaded?()
             }
         }
     }
@@ -291,10 +296,25 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
 }
 
 extension SessionListView {
+    /// The session wearing this title in this folder, if the list holds it.
+    func session(named title: String, in directory: String?) -> String? {
+        ClaudeSessionStore.matching(title: title, directory: directory, in: sessions)?.id
+    }
+
     /// Marks the session the focused pane is running. Nil unmarks.
+    ///
+    /// Opens the project holding it: everything starts folded, and a mark
+    /// behind a fold answers the question for nobody.
     func setCurrent(_ id: String?) {
         guard id != current else { return }
         current = id
+        if let id, let session = sessions.first(where: { $0.id == id }),
+           !expanded.contains(session.projectName)
+        {
+            expanded.insert(session.projectName)
+            applyFilter()
+            return
+        }
         table.reloadData()
     }
 }

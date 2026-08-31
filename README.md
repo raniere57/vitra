@@ -117,8 +117,13 @@ older dated — because four sessions of the same project are told apart by *whe
 and not by "4 days ago". A session run in a worktree gets the worktree as a chip
 beside the date.
 
-The session the focused pane is in carries an accent rail down its leading edge
-and a heavier title: with a dozen conversations sharing three or four names,
+The session the focused pane is in carries an accent rail down its leading edge,
+a heavier title, and its project opens to show it — a mark behind a fold answers
+the question for nobody. The session is known outright when the sidebar started
+it, and recognised otherwise: Claude Code names the terminal after the
+conversation, so a pane running a program in a folder that has sessions is
+matched to the one whose title it is wearing, which covers the ones started by
+hand, resumed from inside Claude Code, or begun by a compaction. It reads: with a dozen conversations sharing three or four names,
 "which one am I in" is otherwise a question the sidebar cannot answer. It is a
 mark and not a selection — selection is the row you clicked last, which is a
 different question — and it follows the keyboard from pane to pane, clearing

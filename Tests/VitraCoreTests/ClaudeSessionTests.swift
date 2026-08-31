@@ -284,3 +284,44 @@ private func writeIndexEntry(
 
     #expect(sessions.map(\.id) == ["resumed"])
 }
+
+@Test func aTerminalIsMatchedToTheSessionItIsNamedAfter() {
+    let now = Date()
+    let sessions = [
+        ClaudeSession(
+            id: "old", title: "Marketing", projectPath: "/Users/x/farol",
+            modified: now.addingTimeInterval(-3600), isArchived: false
+        ),
+        ClaudeSession(
+            id: "new", title: "Marketing", projectPath: "/Users/x/farol",
+            modified: now, isArchived: false
+        ),
+        ClaudeSession(
+            id: "other", title: "Marketing", projectPath: "/Users/x/vitra",
+            modified: now, isArchived: false
+        ),
+    ]
+
+    // Claude Code decorates the title with a status glyph; the letters are what
+    // is compared, and the newest of a project's namesakes wins.
+    #expect(
+        ClaudeSessionStore.matching(title: "✳ Marketing", directory: "/Users/x/farol", in: sessions)?.id
+            == "new"
+    )
+    // The other project keeps its own session of the same name.
+    #expect(
+        ClaudeSessionStore.matching(title: "Marketing", directory: "/Users/x/vitra", in: sessions)?.id
+            == "other"
+    )
+    // A worktree is inside the project it belongs to.
+    #expect(
+        ClaudeSessionStore.matching(
+            title: "Marketing",
+            directory: "/Users/x/farol/.claude/worktrees/eager-lamport",
+            in: sessions
+        )?.id == "new"
+    )
+    #expect(ClaudeSessionStore.matching(title: "Marketing", directory: "/tmp", in: sessions) == nil)
+    // A title too short to be a name matches nothing at all.
+    #expect(ClaudeSessionStore.matching(title: "✳ ok", directory: nil, in: sessions) == nil)
+}
