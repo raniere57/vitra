@@ -3,7 +3,7 @@
 Every release, what changed in it, and the measurements behind the claims.
 Dates are the day the disk image was built.
 
-## Unreleased
+## 0.1.1 - 2026-08-31
 
 - Double-clicking the preview panel's divider maximises it over the whole
   window; `Esc` restores the split.

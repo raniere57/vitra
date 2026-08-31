@@ -12,10 +12,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/dist/Vitra.app/Contents/Info.plist" 2>/dev/null || echo 0.1.0)"
 STAGE="$ROOT/.build/dmg"
-VOLUME="Vitra $VERSION"
-DMG="$ROOT/dist/Vitra-$VERSION.dmg"
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -28,6 +25,12 @@ die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 # what the linker can prove nothing reaches.
 log "release build"
 VITRA_BUILD_FLAGS="-Xswiftc -Osize -Xlinker -dead_strip" "$ROOT/scripts/build-app.sh"
+
+# The version comes from the app that was just built, not from whatever was in
+# dist before it: reading it first shipped 0.1.1 in a disk image called 0.1.0.
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/dist/Vitra.app/Contents/Info.plist")"
+VOLUME="Vitra $VERSION"
+DMG="$ROOT/dist/Vitra-$VERSION.dmg"
 
 log "staging"
 rm -rf "$STAGE"
