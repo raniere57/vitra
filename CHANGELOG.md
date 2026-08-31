@@ -3,7 +3,7 @@
 Every release, what changed in it, and the measurements behind the claims.
 Dates are the day the disk image was built.
 
-## Unreleased
+## 0.1.2 - 2026-08-31
 
 - Fixed: a shell opened by Vitra no longer inherits the session markers of an
   agent that launched Vitra (`CLAUDECODE`, `CLAUDE_CODE_*`, `AI_AGENT`). A
