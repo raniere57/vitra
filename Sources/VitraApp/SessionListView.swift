@@ -32,9 +32,9 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
         case session(ClaudeSession)
     }
 
-    /// Projects the user has folded away. One busy project can hold twenty
-    /// sessions, and without this it buries every other project below it.
-    private var collapsed: Set<String> = []
+    /// Projects the user has opened. Everything starts folded: one busy project
+    /// holds twenty sessions, and open by default that is all the sidebar shows.
+    private var expanded: Set<String> = []
 
     /// Colours for the project dots, taken in order and kept per project so a
     /// project keeps its colour for as long as the list is open.
@@ -193,7 +193,7 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
             let sessions = grouped[project] ?? []
             // A filter that matched inside a folded project opens it: hiding a
             // result behind a fold the search itself caused is a dead end.
-            let isCollapsed = filter.isEmpty && collapsed.contains(project)
+            let isCollapsed = filter.isEmpty && !expanded.contains(project)
             let header = Row.project(project, count: sessions.count, collapsed: isCollapsed)
             return isCollapsed ? [header] : [header] + sessions.map(Row.session)
         }
@@ -219,7 +219,7 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
 
         switch rows[row] {
         case let .project(name, _, _):
-            if collapsed.contains(name) { collapsed.remove(name) } else { collapsed.insert(name) }
+            if expanded.contains(name) { expanded.remove(name) } else { expanded.insert(name) }
             applyFilter()
         case let .session(session):
             onOpen?(session)

@@ -105,8 +105,9 @@ the conversation reopens where it was, in the terminal you are already looking
 at. The filter field searches titles and project names.
 
 Sessions are grouped by project, newest project first, with a colour dot and the
-count beside the name; clicking a project's name folds it away, which is what
-keeps one busy repository from burying the other twenty. A hairline separates
+count beside the name; projects start folded and a click opens one, which keeps
+one busy repository from burying the other sixteen — every project fits on the
+screen at once. A hairline separates
 one session from the next, and each row carries the title over the day and the
 hour it was last worked on — today and yesterday named by the system, anything
 older dated — because four sessions of the same project are told apart by *when*
