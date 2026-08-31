@@ -107,9 +107,10 @@ diretório passa a ser o diretório de lá. Clicar nele abre uma aba que roda
 `ssh -t <host> 'cd "<diretório>" && exec "$SHELL" -l'`: um shell de login
 naquela pasta, no servidor, e a barra de título mostra `host:/diretório`. Todo favorito — local ou remoto — tem um campo **Command**: o que estiver ali é
 rodado quando a aba abre. Escreva `claude` e o favorito remoto vira
-`ssh -t <host> 'cd "<diretório>" && claude; exec "$SHELL" -l'`, com o shell de
-login esperando por baixo, então sair do Claude deixa você no servidor em vez de
-desconectar. Nada é
+`ssh -t <host> 'cd "<diretório>" && exec "$SHELL" -lic "claude; exec \"$SHELL\" -l"'`.
+O shell de lá é de login *e* interativo — é a única forma de o `PATH` que o nvm
+ou o `~/.local/bin` monta chegar ao comando — e o shell de login esperando por
+baixo faz sair do Claude deixar você no servidor em vez de desconectar. Nada é
 lido do disco daqui — o caminho de um favorito remoto nunca é tratado como
 caminho local — e a autenticação continua sendo a do seu ssh: o Vitra não guarda
 senha nem chave, só a linha que ele digita.
@@ -248,6 +249,11 @@ e a lista se move sozinha. A mesma regra decide o que uma pasta na barra lateral
 esquerda faz: `cd` num painel livre, aba nova num ocupado.
 
 ## Links
+
+`Cmd-Shift-B` (ou **View → Browser**) abre o navegador no painel com o cursor já
+na barra de endereço: digite `google.com` e Enter. Antes disso o navegador só
+aparecia por um link clicado ou por um agente pedindo — o que não é ter um
+navegador.
 
 Uma URL na saída é um link: um clique abre no painel de visualização — uma
 página que você olha de relance sem sair da janela — e `Cmd`-clique entrega ao

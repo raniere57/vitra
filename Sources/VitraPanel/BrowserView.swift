@@ -62,6 +62,13 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         }
     }
 
+    /// Puts the keyboard in the address bar, so opening the browser is one
+    /// gesture rather than two.
+    public func focusAddress() {
+        window?.makeFirstResponder(address)
+        address.currentEditor()?.selectAll(nil)
+    }
+
     public func goBack() { webView?.goBack() }
     public func goForward() { webView?.goForward() }
     public func reload() { webView?.reload() }

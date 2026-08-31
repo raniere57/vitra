@@ -346,6 +346,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         currentController?.togglePanel()
     }
 
+    /// Opens the browser in the side panel, with the address bar ready to type
+    /// in: without this the browser is only reachable by clicking a link or by
+    /// asking an agent, which is not a way to have a browser.
+    @objc func openBrowser(_ sender: Any?) {
+        currentController?.browser().focusAddress()
+    }
+
     /// `vitra open <file>`, which reaches the running app as an open request.
     ///
     /// Files are previewed in the front window rather than opened as documents:

@@ -102,6 +102,13 @@ enum MainMenu {
         )
         togglePanel.keyEquivalentModifierMask = [.command, .shift]
 
+        let browser = viewMenu.addItem(
+            withTitle: "Browser",
+            action: #selector(AppDelegate.openBrowser(_:)),
+            keyEquivalent: "b"
+        )
+        browser.keyEquivalentModifierMask = [.command, .shift]
+
         let toggleSidebar = viewMenu.addItem(
             withTitle: "Folders Sidebar",
             action: #selector(AppDelegate.toggleFolderSidebar(_:)),

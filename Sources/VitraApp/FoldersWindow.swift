@@ -21,7 +21,7 @@ final class FoldersWindow {
 
         let model = FoldersModel(bookmarks: bookmarks, onChange: onChange)
         let controller = NSHostingController(rootView: FoldersView(model: model))
-        let window = NSWindow(contentViewController: controller)
+        let window = ClosableOnEscape(contentViewController: controller)
         window.title = "Folders"
         window.styleMask = [.titled, .closable, .resizable]
         window.setContentSize(NSSize(width: 780, height: 520))
@@ -38,6 +38,15 @@ final class FoldersWindow {
         guard let controller = window?.contentViewController as? NSHostingController<FoldersView> else { return }
         controller.rootView.model.replace(bookmarks)
     }
+}
+
+/// A window Escape closes.
+///
+/// SwiftUI has no say in it: the form here is full of text fields, and a text
+/// field answers Escape by abandoning its own editing — the key only reaches
+/// the window when nothing above it wanted it.
+private final class ClosableOnEscape: NSWindow {
+    override func cancelOperation(_ sender: Any?) { close() }
 }
 
 @MainActor

@@ -81,17 +81,20 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
         // `$SHELL`, this side expands nothing, and the line stays readable —
         // which matters, because the user watches it run.
         var script = directory.isEmpty ? "" : "cd \"\(Self.escapedForDoubleQuotes(directory))\""
+        // `&&`, so a directory that is gone stops here instead of dropping the
+        // user into a shell somewhere else on the machine.
+        if !script.isEmpty { script += " && " }
         if line.isEmpty {
-            // `&&`, so a directory that is gone stops here instead of dropping
-            // the user into a shell somewhere else on the machine.
-            script += " &&"
+            script += "exec \"$SHELL\" -l"
         } else {
-            script += script.isEmpty ? line : " && " + line
-            // `;`, so quitting whatever was launched leaves a login shell on
-            // the far machine instead of disconnecting.
-            script += ";"
+            // Login *and* interactive, because what puts a tool like `claude`
+            // on the PATH — nvm, a `~/.local/bin` line — lives in the file the
+            // far shell reads only when it is both, and `ssh host command` is
+            // neither. The login shell after it means quitting the command
+            // leaves the user on that machine instead of disconnecting.
+            let inner = Self.escapedForDoubleQuotes("\(line); exec \"$SHELL\" -l")
+            script += "exec \"$SHELL\" -lic \"\(inner)\""
         }
-        script += " exec \"$SHELL\" -l"
         return "ssh -t " + host + " " + ShellQuote.quote(script) + "\n"
     }
 
