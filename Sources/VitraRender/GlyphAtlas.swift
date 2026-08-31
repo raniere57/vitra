@@ -59,7 +59,27 @@ public final class GlyphAtlas {
     private var scratch: UnsafeMutablePointer<UInt8>
     private let scratchSide: Int
 
-    public init(device: MTLDevice, fonts: FontSet, size: Int = 2048) throws {
+    /// A sheet big enough for about fifteen hundred glyphs at this cell size,
+    /// rounded up to a power of two and never below 1024.
+    ///
+    /// A fixed 2048x2048 sheet is 4 MB of texture whatever the font: at a 13pt
+    /// cell that is room for twenty thousand glyphs, for a session that draws a
+    /// few hundred. A full sheet is not an error — it clears and rasterizes
+    /// again — so the cost of guessing low is a little work, not a wrong pixel.
+    public static func side(for metrics: FontMetrics) -> Int {
+        let area = Double(metrics.cellWidth + 2) * Double(metrics.cellHeight + 2) * 1500
+        let exact = area.squareRoot()
+        let power = 1 << Int(log2(max(exact, 1)).rounded(.up))
+        // Never past 2048: a bigger sheet than that trades 12 MB of texture for
+        // fewer resets on a font nobody runs a terminal in.
+        return min(2048, max(1024, power))
+    }
+
+    public convenience init(device: MTLDevice, fonts: FontSet) throws {
+        try self.init(device: device, fonts: fonts, size: GlyphAtlas.side(for: fonts.metrics))
+    }
+
+    public init(device: MTLDevice, fonts: FontSet, size: Int) throws {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .r8Unorm,
             width: size,

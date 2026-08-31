@@ -392,3 +392,72 @@ mapped: WebCore 10.9 MB resident, JavaScriptCore 8.7 MB, WebKit 4.8 MB — about
 and the preferences window, is another 9.5 MB. Both are dyld loading what the
 binary links; deferring them means loading the browser from a bundle at the
 moment it opens, and writing the panels in AppKit.
+
+## The windows nobody was looking at
+
+Eight tabs, each shown once, then the app hidden:
+
+```
+Physical footprint:  494.4M
+IOSurface            409.1M   (51 surfaces)
+```
+
+A tab in macOS is a window of its own, and every window that has been drawn
+keeps the surfaces the GPU composites from — two of them, 25 MB each at this
+window size — for as long as its layer has a size. Nobody was looking at seven
+of those eight windows, and the display link on each was still running: a
+command printing in a background tab was being rendered at 60 frames a second
+into a surface no screen would ever show.
+
+A window that AppKit reports as not visible now stops drawing and hands its
+surfaces back. Same eight tabs, same hide:
+
+```
+Physical footprint:   80.6M      (was 494.4M)
+```
+
+And the shell keeps running. 56 MB of output printed into a hidden window:
+
+```
++0.03s CPU hidden      (+0.21s visible)
+```
+
+## What linking WebKit actually costs
+
+An earlier note here said deferring WebKit and SwiftUI would save about 34 MB.
+That was wrong, and the correction is worth keeping. Their pages in a Vitra
+with no browser open:
+
+```
+WebCore          57.7M mapped   29.6M resident   0K dirty
+JavaScriptCore   27.0M mapped   15.2M resident   0K dirty
+WebKit           21.9M mapped   10.3M resident   0K dirty
+SwiftUI          23.3M mapped    5.6M resident   0K dirty
+```
+
+Resident, but clean, file-backed and shared out of the dyld cache with every
+other process on the machine. None of it counts toward the footprint. What
+linking them really costs is their writable data — `WebKit` 195 KB,
+`SwiftUI` 27 KB, and the rest of `__DATA_DIRTY` — under 2 MB all told.
+Deferring them would buy that, not 34 MB.
+
+## What a terminal costs when it is working
+
+Cold numbers on this machine, one window, SF Mono 13:
+
+```
+launch to serving          0.30s
+idle, 25 seconds           0.47s CPU total, launch included
+56 MB of output            +0.21s CPU
+1.1 GB of output           6.0s CPU   (~5.5s per GB)
+```
+
+The instance buffer was being refilled in place while the GPU could still be
+reading the previous frame. It is two buffers and a semaphore now: the same
+throughput, without the race.
+
+The glyph atlas was a 2048x2048 sheet whatever the font — 4 MB for a session
+that draws a few hundred glyphs. It is now sized from the cell: 1024x1024 at
+the default 13pt, still 2048 where the cells are big enough to need it. A full
+sheet clears and rasterizes again, so guessing low costs work, never a wrong
+pixel.

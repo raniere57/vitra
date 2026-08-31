@@ -101,6 +101,9 @@ final class TerminalView: NSView, NSMenuItemValidation {
     }
     private var isDropTarget = false
 
+    /// Whether the pane is being drawn at all. See `setDrawingActive`.
+    private var isDrawingActive = true
+
     /// The narrowest a pane can get before its size stops reaching the program.
     /// Narrower than any split this window allows, so only a transient layout —
     /// or a hidden pane — ever falls under it.
@@ -406,6 +409,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
         }
         updateDrawableSize()
         updateBlinkTimer()
+        guard isDrawingActive else { return }
         startDisplayLink()
     }
 
@@ -422,6 +426,33 @@ final class TerminalView: NSView, NSMenuItemValidation {
         updateDrawableSize()
     }
 
+    /// Whether this pane is on a screen someone can see.
+    ///
+    /// A pane in a background tab, a minimised window or a hidden app is not
+    /// drawn at all: the display link stops, and the window-sized surfaces the
+    /// GPU composites from are handed back. Those surfaces are the single
+    /// largest thing this app holds — 25 MB each, two per pane — and macOS
+    /// keeps them per layer for as long as the layer has a size, whether or not
+    /// anyone is looking. Eight tabs that had each been shown once held 409 MB
+    /// of them.
+    ///
+    /// The shell keeps running and its output keeps being parsed. Only the
+    /// drawing stops, and `becameVisible()` starts it again.
+    func setDrawingActive(_ active: Bool) {
+        guard active != isDrawingActive else { return }
+        isDrawingActive = active
+
+        guard active else {
+            stopDisplayLink()
+            // A one-pixel drawable is the smallest a layer can be asked for, and
+            // asking releases the pool it was holding.
+            metalLayer?.drawableSize = CGSize(width: 1, height: 1)
+            return
+        }
+        becameVisible()
+        startDisplayLink()
+    }
+
     /// Brings the pane back after it was hidden — by the panel taking the whole
     /// window, say. It deliberately did not resize while it could not be seen,
     /// so the size and the drawable are caught up here in one go.
@@ -431,6 +462,10 @@ final class TerminalView: NSView, NSMenuItemValidation {
     }
 
     private func updateDrawableSize() {
+        // Nothing to size while the pane is not being drawn; setDrawingActive
+        // puts the real size back on the way in.
+        guard isDrawingActive else { return }
+
         // A hidden pane, or one momentarily squeezed to a sliver by a layout
         // pass, keeps the size it had: following it down would make the program
         // reflow every line it holds, and growing back does not undo that.

@@ -1119,6 +1119,16 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// app, leaving everything running. Clicking the Dock icon brings it back.
     /// Cmd-Q quits, `Close Pane` closes one terminal, and the × in a pane's
     /// corner does the same.
+    /// A window that is not on screen stops drawing.
+    ///
+    /// Switching tabs, minimising, hiding the app: AppKit says so here, and
+    /// there is no reason to spend a display link or 50 MB of GPU surfaces on a
+    /// window nobody is looking at. Whatever is running keeps running.
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        let visible = window?.occlusionState.contains(.visible) ?? true
+        panes.forEach { $0.setDrawingActive(visible) }
+    }
+
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         // A tab among others closes: that button means "close this tab", and
         // the rest of the workspace stays on screen. The last window is the

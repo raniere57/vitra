@@ -44,8 +44,18 @@ public final class TerminalRenderer {
     private let pipeline: MTLRenderPipelineState
 
     private var instances: [CellInstance] = []
-    private var instanceBuffer: MTLBuffer?
-    private var instanceCapacity = 0
+
+    /// Two instance buffers, used in turn, and a permit for each.
+    ///
+    /// A frame is encoded from one buffer while the GPU may still be reading
+    /// the one before it, so refilling a single buffer in place was a race:
+    /// rare, invisible most of the time, and a torn frame when it was not. Two
+    /// buffers and a semaphore make the CPU wait only when it is a whole frame
+    /// ahead, which is exactly when waiting is right.
+    private var instanceBuffers: [MTLBuffer?] = [nil, nil]
+    private var instanceCapacities = [0, 0]
+    private var nextBuffer = 0
+    private let framesInFlight = DispatchSemaphore(value: 2)
 
     /// Extra colour applied to selected cells, blended over their background.
     public var selectionColor = TerminalColor(red: 60, green: 90, blue: 140)
@@ -215,7 +225,8 @@ public final class TerminalRenderer {
         build(from: snapshot, cursorOn: cursorOn, padding: padding, gutter: gutter)
         // An empty instance list still needs the pass: the clear is what paints
         // the terminal background, and skipping it leaves the drawable undefined.
-        let buffer: MTLBuffer? = uploadInstances() ? instanceBuffer : nil
+        framesInFlight.wait()
+        let buffer = uploadInstances()
 
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = target
@@ -227,7 +238,11 @@ public final class TerminalRenderer {
 
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass)
-        else { return nil }
+        else {
+            framesInFlight.signal()
+            return nil
+        }
+        commandBuffer.addCompletedHandler { [framesInFlight] _ in framesInFlight.signal() }
 
         if !instances.isEmpty, let buffer {
             var uniforms = Uniforms(
@@ -439,25 +454,30 @@ public final class TerminalRenderer {
 
     // MARK: - Buffers
 
-    private func uploadInstances() -> Bool {
-        guard !instances.isEmpty else { return true }
+    /// Fills the next buffer in the rotation and returns it, or nil when there
+    /// is nothing to draw.
+    private func uploadInstances() -> MTLBuffer? {
+        guard !instances.isEmpty else { return nil }
 
-        if instanceCapacity < instances.count {
+        let slot = nextBuffer
+        nextBuffer = (nextBuffer + 1) % instanceBuffers.count
+
+        if instanceCapacities[slot] < instances.count {
             // Grow with headroom so a busy screen does not reallocate every frame.
             let capacity = max(instances.count * 2, 4096)
             guard let buffer = device.makeBuffer(
                 length: capacity * MemoryLayout<CellInstance>.stride,
                 options: .storageModeShared
-            ) else { return false }
-            instanceBuffer = buffer
-            instanceCapacity = capacity
+            ) else { return nil }
+            instanceBuffers[slot] = buffer
+            instanceCapacities[slot] = capacity
         }
 
-        guard let buffer = instanceBuffer else { return false }
+        guard let buffer = instanceBuffers[slot] else { return nil }
         instances.withUnsafeBytes { source in
             buffer.contents().copyMemory(from: source.baseAddress!, byteCount: source.count)
         }
-        return true
+        return buffer
     }
 }
 

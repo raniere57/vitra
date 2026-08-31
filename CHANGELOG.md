@@ -11,6 +11,18 @@ Dates are the day the disk image was built.
   that opened the window and turned its own transcript off. Anything the user
   sets in a profile still comes back when the shell reads that profile.
 
+## Unreleased
+
+- Windows nobody is looking at stop drawing. A background tab, a minimised
+  window or a hidden app now releases the GPU surfaces it was holding and stops
+  its display link. Eight tabs went from **494 MB to 80 MB**, and 56 MB of
+  output printed into a hidden window costs **0.03s of CPU instead of 0.21s**.
+  Whatever is running keeps running, and comes back drawn.
+- The glyph atlas is sized from the font's cell rather than always 2048x2048:
+  1 MB instead of 4 MB at the default size.
+- Fixed: the instance buffer was refilled while the GPU could still be reading
+  the previous frame. Two buffers and a semaphore now.
+
 ## 0.1.1 - 2026-08-31
 
 - Double-clicking the preview panel's divider maximises it over the whole
