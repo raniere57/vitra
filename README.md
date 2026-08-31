@@ -401,8 +401,9 @@ claude mcp add vitra -- vitra mcp
 | `preview_file` | show a file in the panel |
 | `browser_open` | load a URL in the browser panel |
 | `browser_snapshot` | list the visible, usable elements, each with a ref |
-| `browser_click` | click a ref |
+| `browser_click` | click a ref, waiting out whatever it navigates to |
 | `browser_type` | type into a ref, optionally submitting |
+| `browser_back` / `browser_forward` | step through the panel's history |
 | `browser_eval` | run JavaScript and get the result |
 | `browser_screenshot` | save a PNG and return its path |
 | `browser_console` | read the page's console output |

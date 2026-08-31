@@ -28,19 +28,31 @@ public enum MCPTools {
         ),
         tool(
             "browser_click",
-            "Click the element with the given ref from the most recent snapshot.",
+            "Click the element with the given ref from the most recent snapshot. If the click navigates, this waits for the new page and reports where it landed.",
             properties: ["ref": string("Element ref from browser_snapshot, such as e12.")],
             required: ["ref"]
         ),
         tool(
             "browser_type",
-            "Type text into the element with the given ref, replacing what it holds.",
+            "Type text into the element with the given ref, replacing what it holds. With submit, this waits for whatever the submission navigates to.",
             properties: [
                 "ref": string("Element ref from browser_snapshot."),
                 "text": string("Text to type."),
                 "submit": ["type": "boolean", "description": "Press Enter afterwards. Defaults to false."],
             ],
             required: ["ref", "text"]
+        ),
+        tool(
+            "browser_back",
+            "Go back one step in the browser panel's history and wait for the page to load. Refs from an earlier snapshot do not survive it.",
+            properties: [:],
+            required: []
+        ),
+        tool(
+            "browser_forward",
+            "Go forward one step in the browser panel's history and wait for the page to load.",
+            properties: [:],
+            required: []
         ),
         tool(
             "browser_eval",

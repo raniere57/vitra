@@ -67,6 +67,10 @@ public final class TerminalRenderer {
     }
 
     private static func atlas(device: MTLDevice, fonts: FontSet) throws -> GlyphAtlas {
+        // The atlas caches glyphs as it draws them, so sharing one is only safe
+        // between renderers on the same thread. Every pane draws on the main
+        // thread; anything else - a test, a headless render - gets its own.
+        guard Thread.isMainThread else { return try GlyphAtlas(device: device, fonts: fonts) }
         atlasLock.lock()
         defer { atlasLock.unlock() }
 

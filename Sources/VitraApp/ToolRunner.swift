@@ -39,6 +39,8 @@ final class ToolRunner {
         case "browser_snapshot": return try await browser().snapshot()
         case "browser_click": return try await browserClick(arguments)
         case "browser_type": return try await browserType(arguments)
+        case "browser_back": return try await browser().back()
+        case "browser_forward": return try await browser().forward()
         case "browser_eval": return try await browserEval(arguments)
         case "browser_screenshot": return try await browserScreenshot()
         case "browser_console": return try browserConsole(arguments)

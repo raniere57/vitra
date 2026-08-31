@@ -66,6 +66,85 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     public func goForward() { webView?.goForward() }
     public func reload() { webView?.reload() }
 
+    /// Steps back through history and reports where the page landed.
+    public func back() async throws -> String {
+        guard let webView else { throw ToolFailure("the browser is not open") }
+        guard webView.canGoBack else { throw ToolFailure("there is nothing to go back to") }
+        let from = webView.url
+        webView.goBack()
+        return await settled(from: from, requiringChange: true) ?? "went back to \(describeLocation())"
+    }
+
+    /// Steps forward through history and reports where the page landed.
+    public func forward() async throws -> String {
+        guard let webView else { throw ToolFailure("the browser is not open") }
+        guard webView.canGoForward else { throw ToolFailure("there is nothing to go forward to") }
+        let from = webView.url
+        webView.goForward()
+        return await settled(from: from, requiringChange: true) ?? "went forward to \(describeLocation())"
+    }
+
+    /// Waits out a navigation an action may have started, and describes where
+    /// the page ended up. `nil` when nothing moved.
+    ///
+    /// A click is not a request to navigate — most clicks are not — so this
+    /// waits briefly for one to begin, and only then for it to finish. Both a
+    /// real load and a history-API change count: single-page applications never
+    /// set `isLoading` at all, and only the URL says they moved.
+    private func settled(
+        from url: URL?,
+        startingWithin start: TimeInterval = 0.6,
+        requiringChange: Bool = false
+    ) async -> String? {
+        // Going back is known to move, so it is worth waiting longer for the
+        // address to actually change: a single-page application answers a
+        // history step without ever loading anything.
+        let window = requiringChange ? Self.historyTimeout : start
+        let began = Date()
+        while Date().timeIntervalSince(began) < window {
+            if webView?.url != url { break }
+            if !requiringChange, webView?.isLoading == true { break }
+            try? await Task.sleep(for: .milliseconds(40))
+        }
+        guard webView?.isLoading == true || webView?.url != url else { return nil }
+
+        let finishing = Date()
+        while webView?.isLoading == true, Date().timeIntervalSince(finishing) < Self.navigationTimeout {
+            try? await Task.sleep(for: .milliseconds(40))
+        }
+        if webView?.isLoading == true { return "still loading \(describeLocation())" }
+
+        // The address can change once more as a framework finishes routing, so
+        // the page is reported once it has held still.
+        await holdStill()
+        return "navigated to \(describeLocation())"
+    }
+
+    /// Waits for the address to stop moving, which is what says a single-page
+    /// application has finished routing.
+    private func holdStill(for quiet: TimeInterval = 0.25) async {
+        // The title as well as the address: a router changes the address first
+        // and the title a beat later, and the title is what an agent reads.
+        var last = describeLocation()
+        let deadline = Date().addingTimeInterval(Self.settleTimeout)
+        var still = Date()
+        while Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(40))
+            let now = describeLocation()
+            if now != last {
+                last = now
+                still = Date()
+                continue
+            }
+            if Date().timeIntervalSince(still) >= quiet { return }
+        }
+    }
+
+    private func describeLocation() -> String {
+        let url = currentURL?.absoluteString ?? "about:blank"
+        return currentTitle.isEmpty ? url : "\(url) — \(currentTitle)"
+    }
+
     // MARK: - Automation
 
     /// Runs `script` in the isolated world and returns whatever it returns.
@@ -113,15 +192,27 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     }
 
     public func click(ref: String) async throws -> String {
+        let from = currentURL
         let result = try await outcome(of: BrowserScripts.click(ref: ref), ref: ref)
         let role = result["role"] as? String ?? "element"
         let label = result["label"] as? String ?? ""
-        return label.isEmpty ? "clicked \(ref) (\(role))" : "clicked \(ref) (\(role) \"\(label)\")"
+        let what = label.isEmpty ? "clicked \(ref) (\(role))" : "clicked \(ref) (\(role) \"\(label)\")"
+        return await report(what, movedFrom: from)
     }
 
     public func type(ref: String, text: String, submit: Bool) async throws -> String {
+        let from = currentURL
         _ = try await outcome(of: BrowserScripts.type(ref: ref, text: text, submit: submit), ref: ref)
-        return submit ? "typed into \(ref) and submitted" : "typed into \(ref)"
+        let what = submit ? "typed into \(ref) and submitted" : "typed into \(ref)"
+        // Typing without submitting cannot navigate, so it is not waited on.
+        guard submit else { return what }
+        return await report(what, movedFrom: from)
+    }
+
+    /// Adds where the page went, and the reminder that the refs are stale now.
+    private func report(_ what: String, movedFrom url: URL?) async -> String {
+        guard let landed = await settled(from: url) else { return what }
+        return "\(what)\n\(landed)\nThe refs from the last snapshot are gone; take a new one."
     }
 
     /// Runs a script that answers `{ok: …}` and turns a dead ref into a clear error.
@@ -159,6 +250,15 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     }
 
     public func clearConsole() { console.removeAll() }
+
+    /// How long a navigation started by a click is waited on before the tool
+    /// answers anyway: a page that never finishes should not hang the agent.
+    private static let navigationTimeout: TimeInterval = 20
+
+    /// How long a history step is given to change the address, and how long the
+    /// address is watched afterwards before the tool answers with what it sees.
+    private static let historyTimeout: TimeInterval = 3
+    private static let settleTimeout: TimeInterval = 2
 
     // MARK: - Lifecycle
 

@@ -13,6 +13,12 @@ Dates are the day the disk image was built.
   wreckage. A pane's size now reaches the program only while the pane is
   visible and wider than 100 points.
 - Fixed: the split's divider is no longer drawn over the maximised panel.
+- `browser_back` and `browser_forward`: history in the browser panel, each
+  waiting for the page to actually change before answering.
+- `browser_click` and `browser_type` with submit now wait out whatever
+  navigation they started and report where the page landed, including
+  single-page applications that change the address without loading anything.
+  The answer says the old refs are gone, because they are.
 - The default font is SF Mono instead of Menlo. It ships with macOS, so nothing
   is installed and nothing is bundled; `family = "SF Mono"` in the config now
   resolves through the system font, which is the only way to ask for it.
