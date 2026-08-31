@@ -102,7 +102,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
     private var isDropTarget = false
 
     /// How thick the focus ring is drawn, in points.
-    private static let focusRingWidth: CGFloat = 2
+    private static let focusRingWidth: CGFloat = 1
 
     init(
         session: TerminalSession,
@@ -150,7 +150,6 @@ final class TerminalView: NSView, NSMenuItemValidation {
         focusBar.wantsLayer = true
         focusBar.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor
         focusBar.layer?.borderWidth = TerminalView.focusRingWidth
-        focusBar.layer?.cornerRadius = 5
         focusBar.autoresizingMask = [.width, .height]
         focusBar.isHidden = true
         addSubview(focusBar)
