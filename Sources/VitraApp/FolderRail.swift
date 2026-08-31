@@ -17,6 +17,9 @@ final class FolderRail: NSView {
     private let stack = NSStackView()
     private var bookmarks: [Bookmark] = []
     private var current: Bookmark.ID?
+    /// The terminal's own text colour. The rail is dark chrome, and the system
+    /// greys are all but invisible on it.
+    private var foreground: NSColor = .labelColor
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -46,6 +49,8 @@ final class FolderRail: NSView {
     func apply(_ config: Config) {
         let background = NSColor(hex: config.theme.background.hex) ?? .black
         layer?.backgroundColor = background.blended(withFraction: 0.04, of: .white)?.cgColor
+        foreground = NSColor(hex: config.theme.foreground.hex) ?? .labelColor
+        update(bookmarks: bookmarks, current: current)
         needsDisplay = true
     }
 
@@ -74,15 +79,10 @@ final class FolderRail: NSView {
 
     private func button(for bookmark: Bookmark, index: Int) -> NSButton {
         let button = RailButton()
-        button.image = NSImage(systemSymbolName: bookmark.symbolName, accessibilityDescription: bookmark.name)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 15, weight: .regular))
-        // NSButton's stock title is the word "Button": an icon-only rail button
-        // has to be told it has no title, or that word is what the rail shows.
+        button.image = NSImage(systemSymbolName: bookmark.symbolName, accessibilityDescription: bookmark.name)
         button.title = ""
         button.imagePosition = .imageOnly
         button.isBordered = false
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 9
         button.toolTip = "\(bookmark.name) — \(bookmark.displayPath)"
         button.target = self
         button.action = #selector(openTapped(_:))
@@ -93,17 +93,12 @@ final class FolderRail: NSView {
             button.heightAnchor.constraint(equalToConstant: 34),
         ])
 
-        // The window's own folder is lit in its colour; the rest sit back so the
-        // lit one is findable without reading a single label.
-        let isCurrent = bookmark.id == current
-        let accent = bookmark.colorHex.flatMap { NSColor(hex: $0) } ?? .controlAccentColor
-        button.layer?.backgroundColor = isCurrent
-            ? accent.withAlphaComponent(0.16).cgColor
-            : NSColor.clear.cgColor
-        button.layer?.borderWidth = isCurrent ? 1 : 0
-        button.layer?.borderColor = accent.withAlphaComponent(0.5).cgColor
-        button.contentTintColor = isCurrent ? accent : .secondaryLabelColor
-        button.alphaValue = isCurrent ? 1 : 0.8
+        // The window's own folder is lit in its colour; the rest sit back, but
+        // not so far back that they cannot be read — and the one under the
+        // pointer comes forward, which is what says these are buttons.
+        button.isCurrent = bookmark.id == current
+        button.accent = bookmark.colorHex.flatMap { NSColor(hex: $0) } ?? .controlAccentColor
+        button.foreground = foreground
         return button
     }
 
@@ -119,7 +114,7 @@ final class FolderRail: NSView {
         button.target = self
         button.action = #selector(menuTapped(_:))
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.alphaValue = 0.6
+        button.foreground = foreground
         NSLayoutConstraint.activate([
             button.widthAnchor.constraint(equalToConstant: 34),
             button.heightAnchor.constraint(equalToConstant: 30),
@@ -142,15 +137,65 @@ final class FolderRail: NSView {
 /// The stock bezel paints a light rounded rectangle that fights the terminal
 /// behind it; the tint and the ring come from the layer instead.
 private final class RailButton: NSButton {
+    /// The terminal's text colour, which the icon is drawn in.
+    var foreground: NSColor = .labelColor { didSet { needsDisplay = true } }
+    /// The folder's own colour, used while it is the window's folder.
+    var accent: NSColor = .controlAccentColor { didSet { needsDisplay = true } }
+    var isCurrent = false { didSet { needsDisplay = true } }
+
+    private var isHovered = false { didSet { needsDisplay = true } }
+    private var tracking: NSTrackingArea?
+
+    /// A tracking area that follows the button, so hover keeps working after a
+    /// window resize or a favourite being added.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+
     override func draw(_ dirtyRect: NSRect) {
-        attributedTitle.draw(in: titleRect())
-        if let image {
-            let size = NSSize(width: 13, height: 13)
-            let origin = NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2)
-            image.isTemplate = true
-            NSColor.secondaryLabelColor.set()
-            image.draw(in: NSRect(origin: origin, size: size))
+        let plate = bounds.insetBy(dx: 1, dy: 1)
+        if isCurrent {
+            accent.withAlphaComponent(0.18).setFill()
+            NSBezierPath(roundedRect: plate, xRadius: 9, yRadius: 9).fill()
+            accent.withAlphaComponent(0.55).setStroke()
+            NSBezierPath(roundedRect: plate, xRadius: 9, yRadius: 9).stroke()
+        } else if isHovered {
+            foreground.withAlphaComponent(0.12).setFill()
+            NSBezierPath(roundedRect: plate, xRadius: 9, yRadius: 9).fill()
         }
+
+        attributedTitle.draw(in: titleRect())
+        guard let image else { return }
+
+        // Resting icons are readable, not decorative: the terminal's own text
+        // colour held back, rather than a system grey that vanishes on a dark
+        // rail. The colour goes through the symbol configuration because a
+        // template image ignores the fill colour that is set around it.
+        let colour = isCurrent
+            ? accent
+            : foreground.withAlphaComponent(isHovered ? 1 : 0.7)
+        let configuration = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+            .applying(NSImage.SymbolConfiguration(hierarchicalColor: colour))
+        guard let symbol = image.withSymbolConfiguration(configuration) else { return }
+
+        let size = symbol.size
+        symbol.draw(in: NSRect(
+            x: ((bounds.width - size.width) / 2).rounded(),
+            y: ((bounds.height - size.height) / 2).rounded(),
+            width: size.width,
+            height: size.height
+        ))
     }
 
     private func titleRect() -> NSRect {
