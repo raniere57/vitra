@@ -40,7 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loadConfiguration()
         bookmarks = bookmarkStore.load()
         rebuildMenu()
-        if pendingPreviews.isEmpty { newWindow(nil) }
+        if pendingPreviews.isEmpty, !restoreLayout() { newWindow(nil) }
         showPendingPreviews()
         startBridge()
         SelfCapture.scheduleIfRequested()
@@ -227,7 +227,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        saveLayout()
         bridge?.stop()
+    }
+
+    // MARK: - Layout
+
+    /// Writes down how the windows were arranged, so the next launch can open
+    /// them again rather than making the user rebuild four panes by hand.
+    private func saveLayout() {
+        // A window opened on a command (`vitra -e ...`) is a one-off, and a
+        // self-shot run is a measurement: neither is a workspace worth keeping,
+        // unless the run brought its own layout file to write to.
+        guard Self.commandFromArguments() == nil, Self.savesLayout else { return }
+
+        // Tabs of one window share a tab group; separate windows do not. The
+        // group is identified by position in the list so it survives the trip
+        // through JSON.
+        var groups: [ObjectIdentifier: Int] = [:]
+        var saved: [Layout.Window] = []
+        for controller in windows {
+            var group = groups.count
+            if let tabGroup = controller.window?.tabGroup {
+                let key = ObjectIdentifier(tabGroup)
+                if let existing = groups[key] {
+                    group = existing
+                } else {
+                    groups[key] = group
+                }
+            }
+            guard let window = controller.layout(tabGroup: group) else { continue }
+            saved.append(window)
+        }
+
+        guard !saved.isEmpty else {
+            Layout.forget()
+            return
+        }
+        try? Layout(windows: saved).save()
+    }
+
+    /// Opens the windows the last run left behind. False when there are none.
+    @discardableResult
+    private func restoreLayout() -> Bool {
+        guard Self.commandFromArguments() == nil, Self.savesLayout, let layout = Layout.load()
+        else { return false }
+
+        var leaders: [Int: NSWindow] = [:]
+        for saved in layout.windows {
+            let bookmark = saved.directory.map {
+                Bookmark(name: URL(fileURLWithPath: $0).lastPathComponent, path: $0)
+            }
+            makeWindow(asTabOf: leaders[saved.tabGroup], bookmark: bookmark, restoring: saved)
+            guard let controller = windows.last, let window = controller.window else { continue }
+            if leaders[saved.tabGroup] == nil { leaders[saved.tabGroup] = window }
+            window.setFrame(
+                NSRect(
+                    x: saved.frame.x,
+                    y: saved.frame.y,
+                    width: saved.frame.width,
+                    height: saved.frame.height
+                ),
+                display: false
+            )
+        }
+        return !windows.isEmpty
     }
 
     @objc func togglePreviewPanel(_ sender: Any?) {
@@ -282,7 +346,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         asTabOf sibling: NSWindow?,
         bookmark: Bookmark? = nil,
         running: String? = nil,
-        session: String? = nil
+        session: String? = nil,
+        restoring: Layout.Window? = nil
     ) {
         guard let device else { return }
         do {
@@ -302,6 +367,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 window.makeKeyAndOrderFront(nil)
             } else {
                 controller.showWindow(nil)
+            }
+
+            // After the window is on screen: the split proportions are shares of
+            // a size, and a window that has not been laid out has none.
+            if let restoring {
+                controller.window?.layoutIfNeeded()
+                controller.restore(restoring)
             }
 
             // The shell has to be up to read what it is handed: one hop, after
@@ -328,6 +400,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// `-e <command> [args...]` runs a command instead of the login shell, the
     /// same convention xterm established.
+    /// Whether this run owns a workspace worth remembering.
+    private static var savesLayout: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["VITRA_SELF_SHOT"] == nil || environment["VITRA_LAYOUT_PATH"] != nil
+    }
+
     private static func commandFromArguments() -> [String]? {
         let arguments = CommandLine.arguments
         guard let index = arguments.firstIndex(of: "-e"), index + 1 < arguments.count else { return nil }

@@ -207,6 +207,22 @@ whatever program is running. A pane that is not the key window always shows a
 hollow block — the position is still worth knowing, the claim on your typing is
 not.
 
+## The workspace comes back
+
+Quitting writes the arrangement to `~/.vitra/layout.json`, and the next launch
+opens it again: the windows and their tabs, the split tree at the proportions
+you left it, the folder each pane was in, the sidebar you had open and on which
+of its two halves. A pane that was in a Claude Code session runs
+`claude --resume <id>` for you, because that is the part that is minutes of work
+to rebuild by hand.
+
+The scrollback does not come back. A restored pane is a fresh shell in the same
+folder — replaying output no program produced would be a lie, and a terminal
+that lies about what ran in it is worse than one that starts empty.
+
+Nothing is remembered for a window opened on a command (`vitra -e …`): that is a
+one-off, not a workspace. Deleting the file is how you start clean.
+
 ## Command blocks
 
 The shell tells Vitra where each command starts and ends (OSC 133), and the

@@ -542,7 +542,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     // MARK: - Panes
 
-    private func makePane() throws -> TerminalView {
+    private func makePane(in directory: String? = nil) throws -> TerminalView {
         let size = TerminalSize(columns: 80, rows: 24)
         let core = try GhosttyTerminalCore(size: size)
         let executable = command?.first ?? config.shell ?? ShellEnvironment.loginShell()
@@ -558,7 +558,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
                 colorDefaults: config.colorDefaults
             ),
             size: size,
-            workingDirectory: bookmark?.exists == true ? bookmark?.url.path : nil
+            workingDirectory: directory ?? (bookmark?.exists == true ? bookmark?.url.path : nil)
         )
         let pane = try TerminalView(
             session: session,
@@ -621,6 +621,134 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     var focusedPane: TerminalView? {
         if let responder = window?.firstResponder as? TerminalView { return responder }
         return panes.last
+    }
+
+    // MARK: - Layout
+
+    /// What this window is showing, in the form the next launch can rebuild.
+    func layout(tabGroup: Int) -> Layout.Window? {
+        guard let window, let root = paneContainer.subviews.first else { return nil }
+        let frame = window.frame
+        return Layout.Window(
+            directory: bookmark?.path,
+            frame: Layout.Frame(
+                x: frame.origin.x,
+                y: frame.origin.y,
+                width: frame.width,
+                height: frame.height
+            ),
+            sidebar: Layout.Sidebar(
+                expanded: sidebar.isExpanded,
+                mode: sidebar.mode == .sessions ? "sessions" : "folders",
+                width: sidebar.frame.width
+            ),
+            tabGroup: tabGroup,
+            root: node(of: root)
+        )
+    }
+
+    /// One view of the pane tree, as a node.
+    ///
+    /// The proportions come from the frames rather than from a divider index:
+    /// what is on screen is the truth, and it survives a window that was
+    /// resized after the last drag.
+    private func node(of view: NSView) -> Layout.Node {
+        guard let split = view as? NSSplitView else {
+            let pane = view as? TerminalView
+            return .pane(Layout.Pane(
+                directory: pane?.session.currentDirectory?.path,
+                session: pane?.claudeSession
+            ))
+        }
+
+        let children = split.arrangedSubviews
+        let sizes = children.map { split.isVertical ? $0.frame.width : $0.frame.height }
+        let total = max(sizes.reduce(0, +), 1)
+        return .split(
+            vertical: split.isVertical,
+            fractions: sizes.map { $0 / total },
+            children: children.map { node(of: $0) }
+        )
+    }
+
+    /// Rebuilds a saved pane tree in place of the single pane a new window has.
+    func restore(_ window: Layout.Window) {
+        // A single pane is what a new window already is: nothing to rebuild,
+        // and rebuilding it would throw away the pane the window was born with.
+        if case let .pane(saved) = window.root {
+            resume(saved, in: focusedPane)
+        } else if let built = build(window.root) {
+            for pane in panes where pane.superview === paneContainer { pane.prepareForRemoval() }
+            panes.removeAll { $0.superview === paneContainer }
+            paneContainer.subviews.forEach { $0.removeFromSuperview() }
+            built.frame = paneContainer.bounds
+            built.autoresizingMask = [.width, .height]
+            paneContainer.addSubview(built)
+            paneContainer.layoutSubtreeIfNeeded()
+            place(window.root, in: built)
+            self.window?.makeFirstResponder(panes.first)
+        }
+
+        if window.sidebar.expanded {
+            sidebar.setMode(window.sidebar.mode == "sessions" ? .sessions : .folders)
+            setSidebar(expanded: true)
+        }
+        refreshFocusIndicators()
+        refreshDirectory()
+    }
+
+    /// Builds the views for a saved tree. Nil when a pane cannot be opened.
+    private func build(_ node: Layout.Node) -> NSView? {
+        switch node {
+        case let .pane(saved):
+            guard let pane = try? makePane(in: saved.directory) else { return nil }
+            pane.autoresizingMask = [.width, .height]
+            resume(saved, in: pane)
+            return pane
+        case let .split(vertical, _, children):
+            let split = PaneSplitView()
+            split.isVertical = vertical
+            split.dividerStyle = .thin
+            split.autoresizingMask = [.width, .height]
+            split.delegate = self
+            for child in children {
+                guard let view = build(child) else { continue }
+                split.addArrangedSubview(view)
+            }
+            guard !split.arrangedSubviews.isEmpty else { return nil }
+            return split.arrangedSubviews.count == 1 ? split.arrangedSubviews[0] : split
+        }
+    }
+
+    /// Puts the dividers back where they were, once the views have a size.
+    private func place(_ node: Layout.Node, in view: NSView) {
+        guard case let .split(_, fractions, children) = node,
+              let split = view as? NSSplitView,
+              split.arrangedSubviews.count == children.count
+        else { return }
+
+        let total = split.isVertical ? split.bounds.width : split.bounds.height
+        var offset: CGFloat = 0
+        for index in 0 ..< (children.count - 1) {
+            offset += total * fractions[index]
+            split.setPosition(offset, ofDividerAt: index)
+        }
+        for (child, view) in zip(children, split.arrangedSubviews) {
+            view.layoutSubtreeIfNeeded()
+            place(child, in: view)
+        }
+    }
+
+    /// Puts a pane back in the Claude Code session it was in.
+    private func resume(_ saved: Layout.Pane, in pane: TerminalView?) {
+        guard let pane, let id = saved.session else { return }
+        pane.claudeSession = id
+        let command = "claude --resume " + id + "\n"
+        // The shell has to be up to read what it is handed; the same hop a new
+        // tab opening on a command already makes.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            pane.session.send(text: command)
+        }
     }
 
     /// Splits the focused pane, side by side or stacked.
