@@ -1048,6 +1048,19 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         panes.forEach { $0.updateBlinkTimer() }
     }
 
+    /// The red button puts Vitra away rather than closing it.
+    ///
+    /// A window here is not a document: it holds running shells, and a Claude
+    /// Code session that took ten minutes to get into. Closing one would end
+    /// them, so the button does what most apps of this shape do — hides the
+    /// app, leaving everything running. Clicking the Dock icon brings it back.
+    /// Cmd-Q quits, `Close Pane` closes one terminal, and the × in a pane's
+    /// corner does the same.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        NSApp.hide(nil)
+        return false
+    }
+
     func windowWillClose(_ notification: Notification) {
         panes.forEach { $0.prepareForRemoval() }
         panes.forEach { $0.session.terminate() }

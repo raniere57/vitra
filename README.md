@@ -212,6 +212,18 @@ whatever program is running. A pane that is not the key window always shows a
 hollow block — the position is still worth knowing, the claim on your typing is
 not.
 
+## The red button hides
+
+A window here is not a document: it holds running shells and a Claude Code
+session that took ten minutes to get into, so the red button puts Vitra away
+rather than closing it. Everything keeps running, and clicking the Dock icon
+brings it back exactly as it was — no restore, because nothing was lost.
+
+Quitting is `Cmd-Q`, or Quit from the Dock icon's menu, and that is when the
+layout is written down. `Close Window` in the File menu closes one window for
+real, ending what runs in it; `Close Pane` and the × in a pane's corner close
+one terminal.
+
 ## Closing a pane
 
 A × in the pane's top-right corner, shown while the pointer is in that pane and

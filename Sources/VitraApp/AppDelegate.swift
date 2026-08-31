@@ -46,7 +46,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SelfCapture.scheduleIfRequested()
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// Closing the windows is not quitting: the red button hides the app and
+    /// the panes keep running, so there is nothing to terminate after.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// The Dock icon, clicked while the app was hidden or had no window.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        NSApp.unhide(nil)
+        if windows.isEmpty {
+            newWindow(nil)
+        } else {
+            windows.last?.window?.makeKeyAndOrderFront(nil)
+        }
+        return true
+    }
 
     @objc func newWindow(_ sender: Any?) {
         makeWindow(asTabOf: nil)
@@ -324,6 +337,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.preview(target)
         }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Closes the window for real, ending what is running in it.
+    ///
+    /// The red button hides instead, so this menu item is the way to say
+    /// "close" and mean it. Nothing asks for confirmation here for the same
+    /// reason Close Pane does not: it is a deliberate command, not a stray
+    /// click on a corner.
+    @objc func closeWindow(_ sender: Any?) {
+        currentController?.window?.close()
     }
 
     @objc func closePane(_ sender: Any?) {

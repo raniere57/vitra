@@ -37,7 +37,7 @@ enum MainMenu {
         splitDown.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Close Pane", action: #selector(AppDelegate.closePane(_:)), keyEquivalent: key("close_pane", keybindings))
-        let closeWindow = fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: key("close_pane", keybindings))
+        let closeWindow = fileMenu.addItem(withTitle: "Close Window", action: #selector(AppDelegate.closeWindow(_:)), keyEquivalent: key("close_pane", keybindings))
         closeWindow.keyEquivalentModifierMask = [.command, .shift]
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
