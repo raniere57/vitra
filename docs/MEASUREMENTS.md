@@ -203,3 +203,30 @@ browser_eval     →  object
 
 The page's own script, running in the page world, cannot see the ref registry
 that `browser_click` and `browser_type` depend on.
+
+## Phase 5 — configuration and themes
+
+| State | phys_footprint | peak | RSS |
+|---|---|---|---|
+| idle, config watcher and bridge running | **30 MB** | 34 MB | 70.4 MB |
+
+The FSEvents watcher and the socket cost nothing measurable against Phase 4's
+33 MB; the difference between the two numbers is noise between launches.
+
+### Translucency, checked in the pixels
+
+The window capture flattens alpha, so the check is a comparison rather than an
+alpha read. Same theme, same point in the window, two runs:
+
+| Configuration | pixel at the centre |
+|---|---|
+| `opacity = 1` | `rgb(13, 13, 18)` — the theme's background exactly |
+| `opacity = 0.75, blur = true` | `rgb(18, 18, 23)` — composited over the blur layer |
+
+### Hot reload
+
+One run, one window: launched with `dark`, Menlo 13, padding 8. The file was
+rewritten mid-session to `light`, SF Mono 15, padding 16. The window changed
+theme, typeface, size and padding without a restart, and the ANSI colours in
+already-printed output changed with it — a theme change dirties no cell, so the
+render state is forced to re-read rather than waiting for the next keystroke.

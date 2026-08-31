@@ -98,6 +98,38 @@ instead of hanging.
   `typeof window.__vitra` gets `undefined` while the same expression in the
   isolated world answers `object`.
 
+## Configuration
+
+`~/.vitra/config.toml`, written on first launch. Saving it applies to every open
+window immediately — font, theme, opacity, padding, scrollback and shell, with no
+restart. `Cmd-,` opens a settings window that edits the same file.
+
+```toml
+[font]
+family = "SF Mono"
+size = 14
+
+[window]
+opacity = 0.92   # 0.5 to 1
+blur = true
+padding = 10
+
+[terminal]
+scrollback = 10000
+# shell = "/bin/zsh"
+
+[theme]
+name = "dark"          # dark or light
+cursor = "#e8e8ef"     # override any single colour
+palette = [ ... ]      # or all sixteen
+
+[keybindings]
+split_right = "d"      # single characters, always with Command
+```
+
+A typo never stops a window from opening: the bad value is skipped, the default
+stays, and the reason is printed.
+
 ## Keys
 
 | Key | Action |

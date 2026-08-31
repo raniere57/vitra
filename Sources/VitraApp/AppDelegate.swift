@@ -12,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingPreviews: [URL] = []
 
     private var bridge: SocketServer?
+    private var configWatcher: ConfigWatcher?
+    private let preferences = PreferencesWindow()
+    private(set) var config = Config()
 
     /// The window MCP tools act on.
     var frontController: TerminalWindowController? { currentController }
@@ -28,7 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let store = attachments
         DispatchQueue.global(qos: .utility).async { store.purgeExpired() }
 
-        NSApp.mainMenu = MainMenu.build()
+        loadConfiguration()
+        NSApp.mainMenu = MainMenu.build(keybindings: config.keybindings)
         if pendingPreviews.isEmpty { newWindow(nil) }
         showPendingPreviews()
         startBridge()
@@ -52,6 +56,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func splitVertically(_ sender: Any?) {
         currentController?.splitFocusedPane(vertical: false)
+    }
+
+    /// Reads the configuration and starts following the file.
+    ///
+    /// A first run leaves a commented file behind: a configuration nobody can
+    /// see is a configuration nobody edits.
+    @MainActor
+    private func loadConfiguration() {
+        let (loaded, problems) = Config.load()
+        config = loaded
+        report(problems)
+
+        if !FileManager.default.fileExists(atPath: Config.path.path) {
+            try? FileManager.default.createDirectory(
+                at: Config.path.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try? loaded.toml().write(to: Config.path, atomically: true, encoding: .utf8)
+        }
+
+        // The watcher fires on its own queue; the hop to main is where this
+        // becomes safe to touch AppKit with.
+        let watcher = ConfigWatcher { config, problems in
+            DispatchQueue.main.async {
+                (NSApp.delegate as? AppDelegate)?.configurationChanged(config, problems)
+            }
+        }
+        watcher.start()
+        configWatcher = watcher
+    }
+
+    @MainActor
+    private func configurationChanged(_ config: Config, _ problems: [String]) {
+        self.config = config
+        report(problems)
+        NSApp.mainMenu = MainMenu.build(keybindings: config.keybindings)
+        windows.forEach { $0.apply(config) }
+        preferences.update(config: config)
+    }
+
+    private func report(_ problems: [String]) {
+        for problem in problems {
+            FileHandle.standardError.write(Data("vitra: \(problem)\n".utf8))
+        }
+    }
+
+    @MainActor
+    @objc func showPreferences(_ sender: Any?) {
+        preferences.show(config: config) { [weak self] edited in
+            // Saving writes the file; the watcher is what applies it, so there
+            // is exactly one path from a setting to a window.
+            try? edited.toml().write(to: Config.path, atomically: true, encoding: .utf8)
+            self?.configurationChanged(edited, [])
+        }
     }
 
     /// Serves MCP tool calls that `vitra mcp` forwards over the unix socket.
@@ -128,7 +186,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 fontName: "Menlo",
                 fontSize: 13,
                 command: Self.commandFromArguments(),
-                attachments: attachments
+                attachments: attachments,
+                config: config
             )
             windows.append(controller)
 

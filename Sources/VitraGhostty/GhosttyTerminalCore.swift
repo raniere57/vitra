@@ -11,7 +11,7 @@ import VitraCore
 /// the compiler cannot see the queue discipline that makes it safe.
 public final class GhosttyTerminalCore: TerminalCore, @unchecked Sendable {
     let handle: GhosttyTerminal
-    private let renderReader: RenderStateReader
+    let renderReader: RenderStateReader
     private let keyEncoder: KeyEncoder
     public private(set) var size: TerminalSize
 

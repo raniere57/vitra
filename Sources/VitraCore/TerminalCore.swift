@@ -19,6 +19,12 @@ public protocol TerminalCore: AnyObject {
     func feed(_ bytes: UnsafeRawBufferPointer)
 
     /// Resizes the screen, reflowing existing content.
+    /// Applies a colour theme to the engine's defaults and palette.
+    func apply(theme: Theme)
+
+    /// Caps retained scrollback.
+    func setScrollback(lines: Int)
+
     func resize(to size: TerminalSize) throws
 
     /// Whether the program running inside asked for bracketed paste (mode 2004).

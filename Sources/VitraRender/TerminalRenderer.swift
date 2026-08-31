@@ -124,6 +124,7 @@ public final class TerminalRenderer {
         snapshot: RenderSnapshot,
         cursorOn: Bool,
         padding: CGFloat,
+        opacity: Double = 1,
         drawable: CAMetalDrawable,
         viewportSize: CGSize
     ) {
@@ -131,6 +132,7 @@ public final class TerminalRenderer {
             snapshot: snapshot,
             cursorOn: cursorOn,
             padding: padding,
+            opacity: opacity,
             target: drawable.texture,
             viewportSize: viewportSize
         ) else { return }
@@ -151,6 +153,7 @@ public final class TerminalRenderer {
             snapshot: snapshot,
             cursorOn: cursorOn,
             padding: padding,
+            opacity: 1,
             target: target,
             viewportSize: size
         ) else { return }
@@ -163,6 +166,7 @@ public final class TerminalRenderer {
         snapshot: RenderSnapshot,
         cursorOn: Bool,
         padding: CGFloat,
+        opacity: Double,
         target: MTLTexture,
         viewportSize: CGSize
     ) -> MTLCommandBuffer? {
@@ -175,7 +179,9 @@ public final class TerminalRenderer {
         pass.colorAttachments[0].texture = target
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .store
-        pass.colorAttachments[0].clearColor = snapshot.defaultBackground.clearColor
+        // Opacity applies to the background alone: text stays fully opaque, so
+        // a translucent window is still readable over anything behind it.
+        pass.colorAttachments[0].clearColor = snapshot.defaultBackground.clearColor(alpha: opacity)
 
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass)
@@ -416,12 +422,12 @@ extension TerminalColor {
         SIMD4(Float(red) / 255, Float(green) / 255, Float(blue) / 255, 1)
     }
 
-    var clearColor: MTLClearColor {
+    func clearColor(alpha: Double = 1) -> MTLClearColor {
         MTLClearColor(
             red: Double(red) / 255,
             green: Double(green) / 255,
             blue: Double(blue) / 255,
-            alpha: 1
+            alpha: alpha
         )
     }
 

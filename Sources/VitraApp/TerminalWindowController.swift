@@ -28,16 +28,26 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     private var panel: PreviewPanel?
     private var panelSplit: NSSplitView?
 
+    /// The window's permanent content view.
+    ///
+    /// Everything else lives inside it, so a translucent window can keep a
+    /// blur layer underneath while the panel comes and goes above.
+    private let rootView = NSView()
+    private var blurView: NSVisualEffectView?
+    private var config: Config
+
     init(
         device: MTLDevice,
         fontName: String,
         fontSize: CGFloat,
         command: [String]? = nil,
-        attachments: AttachmentStore = AttachmentStore()
+        attachments: AttachmentStore = AttachmentStore(),
+        config: Config = Config()
     ) throws {
         self.device = device
-        self.fontName = fontName
-        self.fontSize = fontSize
+        self.fontName = config.fontName
+        self.fontSize = CGFloat(config.fontSize)
+        self.config = config
         self.command = command
         self.attachments = attachments
 
@@ -58,14 +68,20 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         super.init(window: window)
 
         let pane = try makePane()
-        paneContainer.frame = window.contentLayoutRect
+        rootView.frame = window.contentLayoutRect
+        rootView.autoresizingMask = [.width, .height]
+        window.contentView = rootView
+
+        paneContainer.frame = rootView.bounds
         paneContainer.autoresizingMask = [.width, .height]
         pane.frame = paneContainer.bounds
         pane.autoresizingMask = [.width, .height]
         paneContainer.addSubview(pane)
-        window.contentView = paneContainer
+        rootView.addSubview(paneContainer)
+
         window.delegate = self
         window.makeFirstResponder(pane)
+        apply(config)
     }
 
     @available(*, unavailable)
@@ -93,7 +109,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         let core = try GhosttyTerminalCore(size: size)
         let session = try TerminalSession(
             core: core,
-            executable: command?.first ?? ShellEnvironment.loginShell(),
+            executable: command?.first ?? config.shell ?? ShellEnvironment.loginShell(),
             arguments: command.map { Array($0.dropFirst()) } ?? ["-l"],
             size: size
         )
@@ -104,6 +120,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             fontSize: fontSize,
             attachments: attachments
         )
+        try? pane.apply(config)
 
         session.onTitleChanged = { [weak self, weak pane] title in
             guard let pane, self?.focusedPane === pane else { return }
@@ -247,14 +264,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         let split = PaneSplitView()
         split.isVertical = true
         split.dividerStyle = .thin
-        split.frame = window?.contentLayoutRect ?? paneContainer.frame
+        split.frame = rootView.bounds
         split.autoresizingMask = [.width, .height]
 
         paneContainer.removeFromSuperview()
         split.addArrangedSubview(paneContainer)
         split.addArrangedSubview(panel)
         split.delegate = self
-        window?.contentView = split
+        split.frame = rootView.bounds
+        rootView.addSubview(split)
 
         // After layout: the split has no width of its own until the window has
         // sized it, and a divider placed before that collapses the terminal.
@@ -278,7 +296,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         paneContainer.frame = split.frame
         paneContainer.autoresizingMask = [.width, .height]
         split.removeFromSuperview()
-        window?.contentView = paneContainer
+        rootView.addSubview(paneContainer)
 
         self.panel = nil
         self.panelSplit = nil
@@ -288,6 +306,43 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     func closeFocusedPane() {
         guard let pane = focusedPane else { return }
         pane.session.terminate()
+    }
+
+    // MARK: - Configuration
+
+    /// Takes a new configuration: window translucency here, everything else in
+    /// the panes.
+    func apply(_ config: Config) {
+        self.config = config
+        guard let window else { return }
+
+        let translucent = config.opacity < 1
+        window.isOpaque = !translucent
+        window.backgroundColor = translucent ? .clear : .black
+        window.hasShadow = true
+
+        if translucent && config.blur {
+            if blurView == nil {
+                let effect = NSVisualEffectView(frame: rootView.bounds)
+                effect.material = .underPageBackground
+                effect.blendingMode = .behindWindow
+                effect.state = .active
+                effect.autoresizingMask = [.width, .height]
+                rootView.addSubview(effect, positioned: .below, relativeTo: nil)
+                blurView = effect
+            }
+        } else {
+            blurView?.removeFromSuperview()
+            blurView = nil
+        }
+
+        for pane in panes {
+            do {
+                try pane.apply(config)
+            } catch {
+                NSSound.beep()
+            }
+        }
     }
 
     // MARK: - NSSplitViewDelegate

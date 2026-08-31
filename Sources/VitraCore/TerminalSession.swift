@@ -258,6 +258,18 @@ public final class TerminalSession: @unchecked Sendable {
         }
     }
 
+    /// Applies a theme to the engine, on the queue that owns it.
+    public func apply(theme: Theme) {
+        queue.async { [weak self] in
+            self?.core.apply(theme: theme)
+            self?.scheduleRedraw()
+        }
+    }
+
+    public func setScrollback(lines: Int) {
+        queue.async { [weak self] in self?.core.setScrollback(lines: lines) }
+    }
+
     public func terminate() {
         pty.terminate()
     }

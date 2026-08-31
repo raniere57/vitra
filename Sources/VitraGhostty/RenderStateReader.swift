@@ -49,6 +49,10 @@ final class RenderStateReader {
     }
 
     /// Refills `snapshot` from `terminal`, or returns false if nothing changed.
+    /// Set when something outside the grid changed and the next read must
+    /// happen even though no cell is dirty.
+    var forceNextUpdate = false
+
     func update(from terminal: GhosttyTerminal, into snapshot: RenderSnapshot) throws -> Bool {
         let result = ghostty_render_state_update(state, terminal)
         guard result == GHOSTTY_SUCCESS else {
@@ -60,7 +64,13 @@ final class RenderStateReader {
         // ponytail: any dirty row redraws the whole grid. A full 80x24 refill is
         // ~30 KB of instance data; switch to per-row dirty tracking only if that
         // shows up in a profile.
-        guard dirty != GHOSTTY_RENDER_STATE_DIRTY_FALSE else { return false }
+        // A theme change alters no cell, so libghostty reports nothing dirty
+        // while every colour on screen is now wrong. This is how that gets drawn.
+        if forceNextUpdate {
+            forceNextUpdate = false
+        } else {
+            guard dirty != GHOSTTY_RENDER_STATE_DIRTY_FALSE else { return false }
+        }
 
         var columns: UInt16 = 0
         var rows: UInt16 = 0

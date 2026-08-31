@@ -18,7 +18,8 @@ final class TerminalView: NSView, NSMenuItemValidation {
     private let snapshot = RenderSnapshot()
     private var fontName: String
     private var fontSize: CGFloat
-    private let padding: CGFloat = 8
+    private var padding: CGFloat = 8
+    private var opacity: CGFloat = 1
 
     private var blinkTimer: DispatchSourceTimer?
     private var cursorOn = true
@@ -109,6 +110,35 @@ final class TerminalView: NSView, NSMenuItemValidation {
         layer?.borderColor = NSColor.controlAccentColor.cgColor
     }
 
+    /// Takes a new configuration without being rebuilt.
+    ///
+    /// The font is the expensive part: a different face or size means a new
+    /// glyph atlas and new cell metrics, so the renderer is replaced and the
+    /// grid recomputed. Everything else is a value change and a redraw.
+    func apply(_ config: Config) throws {
+        padding = config.padding
+        opacity = config.opacity
+        session.apply(theme: config.theme)
+        session.setScrollback(lines: config.scrollbackLines)
+
+        if config.fontName != fontName || config.fontSize != Double(fontSize) {
+            fontName = config.fontName
+            fontSize = CGFloat(config.fontSize)
+            renderer = try TerminalRenderer(
+                device: device,
+                fonts: FontSet(name: fontName, size: fontSize * scale)
+            )
+        }
+
+        if let metalLayer {
+            // A translucent window needs a layer that is not claiming to be
+            // opaque, or the compositor keeps drawing over what is behind it.
+            metalLayer.isOpaque = opacity >= 1
+        }
+        updateDrawableSize()
+        setNeedsRender()
+    }
+
     override func makeBackingLayer() -> CALayer {
         let layer = CAMetalLayer()
         layer.device = device
@@ -171,6 +201,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
             snapshot: snapshot,
             cursorOn: focused ? cursorOn : true,
             padding: padding * scale,
+            opacity: opacity,
             drawable: drawable,
             viewportSize: metalLayer.drawableSize
         )

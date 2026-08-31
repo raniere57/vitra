@@ -1,0 +1,227 @@
+import Foundation
+
+/// Everything `~/.vitra/config.toml` can say.
+///
+/// Reading is forgiving on purpose: an unknown key or a malformed value leaves
+/// the default in place and adds a line to `problems`, which the preferences
+/// window shows. A typo in a config file should never stop a terminal opening.
+public struct Config: Equatable, Sendable {
+    public var fontName: String = "Menlo"
+    public var fontSize: Double = 13
+    public var theme: Theme = .dark
+    /// 0.5–1. Below 1 the window is translucent.
+    public var opacity: Double = 1
+    /// Frosts what is behind a translucent window.
+    public var blur: Bool = false
+    public var padding: Double = 8
+    public var scrollbackLines: Int = 10_000
+    /// nil means the user's login shell.
+    public var shell: String?
+    /// Menu action name to key equivalent, as in `split_right = "d"`.
+    ///
+    /// Always complete: the file overrides entries one at a time, so the app
+    /// never has to merge defaults itself.
+    public var keybindings: [String: String] = Config.defaultKeybindings
+
+    public static let defaultKeybindings: [String: String] = [
+        "new_tab": "t",
+        "split_right": "d",
+        "close_pane": "w",
+        "preview_panel": "p",
+        "clear": "k",
+    ]
+
+    public init() {}
+
+    public static let path = Vitra.supportDirectory.appendingPathComponent("config.toml")
+
+    /// Reads the file, or returns the defaults when it is not there.
+    public static func load(from url: URL = Config.path) -> (config: Config, problems: [String]) {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return (Config(), [])
+        }
+        return parse(text)
+    }
+
+    public static func parse(_ text: String) -> (config: Config, problems: [String]) {
+        var config = Config()
+        var problems: [String] = []
+
+        let root: [String: TOMLValue]
+        do {
+            root = try TOML.parse(text)
+        } catch {
+            return (config, ["config.toml: \(error)"])
+        }
+
+        if let value = root["font"]?.tableValue {
+            if let name = value["family"]?.stringValue { config.fontName = name }
+            if let size = value["size"]?.doubleValue {
+                if (6...72).contains(size) {
+                    config.fontSize = size
+                } else {
+                    problems.append("font.size must be between 6 and 72")
+                }
+            }
+        }
+
+        if let window = root["window"]?.tableValue {
+            if let opacity = window["opacity"]?.doubleValue {
+                if (0.5...1).contains(opacity) {
+                    config.opacity = opacity
+                } else {
+                    problems.append("window.opacity must be between 0.5 and 1")
+                }
+            }
+            if let blur = window["blur"]?.boolValue { config.blur = blur }
+            if let padding = window["padding"]?.doubleValue {
+                config.padding = min(max(padding, 0), 64)
+            }
+        }
+
+        if let terminal = root["terminal"]?.tableValue {
+            if let scrollback = terminal["scrollback"]?.intValue {
+                config.scrollbackLines = max(0, scrollback)
+            }
+            if let shell = terminal["shell"]?.stringValue, !shell.isEmpty {
+                config.shell = shell
+            }
+        }
+
+        if let keys = root["keybindings"]?.tableValue {
+            for (action, value) in keys {
+                guard Config.defaultKeybindings[action] != nil else {
+                    problems.append("unknown action: keybindings.\(action)")
+                    continue
+                }
+                guard let key = value.stringValue, key.count == 1 else {
+                    problems.append("keybindings.\(action) must be a single character")
+                    continue
+                }
+                config.keybindings[action] = key
+            }
+        }
+
+        return (applyTheme(to: config, root: root, problems: &problems), problems)
+    }
+
+    /// Themes are read last: a `[theme]` table overrides the named theme's
+    /// colours one field at a time, so a file can pick "light" and still change
+    /// only the cursor.
+    private static func applyTheme(
+        to config: Config,
+        root: [String: TOMLValue],
+        problems: inout [String]
+    ) -> Config {
+        var config = config
+
+        if let name = root["theme"]?.stringValue {
+            guard let theme = Theme.named(name) else {
+                problems.append("unknown theme: \(name)")
+                return config
+            }
+            config.theme = theme
+            return config
+        }
+
+        guard let table = root["theme"]?.tableValue else { return config }
+
+        if let name = table["name"]?.stringValue {
+            if let theme = Theme.named(name) {
+                config.theme = theme
+            } else {
+                problems.append("unknown theme: \(name)")
+            }
+        }
+
+        var theme = config.theme
+        for (key, target) in [
+            ("background", \Theme.background),
+            ("foreground", \Theme.foreground),
+            ("cursor", \Theme.cursor),
+        ] as [(String, WritableKeyPath<Theme, TerminalColor>)] {
+            guard let raw = table[key]?.stringValue else { continue }
+            guard let color = TerminalColor(hex: raw) else {
+                problems.append("theme.\(key) is not a colour: \(raw)")
+                continue
+            }
+            theme[keyPath: target] = color
+        }
+
+        if let entries = table["palette"]?.arrayValue {
+            guard entries.count == 16 else {
+                problems.append("theme.palette needs exactly 16 colours, found \(entries.count)")
+                config.theme = theme
+                return config
+            }
+            let colors = entries.compactMap { $0.stringValue.flatMap(TerminalColor.init(hex:)) }
+            if colors.count == 16 {
+                theme.palette = colors
+            } else {
+                problems.append("theme.palette holds something that is not a colour")
+            }
+        }
+
+        config.theme = theme
+        return config
+    }
+
+    /// The file this configuration would be written as.
+    ///
+    /// Used by the preferences window, and to lay down a starting file the first
+    /// time Vitra runs, so there is something to edit.
+    public func toml() -> String {
+        let shellLine = shell.map { "shell = \"\($0)\"" } ?? "# shell = \"/bin/zsh\"     # defaults to your login shell"
+        let keybindingLines = Config.defaultKeybindings.keys.sorted()
+            .map { "\($0) = \"\(keybindings[$0] ?? Config.defaultKeybindings[$0]!)\"" }
+            .joined(separator: "\n        ")
+        let palette = theme.palette
+            .map { "\"\($0.hex)\"" }
+            .chunked(into: 4)
+            .map { "  " + $0.joined(separator: ", ") + "," }
+            .joined(separator: "\n")
+
+        return """
+        # Vitra configuration. Saved changes apply to open windows immediately.
+
+        [font]
+        family = "\(fontName)"
+        size = \(clean(fontSize))
+
+        [window]
+        opacity = \(clean(opacity))   # 0.5 to 1
+        blur = \(blur)
+        padding = \(clean(padding))
+
+        [terminal]
+        scrollback = \(scrollbackLines)
+        \(shellLine)
+
+        [theme]
+        name = "\(theme.name)"
+        background = "\(theme.background.hex)"
+        foreground = "\(theme.foreground.hex)"
+        cursor = "\(theme.cursor.hex)"
+        # eight normal colours, then eight bright
+        palette = [
+        \(palette)
+        ]
+
+        [keybindings]
+        # single characters, always combined with Command
+        \(keybindingLines)
+
+        """
+    }
+
+    /// Whole numbers print without a pointless `.0`.
+    private func clean(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(format: "%.2f", value)
+    }
+}
+
+extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map { Array(self[$0..<Swift.min($0 + size, count)]) }
+    }
+}

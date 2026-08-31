@@ -59,7 +59,11 @@ enum SelfCapture {
     private static func capture(to path: String) {
         // Prefer the key window: with native tabs, several windows are "visible"
         // but only the front tab is on screen.
-        let candidate = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible })
+        // Front to back: with the app in the background there is no key window,
+        // and the frontmost visible one is what a person would be looking at.
+        let candidate = NSApp.keyWindow
+            ?? NSApp.orderedWindows.first(where: { $0.isVisible })
+            ?? NSApp.mainWindow
         guard let window = candidate else {
             FileHandle.standardError.write(Data("[self-shot] no visible window\n".utf8))
             return
