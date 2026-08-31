@@ -76,7 +76,7 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
         tree.translatesAutoresizingMaskIntoConstraints = false
 
         search.placeholderString = "Filter folders"
-        search.font = .systemFont(ofSize: 11.5)
+        search.font = .systemFont(ofSize: 12)
         search.controlSize = .small
         search.focusRingType = .none
         search.sendsWholeSearchString = false
@@ -113,7 +113,7 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
 
             search.topAnchor.constraint(equalTo: topAnchor, constant: 10),
 
-            tree.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 6),
+            tree.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 8),
             tree.bottomAnchor.constraint(equalTo: bottomAnchor),
 
             sessions.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 6),
@@ -126,8 +126,8 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
         // width and leaving a 31pt rail with every icon off centre. The half
         // gives way instead; it is invisible while it does.
         for constraint in [
-            search.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 8),
-            search.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            search.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: SidebarStyle.inset),
+            search.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -SidebarStyle.inset),
             tree.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             tree.trailingAnchor.constraint(equalTo: trailingAnchor),
             sessions.leadingAnchor.constraint(equalTo: divider.trailingAnchor),

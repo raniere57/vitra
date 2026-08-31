@@ -22,6 +22,7 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
     /// Where the terminal is, so the row can be lit even after the user has
     /// scrolled somewhere else in the tree.
     private var current: URL?
+    private var hoverTracking: NSTrackingArea?
 
     /// One folder in the tree. A class because the outline view identifies
     /// items by pointer, and because children are filled in later.
@@ -59,11 +60,13 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
         outline.outlineTableColumn = column
         outline.headerView = nil
         outline.rowSizeStyle = .custom
-        outline.rowHeight = 20
-        outline.indentationPerLevel = 12
+        outline.rowHeight = SidebarStyle.folderRow
+        outline.indentationPerLevel = 14
         outline.backgroundColor = .clear
         outline.selectionHighlightStyle = .regular
-        outline.style = .inset
+        // Plain, because the plate under a row is drawn here: the inset style
+        // adds its own margins and its own blue bar on top of them.
+        outline.style = .plain
         outline.dataSource = self
         outline.delegate = self
         outline.target = self
@@ -227,6 +230,32 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
     /// parent did not match, which is the opposite of what searching is for.
     private var isFiltering: Bool { !filter.isEmpty }
 
+    // MARK: - Hover
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        SidebarHover.update(outline, at: event.locationInWindow)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        SidebarHover.update(outline, at: nil)
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView {
+        SidebarRowView()
+    }
+
     // MARK: - NSOutlineViewDelegate
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
@@ -238,16 +267,18 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
 
         let label = node.label
         cell.textField?.stringValue = isFiltering ? "\(label)  —  \(Self.parentLabel(of: node.url))" : label
-        cell.textField?.font = node.symbol == nil
-            ? .systemFont(ofSize: 11.5)
-            : .systemFont(ofSize: 11.5, weight: .medium)
+        let isCurrent = node.url.path == current?.path
+        cell.textField?.font = .systemFont(
+            ofSize: 12,
+            weight: isCurrent ? .semibold : (node.symbol == nil ? .regular : .medium)
+        )
         // Roots carry the favourite's own symbol; everything below is a folder.
         cell.imageView?.image = NSImage(
             systemSymbolName: node.symbol ?? "folder",
             accessibilityDescription: nil
-        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .regular))
-        cell.imageView?.contentTintColor = .secondaryLabelColor
-        cell.textField?.textColor = node.url.path == current?.path ? .labelColor : .secondaryLabelColor
+        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .regular))
+        cell.imageView?.contentTintColor = isCurrent ? SidebarStyle.accent : .secondaryLabelColor
+        cell.textField?.textColor = isCurrent ? .labelColor : .secondaryLabelColor
         cell.toolTip = node.url.path
         return cell
     }
@@ -279,7 +310,7 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
             icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: 14),
             label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
-            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -SidebarStyle.inset),
             label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
         return cell

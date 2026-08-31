@@ -98,6 +98,18 @@ A window opens filled — the screen minus the menu bar and the Dock, the green
 button's "Fill" rather than full screen, so the menu bar and every other window
 stay where they are.
 
+## How the sidebars are drawn
+
+Both halves are one surface, so they are drawn to one set of measurements: the
+same margin for the search field, the rows and the footer, the same rounded
+plate under a row, the same hairline between groups. A row lights under the
+pointer, and the plate is inset from both edges rather than bleeding across the
+column, which is what the stock selection does.
+
+The system's own table styling is off in both: its inset style pads every
+group row with a band of its own, and that band is where the uneven gaps
+between projects came from.
+
 ## Sessions
 
 `Opt-Cmd-C`, or the second button in the title bar, opens the same sidebar on

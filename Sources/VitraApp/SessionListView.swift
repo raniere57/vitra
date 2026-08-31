@@ -29,6 +29,7 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
     /// these. Marked rather than selected: selection is what the user clicked
     /// last, which is a different question.
     private var current: String?
+    private var hoverTracking: NSTrackingArea?
     private var hasLoaded = false
     private var archivedHidden = 0
     private var showsArchived = false
@@ -64,10 +65,14 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
         table.addTableColumn(column)
         table.headerView = nil
         table.rowSizeStyle = .custom
-        table.rowHeight = 38
+        table.rowHeight = SidebarStyle.sessionRow
         table.backgroundColor = .clear
         table.gridStyleMask = []
-        table.style = .inset
+        // Plain, not inset: the inset style pads every group row with a band of
+        // its own, which is where the uneven gaps between projects came from.
+        // The plate under a row is drawn here instead.
+        table.style = .plain
+        table.intercellSpacing = NSSize(width: 0, height: 0)
         table.dataSource = self
         table.delegate = self
         table.target = self
@@ -106,7 +111,12 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.spacing = 6
-        footer.edgeInsets = NSEdgeInsets(top: 5, left: 10, bottom: 5, right: 8)
+        footer.edgeInsets = NSEdgeInsets(
+            top: 6,
+            left: SidebarStyle.inset + 4,
+            bottom: 6,
+            right: SidebarStyle.inset + 2
+        )
         footer.addArrangedSubview(archivedLabel)
         footer.addArrangedSubview(NSView())
         footer.addArrangedSubview(archivedButton)
@@ -115,7 +125,7 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
         addSubview(footer)
 
         NSLayoutConstraint.activate([
-            status.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            status.leadingAnchor.constraint(equalTo: leadingAnchor, constant: SidebarStyle.inset + 4),
             status.topAnchor.constraint(equalTo: topAnchor, constant: 8),
 
             footer.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -255,17 +265,43 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
     func selectionShouldChange(in tableView: NSTableView) -> Bool { true }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        session(atRow: row) == nil ? 26 : 40
+        session(atRow: row) == nil ? SidebarStyle.projectRow : SidebarStyle.sessionRow
     }
 
-    /// A hairline above every session that follows another one.
-    ///
-    /// Not above the first of a group — the header is already a boundary — and
-    /// never below the last, so a group reads as one block of rows.
+    /// Sessions take a plate under the pointer; a project's name is a label and
+    /// takes none — lighting a heading invites a click that only folds it.
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        let view = SeparatorRowView()
-        view.drawsSeparator = row > 0 && session(atRow: row) != nil && session(atRow: row - 1) != nil
+        let view = SidebarRowView()
+        let isProject = session(atRow: row) == nil
+        view.isPlain = isProject
+        // The system's group-row chrome is a full-bleed rule and a tint that
+        // ignore every margin in here; the rule this draws instead is inset
+        // like the rest, and only between one project and the next.
+        view.isGroupRowStyle = false
+        view.topRule = isProject && row > 0
         return view
+    }
+
+    // MARK: - Hover
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        SidebarHover.update(table, at: event.locationInWindow)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        SidebarHover.update(table, at: nil)
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -346,16 +382,18 @@ private final class ProjectCell: NSTableCellView {
         addSubview(count)
 
         NSLayoutConstraint.activate([
-            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: SidebarStyle.inset + 4),
             dot.widthAnchor.constraint(equalToConstant: 6),
             dot.heightAnchor.constraint(equalToConstant: 6),
             dot.centerYAnchor.constraint(equalTo: name.centerYAnchor),
 
             name.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 6),
             name.trailingAnchor.constraint(lessThanOrEqualTo: count.leadingAnchor, constant: -6),
-            name.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            // Centred rather than sitting on the bottom edge: a heading pushed
+            // down leaves a hole above it and crowds the row below.
+            name.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-            count.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            count.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -SidebarStyle.inset - 2),
             count.firstBaselineAnchor.constraint(equalTo: name.firstBaselineAnchor),
         ])
     }
@@ -422,8 +460,8 @@ private final class SessionCell: NSTableCellView {
         textField = title
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: SidebarStyle.inset + 4),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -SidebarStyle.inset - 2),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
@@ -431,15 +469,21 @@ private final class SessionCell: NSTableCellView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard isCurrent else { return }
-        SessionCell.rail.setFill()
+        SidebarStyle.accent.setFill()
         NSBezierPath(
-            roundedRect: NSRect(x: 0, y: 4, width: 2.5, height: bounds.height - 8),
+            // Against the plate's own edge, not the column's: the rail and the
+            // row under the pointer have to look like one object.
+            roundedRect: NSRect(
+                x: SidebarStyle.plateInset,
+                y: 6,
+                width: 2.5,
+                height: bounds.height - 12
+            ),
             xRadius: 1.25,
             yRadius: 1.25
         ).fill()
     }
 
-    private static let rail = NSColor(srgbRed: 0.486, green: 0.753, blue: 1, alpha: 1)
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
@@ -455,14 +499,3 @@ final class ChipLabel: NSTextField {
     }
 }
 
-/// A row that draws the hairline between it and the row above.
-private final class SeparatorRowView: NSTableRowView {
-    var drawsSeparator = false
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard drawsSeparator else { return }
-        NSColor.separatorColor.withAlphaComponent(0.35).setFill()
-        NSRect(x: 6, y: bounds.maxY - 1, width: bounds.width - 12, height: 1).fill()
-    }
-}
