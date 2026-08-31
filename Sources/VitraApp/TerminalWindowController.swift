@@ -402,22 +402,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         let add = menu.addItem(withTitle: "Add Current Folder", action: #selector(AppDelegate.addCurrentFolder(_:)), keyEquivalent: "")
         add.target = delegate
 
-        let bookmarks = delegate?.bookmarks ?? []
-        if !bookmarks.isEmpty {
-            menu.addItem(.separator())
-            for bookmark in bookmarks {
-                let item = menu.addItem(
-                    withTitle: "\(bookmark.emoji)  \(bookmark.name)",
-                    action: #selector(AppDelegate.openBookmarkTab(_:)),
-                    keyEquivalent: ""
-                )
-                item.target = delegate
-                item.representedObject = bookmark.id.uuidString
-                item.toolTip = bookmark.displayPath
-                item.state = bookmark.id == self.bookmark?.id ? .on : .off
-            }
-        }
-
+        // No list of favourites here: the sidebar is the list now, one click
+        // per folder whether it is collapsed to the rail or open on the tree.
+        // A menu repeating it would be a second place to keep in sync.
         menu.addItem(.separator())
         let manage = menu.addItem(withTitle: "Manage Folders…", action: #selector(AppDelegate.showFolders(_:)), keyEquivalent: "")
         manage.target = delegate
