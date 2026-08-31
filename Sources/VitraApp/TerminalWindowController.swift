@@ -182,6 +182,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         togglePanel()
     }
 
+    @objc private func openBrowserFromButton(_ sender: Any?) {
+        browser().focusAddress()
+    }
+
     /// The folder chip and the split buttons, at the left of the title bar.
     ///
     /// Everything here is also a menu command and a shortcut. The buttons exist
@@ -260,13 +264,19 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             action: #selector(splitDownFromButton)
         )
 
+        let browserButton = makeIconButton(
+            symbol: "globe",
+            tooltip: "Browser (⇧⌘B)",
+            action: #selector(openBrowserFromButton)
+        )
+
         let separator = NSBox()
         separator.boxType = .separator
         separator.translatesAutoresizingMaskIntoConstraints = false
 
         // Bare here too, same as the pair on the left: the hairline is enough
         // to say the splits and the panel are different jobs.
-        let row = NSStackView(views: [splitRight, splitDown, separator, panelButton])
+        let row = NSStackView(views: [splitRight, splitDown, separator, browserButton, panelButton])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 4

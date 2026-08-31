@@ -11,8 +11,8 @@ As datas são o dia em que a imagem de disco foi construída.
   `ssh -t <host> 'cd "<diretório>" && exec "$SHELL" -l'`. O caminho de um
   favorito remoto nunca é usado como diretório local, e a barra de título mostra
   `host:/diretório`.
-- `Cmd-Shift-B` (**View → Browser**) abre o navegador no painel com o cursor na
-  barra de endereço. Ele existia desde a primeira versão, mas só um link clicado
+- Um botão de globo na barra de título, e `Cmd-Shift-B` (**View → Browser**),
+  abrem o navegador no painel com o cursor na barra de endereço. Ele existia desde a primeira versão, mas só um link clicado
   ou um agente conseguia abri-lo.
 - `Esc` fecha a janela de pastas.
 - Todo favorito ganhou um campo de **comando**, rodado quando a aba abre —

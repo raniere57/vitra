@@ -250,7 +250,8 @@ esquerda faz: `cd` num painel livre, aba nova num ocupado.
 
 ## Links
 
-`Cmd-Shift-B` (ou **View → Browser**) abre o navegador no painel com o cursor já
+O botão de globo na barra de título, `Cmd-Shift-B` ou **View → Browser** abrem
+o navegador no painel com o cursor já
 na barra de endereço: digite `google.com` e Enter. Antes disso o navegador só
 aparecia por um link clicado ou por um agente pedindo — o que não é ter um
 navegador.
