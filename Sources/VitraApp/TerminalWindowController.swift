@@ -157,34 +157,6 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
 
-    /// Puts the panel toggle in the title bar.
-    ///
-    /// A title bar accessory rather than an NSToolbar: a toolbar would add a
-    /// second row, a delegate and an item registry for one button, and it would
-    /// give the user a customisation sheet with nothing to customise.
-    private func installPanelButton(in window: NSWindow) {
-        panelButton.image = NSImage(
-            systemSymbolName: "sidebar.right",
-            accessibilityDescription: "Preview panel"
-        )
-        panelButton.bezelStyle = .texturedRounded
-        panelButton.isBordered = false
-        panelButton.setButtonType(.pushOnPushOff)
-        panelButton.target = self
-        panelButton.action = #selector(togglePanelFromButton)
-        panelButton.toolTip = "Preview panel"
-        panelButton.frame = NSRect(x: 0, y: 0, width: 28, height: 22)
-
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 40, height: 22))
-        panelButton.frame.origin.x = 6
-        container.addSubview(panelButton)
-
-        let accessory = NSTitlebarAccessoryViewController()
-        accessory.view = container
-        accessory.layoutAttribute = .right
-        window.addTitlebarAccessoryViewController(accessory)
-    }
-
     @objc private func togglePanelFromButton(_ sender: Any?) {
         togglePanel()
     }
@@ -204,32 +176,26 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         pathLabel.lineBreakMode = .byTruncatingHead
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        sidebarButton.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "Folders sidebar")
-        sidebarButton.bezelStyle = .texturedRounded
-        sidebarButton.isBordered = false
-        sidebarButton.setButtonType(.pushOnPushOff)
-        sidebarButton.target = self
-        sidebarButton.action = #selector(toggleSidebarFromButton)
-        sidebarButton.toolTip = "Folders sidebar (⌥⌘S)"
-        sidebarButton.setContentHuggingPriority(.required, for: .horizontal)
-
-        sessionsButton.image = NSImage(
-            systemSymbolName: "bubble.left.and.bubble.right",
-            accessibilityDescription: "Claude Code sessions"
+        makeIconButton(
+            symbol: "sidebar.left",
+            tooltip: "Folders sidebar (⌥⌘S)",
+            action: #selector(toggleSidebarFromButton),
+            button: sidebarButton,
+            toggles: true
         )
-        sessionsButton.bezelStyle = .texturedRounded
-        sessionsButton.isBordered = false
-        sessionsButton.setButtonType(.pushOnPushOff)
-        sessionsButton.target = self
-        sessionsButton.action = #selector(toggleSessionsFromButton)
-        sessionsButton.toolTip = "Claude Code sessions (⌥⌘C)"
-        sessionsButton.setContentHuggingPriority(.required, for: .horizontal)
+        makeIconButton(
+            symbol: "clock.arrow.circlepath",
+            tooltip: "Claude Code sessions (⌥⌘C)",
+            action: #selector(toggleSessionsFromButton),
+            button: sessionsButton,
+            toggles: true
+        )
 
-        let row = NSStackView(views: [sidebarButton, sessionsButton, pathLabel])
+        let row = NSStackView(views: [makeCluster([sidebarButton, sessionsButton]), pathLabel])
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 2
-        row.edgeInsets = NSEdgeInsets(top: 0, left: 6, bottom: 0, right: 8)
+        row.spacing = 8
+        row.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 8)
         row.frame = NSRect(x: 0, y: 0, width: 320, height: 28)
 
         let accessory = NSTitlebarAccessoryViewController()
@@ -244,19 +210,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// Grouped into a single tinted well rather than scattered: three loose
     /// icons in a title bar read as clutter, one control reads as a control.
     private func installWindowControls(in window: NSWindow) {
-        panelButton.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "Preview panel")
-        panelButton.bezelStyle = .texturedRounded
-        panelButton.isBordered = false
-        panelButton.setButtonType(.pushOnPushOff)
-        panelButton.target = self
-        panelButton.action = #selector(togglePanelFromButton)
-        panelButton.toolTip = "Preview panel (⇧⌘P)"
-        panelButton.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            panelButton.widthAnchor.constraint(equalToConstant: 30),
-            panelButton.heightAnchor.constraint(equalToConstant: 24),
-        ])
-
+        makeIconButton(
+            symbol: "sidebar.right",
+            tooltip: "Preview panel (⇧⌘P)",
+            action: #selector(togglePanelFromButton),
+            button: panelButton,
+            toggles: true
+        )
         let splitRight = makeIconButton(
             symbol: "square.split.2x1",
             tooltip: "Split right (⌘D)",
@@ -272,16 +232,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         separator.boxType = .separator
         separator.translatesAutoresizingMaskIntoConstraints = false
 
-        let cluster = NSStackView(views: [splitRight, splitDown, separator, panelButton])
-        cluster.orientation = .horizontal
-        cluster.alignment = .centerY
-        cluster.spacing = 3
-        cluster.edgeInsets = NSEdgeInsets(top: 2, left: 3, bottom: 2, right: 3)
-        cluster.wantsLayer = true
-        cluster.layer?.cornerRadius = 8
-        cluster.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor
-
-        let row = NSStackView(views: [cluster])
+        let row = NSStackView(views: [makeCluster([splitRight, splitDown, separator, panelButton])])
         row.orientation = .horizontal
         row.edgeInsets = NSEdgeInsets(top: 0, left: 6, bottom: 0, right: 10)
         row.frame = NSRect(x: 0, y: 0, width: row.fittingSize.width, height: 28)
@@ -422,16 +373,46 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         }
     }
 
-    private func makeIconButton(symbol: String, tooltip: String, action: Selector) -> NSButton {
-        let button = NSButton()
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)
+    /// Every title bar icon, at one size and one weight.
+    ///
+    /// The two clusters are built from this and nothing else: buttons that
+    /// differ by a couple of points read as a mistake, and the eye finds it
+    /// before it finds the icons.
+    @discardableResult
+    private func makeIconButton(
+        symbol: String,
+        tooltip: String,
+        action: Selector,
+        button: NSButton = NSButton(),
+        toggles: Bool = false
+    ) -> NSButton {
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .regular))
         button.bezelStyle = .texturedRounded
         button.isBordered = false
+        if toggles { button.setButtonType(.pushOnPushOff) }
         button.target = self
         button.action = action
         button.toolTip = tooltip
-        button.frame = NSRect(x: 0, y: 0, width: 28, height: 22)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 30),
+            button.heightAnchor.constraint(equalToConstant: 24),
+        ])
         return button
+    }
+
+    /// The tinted well the icons sit in, on both sides of the title bar.
+    private func makeCluster(_ views: [NSView]) -> NSStackView {
+        let cluster = NSStackView(views: views)
+        cluster.orientation = .horizontal
+        cluster.alignment = .centerY
+        cluster.spacing = 3
+        cluster.edgeInsets = NSEdgeInsets(top: 2, left: 3, bottom: 2, right: 3)
+        cluster.wantsLayer = true
+        cluster.layer?.cornerRadius = 8
+        cluster.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor
+        return cluster
     }
 
     @objc private func toggleSidebarFromButton(_ sender: Any?) { toggleSidebar() }

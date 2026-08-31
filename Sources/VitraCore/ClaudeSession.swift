@@ -15,7 +15,33 @@ public struct ClaudeSession: Sendable, Equatable, Identifiable {
     public let projectPath: String
     public let modified: Date
 
-    public var projectName: String { URL(fileURLWithPath: projectPath).lastPathComponent }
+    /// The project this session belongs to.
+    ///
+    /// A worktree is not its own project: a session in
+    /// `farol/.claude/worktrees/eager-lamport` belongs to `farol`, which is
+    /// where its work lands and where it should be listed.
+    public var projectName: String {
+        let components = URL(fileURLWithPath: projectPath).pathComponents
+        if let index = worktreeIndex(in: components) { return components[index - 2] }
+        return components.last ?? projectPath
+    }
+
+    /// The worktree the session ran in, when it ran in one.
+    public var worktree: String? {
+        let components = URL(fileURLWithPath: projectPath).pathComponents
+        guard let index = worktreeIndex(in: components), index + 1 < components.count
+        else { return nil }
+        return components[index + 1]
+    }
+
+    /// Where `.claude/worktrees` sits in the path, if it is in there at all.
+    private func worktreeIndex(in components: [String]) -> Int? {
+        guard let index = components.lastIndex(of: "worktrees"),
+              index >= 2,
+              components[index - 1] == ".claude"
+        else { return nil }
+        return index
+    }
 
     public init(id: String, title: String, projectPath: String, modified: Date) {
         self.id = id

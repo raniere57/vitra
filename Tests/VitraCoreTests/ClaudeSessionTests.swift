@@ -179,3 +179,22 @@ private func makeStore() throws -> URL {
 
     #expect(ClaudeSessionStore.recent(in: store).first?.title == "/sessions")
 }
+
+@Test func aWorktreeSessionBelongsToItsProject() {
+    let session = ClaudeSession(
+        id: "ggg",
+        title: "Corrigir README",
+        projectPath: "/Users/me/Dev/farol/.claude/worktrees/charming-noyce-e37669",
+        modified: Date()
+    )
+
+    #expect(session.projectName == "farol")
+    #expect(session.worktree == "charming-noyce-e37669")
+}
+
+@Test func aPlainSessionHasNoWorktree() {
+    let session = ClaudeSession(id: "hhh", title: "x", projectPath: "/Users/me/Dev/farol", modified: Date())
+
+    #expect(session.projectName == "farol")
+    #expect(session.worktree == nil)
+}

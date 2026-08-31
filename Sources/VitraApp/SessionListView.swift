@@ -15,9 +15,21 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
     private let scroll = NSScrollView()
     private let status = NSTextField(labelWithString: "Reading sessions…")
     private var sessions: [ClaudeSession] = []
-    private var filtered: [ClaudeSession] = []
+    /// The visible rows: a project header, then its sessions, and so on.
+    private var rows: [Row] = []
     private var filter = ""
     private var hasLoaded = false
+
+    /// A row is either a project's name or one of its sessions. Flattening the
+    /// grouping into rows is what lets a plain table draw it, headers and all.
+    private enum Row {
+        case project(String, count: Int, collapsed: Bool)
+        case session(ClaudeSession)
+    }
+
+    /// Projects the user has folded away. One busy project can hold twenty
+    /// sessions, and without this it buries every other project below it.
+    private var collapsed: Set<String> = []
 
     private static let dateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
@@ -99,36 +111,131 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
     }
 
     private func applyFilter() {
-        filtered = filter.isEmpty ? sessions : sessions.filter { session in
+        let matching = filter.isEmpty ? sessions : sessions.filter { session in
             session.title.range(of: filter, options: [.caseInsensitive, .diacriticInsensitive]) != nil
                 || session.projectName.range(of: filter, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }
+
+        // Projects in the order they were last worked on, and their sessions
+        // newest first inside them: the list reads as recent work, not as a
+        // directory listing.
+        var order: [String] = []
+        var grouped: [String: [ClaudeSession]] = [:]
+        for session in matching {
+            if grouped[session.projectName] == nil { order.append(session.projectName) }
+            grouped[session.projectName, default: []].append(session)
+        }
+
+        rows = order.flatMap { project -> [Row] in
+            let sessions = grouped[project] ?? []
+            // A filter that matched inside a folded project opens it: hiding a
+            // result behind a fold the search itself caused is a dead end.
+            let isCollapsed = filter.isEmpty && collapsed.contains(project)
+            let header = Row.project(project, count: sessions.count, collapsed: isCollapsed)
+            return isCollapsed ? [header] : [header] + sessions.map(Row.session)
         }
         table.reloadData()
     }
 
+    private func session(atRow row: Int) -> ClaudeSession? {
+        guard row >= 0, row < rows.count, case let .session(session) = rows[row] else { return nil }
+        return session
+    }
+
     @objc private func rowClicked() {
         let row = table.clickedRow
-        guard row >= 0, row < filtered.count else { return }
-        onOpen?(filtered[row])
+        guard row >= 0, row < rows.count else { return }
+
+        switch rows[row] {
+        case let .project(name, _, _):
+            if collapsed.contains(name) { collapsed.remove(name) } else { collapsed.insert(name) }
+            applyFilter()
+        case let .session(session):
+            onOpen?(session)
+        }
     }
 
     // MARK: - NSTableViewDataSource
 
-    func numberOfRows(in tableView: NSTableView) -> Int { filtered.count }
+    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
     // MARK: - NSTableViewDelegate
 
+    func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
+        guard row < rows.count, case .project = rows[row] else { return false }
+        return true
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        session(atRow: row) != nil
+    }
+
+    /// Headers stay clickable while staying unselectable: folding a project is
+    /// not choosing anything, so nothing should look chosen afterwards.
+    func selectionShouldChange(in tableView: NSTableView) -> Bool { true }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        session(atRow: row) == nil ? 24 : 38
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard let session = session(atRow: row) else {
+            guard case let .project(name, count, isCollapsed) = rows[row] else { return nil }
+            let identifier = NSUserInterfaceItemIdentifier("project")
+            let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? ProjectCell
+                ?? ProjectCell(identifier: identifier)
+            cell.name.stringValue = "\(isCollapsed ? "▸" : "▾")  \(name)"
+            cell.count.stringValue = "\(count)"
+            cell.toolTip = isCollapsed ? "Show \(count) sessions" : "Hide"
+            return cell
+        }
+
         let identifier = NSUserInterfaceItemIdentifier("row")
         let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? SessionCell
             ?? SessionCell(identifier: identifier)
 
-        let session = filtered[row]
         cell.title.stringValue = session.title
-        cell.detail.stringValue = "\(session.projectName) · \(Self.dateFormatter.localizedString(for: session.modified, relativeTo: Date()))"
+        let when = Self.dateFormatter.localizedString(for: session.modified, relativeTo: Date())
+        cell.detail.stringValue = session.worktree.map { "\(when) · \($0)" } ?? when
         cell.toolTip = "\(session.projectPath)\n\(session.id)"
         return cell
     }
+}
+
+/// A project's name, standing over the sessions that belong to it.
+private final class ProjectCell: NSTableCellView {
+    let name = NSTextField(labelWithString: "")
+    let count = NSTextField(labelWithString: "")
+
+    init(identifier: NSUserInterfaceItemIdentifier) {
+        super.init(frame: .zero)
+        self.identifier = identifier
+
+        name.font = .systemFont(ofSize: 10.5, weight: .semibold)
+        name.textColor = .secondaryLabelColor
+        name.lineBreakMode = .byTruncatingTail
+        name.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(name)
+        textField = name
+
+        count.font = .systemFont(ofSize: 10)
+        count.textColor = .tertiaryLabelColor
+        count.setContentHuggingPriority(.required, for: .horizontal)
+        count.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(count)
+
+        NSLayoutConstraint.activate([
+            name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            name.trailingAnchor.constraint(lessThanOrEqualTo: count.leadingAnchor, constant: -6),
+            name.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
+
+            count.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            count.firstBaselineAnchor.constraint(equalTo: name.firstBaselineAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not supported") }
 }
 
 /// Two lines: what the session is called, and where and when it was.

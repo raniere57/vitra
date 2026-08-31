@@ -102,6 +102,11 @@ app share, `~/.claude/projects/`. Clicking one types
 the conversation reopens where it was, in the terminal you are already looking
 at. The filter field searches titles and project names.
 
+Sessions are grouped by project, newest project first, with the count beside the
+name; clicking a project's name folds it away, which is what keeps one busy
+repository from burying the other twenty. A session run in a worktree is listed
+under its project, with the worktree named beside the date.
+
 Titles come from the transcript's own `custom-title`, falling back to the prompt
 the session started from, or to the slash command when that is all it was. Only
 the newest transcripts are read, and only 32 KB from the head and 64 KB from the
