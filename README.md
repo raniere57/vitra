@@ -136,6 +136,20 @@ head and 64 KB from the tail of each: a session file runs to tens of megabytes
 and the sidebar needs one line out of it. The read happens off the main thread,
 the first time the list is shown — never at launch.
 
+Clicking a session types `cd <project> && claude --resume <id>` into the pane
+that has the keyboard — unless something is already running in it. A pane with a
+program in the foreground reads what it is handed as *input*, which is how the
+command used to end up in Claude Code's own chat box; the tty says who holds the
+terminal (`tcgetpgrp`), and a busy pane gets the session in a new tab instead.
+
+## Scrolling
+
+The wheel and the trackpad scroll the scrollback, and a thin thumb appears on
+the right edge while the viewport is off the live screen — never while it is at
+the bottom, which is where a terminal spends its life. The position comes from
+the terminal itself, once per frame it already draws: no scroll view, no timer,
+nothing running while nothing scrolls. Typing puts the live screen back.
+
 ## Command blocks
 
 The shell tells Vitra where each command starts and ends (OSC 133), and the

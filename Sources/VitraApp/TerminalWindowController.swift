@@ -290,8 +290,27 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     ///
     /// `--resume` only lists the sessions of the directory it runs in, so the
     /// directory is part of the line: the shell arrives where the session was.
-    private func openSession(_ session: ClaudeSession) {
+    /// Types a command into the focused pane. Used when a tab opens to run one.
+    func run(_ command: String) {
         guard let pane = focusedPane else { return }
+        pane.session.send(text: command)
+        window?.makeFirstResponder(pane)
+    }
+
+    private func openSession(_ session: ClaudeSession) {
+        // A pane with a program in the foreground reads what it is handed as
+        // input: clicking a session while Claude Code was running typed
+        // `claude --resume ...` into its chat box. That one opens in a tab.
+        guard let pane = focusedPane, !pane.session.isRunningProgram else {
+            (NSApp.delegate as? AppDelegate)?.openTab(
+                for: Bookmark(
+                    name: URL(fileURLWithPath: session.projectPath).lastPathComponent,
+                    path: session.projectPath
+                ),
+                running: ClaudeSessionStore.resumeCommand(for: session)
+            )
+            return
+        }
         pane.session.send(text: ClaudeSessionStore.resumeCommand(for: session))
         window?.makeFirstResponder(pane)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in

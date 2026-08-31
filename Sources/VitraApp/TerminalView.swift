@@ -45,6 +45,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     /// One rail per command, drawn in the left padding.
     private let blockGutter = CommandBlockView()
+    private let scrollIndicator = ScrollIndicator()
     private var showsCommandBlocks = true
 
     /// How commands ended, newest first, as the shell reported them.
@@ -120,6 +121,10 @@ final class TerminalView: NSView, NSMenuItemValidation {
         blockGutter.autoresizingMask = [.width, .height]
         addSubview(blockGutter)
 
+        scrollIndicator.autoresizingMask = [.width, .height]
+        scrollIndicator.isHidden = true
+        addSubview(scrollIndicator)
+
         focusBar.wantsLayer = true
         focusBar.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor
         focusBar.autoresizingMask = [.height]
@@ -182,6 +187,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
         showsCommandBlocks = config.commandBlocks
         blockGutter.isHidden = !config.commandBlocks
         let foreground = NSColor(hex: config.theme.foreground.hex) ?? .white
+        scrollIndicator.color = foreground.withAlphaComponent(0.30)
         blockGutter.railColor = foreground.withAlphaComponent(0.22)
         blockGutter.labelColor = foreground.withAlphaComponent(0.45)
         blockGutter.separatorColor = foreground.withAlphaComponent(0.10)
@@ -282,6 +288,8 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     /// Hands the gutter this frame's command blocks.
     private func updateCommandBlocks() {
+        scrollIndicator.frame = bounds
+        scrollIndicator.update(snapshot.scroll)
         guard showsCommandBlocks else { return }
         blockGutter.frame = bounds
         blockGutter.update(

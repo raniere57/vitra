@@ -79,6 +79,9 @@ public final class TerminalSession: @unchecked Sendable {
     /// and asking the process is the only answer that is never stale.
     public var currentDirectory: URL? { pty.workingDirectory }
 
+    /// Whether a program - not the shell - is holding the terminal.
+    public var isRunningProgram: Bool { pty.hasForegroundJob }
+
     /// Starts reading the child's output.
     ///
     /// Separate from `init` on purpose: the shell can write before the caller's

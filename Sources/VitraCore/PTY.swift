@@ -282,6 +282,16 @@ public final class PTY: @unchecked Sendable {
         return path.isEmpty ? nil : URL(fileURLWithPath: path, isDirectory: true)
     }
 
+    /// Whether something other than the shell holds the terminal.
+    ///
+    /// The shell's own process group is the shell; a job it started has its
+    /// own. Asking the tty who is in the foreground is how a program that
+    /// never says anything - Claude Code, vim, less - can still be noticed.
+    public var hasForegroundJob: Bool {
+        let foreground = tcgetpgrp(masterFD)
+        return foreground > 0 && foreground != processID
+    }
+
     public func terminate() {
         kill(processID, SIGHUP)
     }

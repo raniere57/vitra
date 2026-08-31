@@ -91,6 +91,15 @@ final class RenderStateReader {
         )
         snapshot.cursor = readCursor(colors: colors)
 
+        var bar = GhosttyTerminalScrollbar()
+        if ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &bar) == GHOSTTY_SUCCESS {
+            snapshot.scroll = ScrollPosition(
+                total: Int(bar.total),
+                offset: Int(bar.offset),
+                visible: Int(bar.len)
+            )
+        }
+
         fillCells(into: snapshot, colors: colors)
 
         // The render state stays dirty until the consumer says it has drawn. Not

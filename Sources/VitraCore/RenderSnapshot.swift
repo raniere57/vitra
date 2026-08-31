@@ -112,6 +112,32 @@ public enum RowSemantic: UInt8, Sendable {
     case promptContinuation = 2
 }
 
+/// Where the viewport sits in the scrollback, in rows.
+///
+/// Read from the terminal once per frame - libghostty keeps it incrementally
+/// and offers no change notification - so a scrollbar costs nothing while
+/// nothing scrolls.
+public struct ScrollPosition: Sendable, Equatable {
+    /// Rows in the whole scrollable area.
+    public var total: Int
+    /// Rows above the top of the viewport.
+    public var offset: Int
+    /// Rows the viewport shows.
+    public var visible: Int
+
+    public init(total: Int = 0, offset: Int = 0, visible: Int = 0) {
+        self.total = total
+        self.offset = offset
+        self.visible = visible
+    }
+
+    /// Whether there is anything above or below to scroll to.
+    public var isScrollable: Bool { total > visible && visible > 0 }
+
+    /// Whether the viewport is showing the live screen.
+    public var isAtBottom: Bool { offset + visible >= total }
+}
+
 public final class RenderSnapshot {
     public private(set) var columns: UInt16 = 0
     public private(set) var rows: UInt16 = 0
@@ -126,6 +152,9 @@ public final class RenderSnapshot {
     public private(set) var rowSemantics: [RowSemantic] = []
     /// Which rows carry cells the user typed, as marked by OSC 133 `B`.
     public private(set) var rowHasInput: [Bool] = []
+
+    /// Where the viewport sits in the scrollback, for the scrollbar.
+    public var scroll = ScrollPosition()
 
     public var defaultForeground: TerminalColor = .white
     public var defaultBackground: TerminalColor = .black

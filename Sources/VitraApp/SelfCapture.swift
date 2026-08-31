@@ -96,6 +96,21 @@ enum SelfCapture {
             }
         }
 
+        // Scrollback moved before the shot: a wheel gesture cannot be faked from
+        // a headless run, and scrolling is the one behaviour a screenshot of the
+        // live screen can never show.
+        if let lines = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_SCROLL"].flatMap(Int.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.8) {
+                guard let pane = (NSApp.keyWindow?.firstResponder as? TerminalView)
+                    ?? (NSApp.orderedWindows.first(where: { $0.isVisible })?.firstResponder as? TerminalView)
+                else {
+                    FileHandle.standardError.write(Data("[self-shot] no pane to scroll\n".utf8))
+                    return
+                }
+                pane.session.scroll(lines: lines)
+            }
+        }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             capture(to: path)
             if ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_QUIT"] != nil {

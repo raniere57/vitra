@@ -167,3 +167,38 @@ private final class Output: @unchecked Sendable {
         )
     }
 }
+
+/// Clicking a session in the sidebar types a command into the pane, which only
+/// makes sense when the shell is the one reading. This is how a pane running
+/// Claude Code — or vim, or less — is told apart from an idle one.
+@Test func aRunningJobIsSeenInTheForeground() throws {
+    let pty = try PTY(
+        executable: "/bin/sh",
+        arguments: ["-i"],
+        environment: ShellEnvironment.childEnvironment(),
+        size: .default
+    )
+    defer {
+        pty.terminate()
+        pty.reap(blocking: true)
+    }
+    pty.startReading(on: DispatchQueue(label: "test.foreground"), onData: { _ in }, onEOF: {})
+
+    try pty.write("sleep 5\n")
+    let started = waitUntil(timeout: 10) { pty.hasForegroundJob }
+    #expect(started, "the shell should have handed the terminal to `sleep`")
+
+    try pty.write("\u{03}")
+    #expect(waitUntil(timeout: 10) { !pty.hasForegroundJob }, "the shell should have it back")
+}
+
+/// Polls a condition instead of sleeping a fixed time: the suite runs in
+/// parallel and a fixed wait is either flaky or slow.
+private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if condition() { return true }
+        usleep(20_000)
+    }
+    return condition()
+}
