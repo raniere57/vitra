@@ -176,6 +176,15 @@ public final class RenderSnapshot {
 
     /// Where the viewport sits in the scrollback, for the scrollbar.
     public var scroll = ScrollPosition()
+    /// True while a program is on the alternate screen, which has no scrollback
+    /// of its own: a full-screen editor, a pager, or a TUI.
+    public var isAlternateScreen = false
+    /// True while the program has asked to be told about the mouse, in which
+    /// case the wheel is its news and not the viewport's.
+    public var mouseTracking = false
+    /// True when the program asked for SGR mouse reports (DECSET 1006), which
+    /// is the only encoding that survives past column 223.
+    public var sgrMouse = false
 
     public var defaultForeground: TerminalColor = .white
     public var defaultBackground: TerminalColor = .black

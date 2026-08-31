@@ -326,3 +326,24 @@ A first measurement read 355 MB and was wrong: `pgrep` had matched the
 long-running instance in `/Applications`, not the one just launched. Measuring
 by the PID of the process actually started is the difference between a
 regression and a mistake.
+
+## The wheel was going to the wrong place
+
+Scrolling worked everywhere I tested it and nowhere the user was. Reading the
+terminal's own state during a Claude Code session ended the guessing:
+
+```
+[self-shot] alt=true mouse=true sgr=true total=62 offset=0 visible=62
+```
+
+`alt=true` is the whole answer. Claude Code runs on the alternate screen, which
+has no scrollback: `total` equals `visible`, so there is nothing above the
+viewport to move to and the wheel had nothing to do. The same read says the
+program asked for mouse reports in SGR form, which is how it scrolls its own
+transcript. A shell session reports `alt=false` with hundreds of lines of
+scrollback, which is why every test outside Claude Code passed.
+
+Two things the harness had to learn before this could be measured: a synthesised
+wheel event posted with `NSApp.postEvent` never reaches the view — AppKit drops
+it — so the pane has to be handed the event directly, and the pane needed a way
+to say what the viewport is doing at the moment of the shot.

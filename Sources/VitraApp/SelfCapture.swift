@@ -197,18 +197,24 @@ enum SelfCapture {
                     FileHandle.standardError.write(Data("[self-shot] no pane to wheel\n".utf8))
                     return
                 }
-                // Posted rather than called: the point of the measurement is
-                // whether AppKit routes a wheel event to the pane at all.
+                // Handed to the pane rather than posted: a synthesised event
+                // posted to the app never survives AppKit's own routing, and
+                // what is being measured here is the pane's own arithmetic.
                 let centre = pane.convert(NSPoint(x: pane.bounds.midX, y: pane.bounds.midY), to: nil)
                 let onScreen = window.convertPoint(toScreen: centre)
                 let height = NSScreen.screens.first?.frame.height ?? 0
                 scroll.location = CGPoint(x: onScreen.x, y: height - onScreen.y)
-                guard let routed = NSEvent(cgEvent: scroll) else { return }
-                NSApp.postEvent(routed, atStart: false)
+                guard let wheel = NSEvent(cgEvent: scroll) else { return }
+                pane.scrollWheel(with: wheel)
             }
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            if let pane = (NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible }))?
+                .firstResponder as? TerminalView
+            {
+                FileHandle.standardError.write(Data("[self-shot] \(pane.scrollState)\n".utf8))
+            }
             capture(to: path)
             if ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_QUIT"] != nil {
                 NSApp.terminate(nil)

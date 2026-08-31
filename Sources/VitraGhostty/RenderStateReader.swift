@@ -91,6 +91,21 @@ final class RenderStateReader {
         )
         snapshot.cursor = readCursor(colors: colors)
 
+        var screen = GHOSTTY_TERMINAL_SCREEN_PRIMARY
+        _ = ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN, &screen)
+        snapshot.isAlternateScreen = screen == GHOSTTY_TERMINAL_SCREEN_ALTERNATE
+
+        var tracking = false
+        _ = ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &tracking)
+        snapshot.mouseTracking = tracking
+
+        // The mode macros are C macros over a static inline, so the DEC private
+        // mode number is packed here the way the header packs it: value in the
+        // low fifteen bits, the ANSI flag in the top one.
+        var sgr = GhosttyTerminalModeConfig(mode: ghostty_mode_new(1006, false), value: false)
+        _ = ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_MODE, &sgr)
+        snapshot.sgrMouse = sgr.value
+
         var bar = GhosttyTerminalScrollbar()
         if ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &bar) == GHOSTTY_SUCCESS {
             snapshot.scroll = ScrollPosition(

@@ -564,6 +564,13 @@ final class TerminalView: NSView, NSMenuItemValidation {
         NSCursor.arrow.set()
     }
 
+    /// What the viewport is doing right now, for a measured run to print.
+    var scrollState: String {
+        "alt=\(snapshot.isAlternateScreen) mouse=\(snapshot.mouseTracking)"
+            + " sgr=\(snapshot.sgrMouse) total=\(snapshot.scroll.total)"
+            + " offset=\(snapshot.scroll.offset) visible=\(snapshot.scroll.visible)"
+    }
+
     override func scrollWheel(with event: NSEvent) {
         let lines: Int
         if event.hasPreciseScrollingDeltas {
@@ -576,9 +583,59 @@ final class TerminalView: NSView, NSMenuItemValidation {
         } else {
             lines = Int(event.scrollingDeltaY.rounded())
         }
-        // ponytail: always scrolls the viewport. Forwarding to the application in
-        // alternate-screen mode comes with mouse reporting in the next phase.
-        session.scroll(lines: -lines)
+        guard lines != 0 else { return }
+
+        // Who the wheel belongs to depends on what the program asked for.
+        //
+        // A program watching the mouse gets the wheel as a mouse report: that is
+        // how a full-screen tool scrolls its own transcript, and it is the only
+        // thing that works on the alternate screen, which has no scrollback of
+        // its own to move through. A full-screen program that never asked about
+        // the mouse gets arrow keys instead — xterm's alternate scroll, and what
+        // makes a pager follow the wheel. Everything else scrolls the viewport.
+        if ProcessInfo.processInfo.environment["VITRA_DEBUG_WHEEL"] != nil {
+            FileHandle.standardError.write(Data(
+                "[wheel] lines=\(lines) mouse=\(snapshot.mouseTracking) alt=\(snapshot.isAlternateScreen)\n".utf8
+            ))
+        }
+        if snapshot.mouseTracking {
+            report(wheel: lines, at: cell(for: event))
+        } else if snapshot.isAlternateScreen {
+            // Up is 126 and Down is 125; the encoder is what knows whether the
+            // program wants the application-cursor form of them.
+            let keyCode: UInt16 = lines > 0 ? 126 : 125
+            for _ in 0 ..< min(abs(lines), 24) {
+                session.send(KeyEvent(keyCode: keyCode))
+            }
+        } else {
+            session.scroll(lines: -lines)
+        }
+    }
+
+    /// Sends the wheel to the program as a mouse report.
+    ///
+    /// Button 64 is a notch up and 65 a notch down, and both are reported as
+    /// presses: the wheel has no release. SGR is preferred because the legacy
+    /// encoding runs out of room at column 223.
+    private func report(wheel lines: Int, at position: (column: UInt16, row: UInt16)) {
+        let button = lines > 0 ? 64 : 65
+        let column = Int(position.column) + 1
+        let row = Int(position.row) + 1
+
+        let report: String
+        if snapshot.sgrMouse {
+            report = "\u{1b}[<\(button);\(column);\(row)M"
+        } else {
+            // 32 is the offset the original encoding adds to every field, and
+            // the fields are single bytes, so anything past 223 cannot be said.
+            guard column <= 223, row <= 223 else { return }
+            report = "\u{1b}[M"
+                + String(UnicodeScalar(UInt8(32 + button)))
+                + String(UnicodeScalar(UInt8(32 + column)))
+                + String(UnicodeScalar(UInt8(32 + row)))
+        }
+
+        for _ in 0 ..< min(abs(lines), 24) { session.send(text: report) }
     }
 
     private var scrollAccumulator: CGFloat = 0

@@ -176,6 +176,14 @@ the bottom, which is where a terminal spends its life. The position comes from
 the terminal itself, once per frame it already draws: no scroll view, no timer,
 nothing running while nothing scrolls. Typing puts the live screen back.
 
+A full-screen program — Claude Code, `vim`, `less` — is on the alternate
+screen, which has no scrollback at all, so scrolling the viewport there would
+move nothing. The wheel goes to the program instead: as a mouse report when it
+asked to hear about the mouse (SGR, or the legacy encoding when that is all it
+knows), and as arrow keys when it did not, which is what makes a pager follow
+the wheel. Vitra reads which of those applies from the terminal itself rather
+than guessing.
+
 `Shift+Page Up` and `Shift+Page Down` move by a screen without a hand on the
 trackpad, and `Shift+Home` and `Shift+End` go to the top of the scrollback and
 back to the live screen. Shift is what says the key is for the terminal and not
