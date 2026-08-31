@@ -89,8 +89,12 @@ enum SelfCapture {
         }
 
         if let keys = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_KEYS"] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.7) {
-                for character in keys {
+            // One key every 150ms rather than a burst inside one runloop turn:
+            // a person types with gaps, and a frame that only ever lands after
+            // the last key would hide exactly the bug this measures.
+            let gap = 0.15
+            for (index, character) in keys.enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.5 + Double(index) * gap) {
                     let text = String(character)
                     guard let event = NSEvent.keyEvent(
                         with: .keyDown,
@@ -102,9 +106,12 @@ enum SelfCapture {
                         characters: text,
                         charactersIgnoringModifiers: text,
                         isARepeat: false,
-                        keyCode: 0
-                    ) else { continue }
-                    NSApp.sendEvent(event)
+                        // Space carries its real code: the input context sees a
+                        // key, not only the text it produced.
+                        keyCode: character == " " ? 49 : 0
+                    ) else { return }
+                    let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible })
+                    (window?.firstResponder as? TerminalView)?.keyDown(with: event)
                 }
             }
         }
@@ -121,6 +128,16 @@ enum SelfCapture {
                     return
                 }
                 pane.session.send(text: text)
+            }
+        }
+
+        // A second round of typing, once whatever the first round started has
+        // had time to come up: a TUI cannot be typed into before it exists.
+        if let input = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_INPUT_LATE"] {
+            let text = input.replacingOccurrences(of: "\\n", with: "\n")
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.9) {
+                let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible })
+                (window?.firstResponder as? TerminalView)?.session.send(text: text)
             }
         }
 

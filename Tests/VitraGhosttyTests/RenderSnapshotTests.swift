@@ -125,3 +125,18 @@ private func rowText(_ snapshot: RenderSnapshot, _ row: Int) -> String {
     #expect(snapshot.text.count == firstSize)
     #expect(rowText(snapshot, 0) == "bbbb")
 }
+
+@Test func typingSpacesRedrawsBecauseTheCursorMoved() throws {
+    // A space over a cell that was already blank changes no cell at all, so
+    // nothing is dirty — but the cursor has moved, and it is the only thing on
+    // screen that says where the next character will land.
+    let core = try GhosttyTerminalCore(size: TerminalSize(columns: 20, rows: 3))
+    core.feed("ab")
+    let snapshot = RenderSnapshot()
+    #expect(try core.updateSnapshot(snapshot))
+    #expect(snapshot.cursor?.column == 2)
+
+    core.feed("    ")
+    #expect(try core.updateSnapshot(snapshot))
+    #expect(snapshot.cursor?.column == 6)
+}

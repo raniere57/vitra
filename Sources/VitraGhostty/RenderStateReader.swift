@@ -66,12 +66,6 @@ final class RenderStateReader {
         // shows up in a profile.
         // A theme change alters no cell, so libghostty reports nothing dirty
         // while every colour on screen is now wrong. This is how that gets drawn.
-        if forceNextUpdate {
-            forceNextUpdate = false
-        } else {
-            guard dirty != GHOSTTY_RENDER_STATE_DIRTY_FALSE else { return false }
-        }
-
         var columns: UInt16 = 0
         var rows: UInt16 = 0
         _ = ghostty_render_state_get(state, GHOSTTY_RENDER_STATE_DATA_COLS, &columns)
@@ -83,13 +77,26 @@ final class RenderStateReader {
             throw TerminalCoreError.operationFailed("render_state_colors_get", code: 0)
         }
 
+        let cursor = readCursor(colors: colors)
+
+        if forceNextUpdate {
+            forceNextUpdate = false
+        } else if dirty == GHOSTTY_RENDER_STATE_DIRTY_FALSE {
+            // Typing a space over a cell that was already blank changes no cell,
+            // so nothing is dirty — but the cursor has moved, and the cursor is
+            // the only thing on screen saying where the next character goes. A
+            // frame that skips this leaves the cursor parked until a character
+            // that is not a space arrives.
+            guard moved(from: snapshot.cursor, to: cursor) else { return false }
+        }
+
         snapshot.beginFrame(
             columns: columns,
             rows: rows,
             foreground: TerminalColor(colors.foreground),
             background: TerminalColor(colors.background)
         )
-        snapshot.cursor = readCursor(colors: colors)
+        snapshot.cursor = cursor
 
         var screen = GHOSTTY_TERMINAL_SCREEN_PRIMARY
         _ = ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN, &screen)
@@ -127,6 +134,18 @@ final class RenderStateReader {
     }
 
     // MARK: - Cursor
+
+    /// Whether the cursor is somewhere new, or has just appeared or gone.
+    ///
+    /// Position only: the style is the user's to override, and comparing it
+    /// would report a change on every frame and start drawing at rest.
+    private func moved(from old: CursorSnapshot?, to new: CursorSnapshot?) -> Bool {
+        switch (old, new) {
+        case (nil, nil): false
+        case let (old?, new?): old.column != new.column || old.row != new.row
+        default: true
+        }
+    }
 
     private func readCursor(colors: GhosttyRenderStateColors) -> CursorSnapshot? {
         var visible = false
