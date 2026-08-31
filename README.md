@@ -1,14 +1,64 @@
-# Vitra
+<div align="center">
+  <img src="docs/icon.png" width="128" height="128" alt="Vitra" />
+  <h1>Vitra</h1>
+  <p><strong>A native macOS terminal built to host CLI coding agents.</strong></p>
+  <p>
+    <img src="https://img.shields.io/badge/macOS-14%2B-111?logo=apple" alt="macOS 14+" />
+    <img src="https://img.shields.io/badge/arch-Apple%20silicon-111" alt="Apple silicon" />
+    <img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift 6" />
+    <a href="https://github.com/raniere57/vitra/releases/latest"><img src="https://img.shields.io/github/v/release/raniere57/vitra?color=2f81f7" alt="latest release" /></a>
+    <img src="https://img.shields.io/badge/license-MIT-111" alt="MIT" />
+  </p>
+</div>
 
-A native macOS terminal built to host Claude Code: attach files to the prompt,
-preview what the agent produces, and stay out of the way of a MacBook Air with
-8 GB of RAM.
+![Vitra with two panes, the folder rail and command blocks](docs/hero.png)
 
-One process, no runtime. Swift 6 and AppKit, [libghostty-vt](docs/DEPENDENCIES.md)
-for the VT core, a Metal renderer with a Core Text glyph atlas, and WebKit that
-is only loaded once a web preview is actually opened.
+## What it is
+
+You already run Claude Code, Codex or another agent in a terminal. Vitra is the
+window around that: your Claude Code sessions listed in a sidebar and resumed
+with one click, files attached to the prompt by dragging them onto the pane,
+whatever the agent writes rendered in a preview panel beside it, and the whole
+workspace - windows, tabs, splits, folders - back where you left it after a
+restart.
+
+It is a real terminal underneath, not a wrapper: [libghostty-vt](docs/DEPENDENCIES.md)
+drives the VT core and a Metal renderer with a Core Text glyph atlas draws it.
+`vim`, `ssh` and `top` behave the way they do in any other terminal.
+
+- **Sessions** - every Claude Code conversation on the machine, grouped by
+  project, searchable, resumed into a new tab. The one you are in is marked.
+- **Folders** - favourite directories on a rail down the left edge, each with
+  its own icon, colour and theme; one click opens a tab already there.
+- **Attachments** - drop a file or paste an image and its path is typed into
+  the prompt. Bytes never go near the pty.
+- **Preview panel** - HTML, Markdown, images, PDFs and a real browser, in a
+  WKWebView that is created when you open it and destroyed when you close it.
+- **Command blocks** - each command is a block with its own rail, timing and
+  exit status.
+- **MCP server** - compiled into the binary, so an agent running inside Vitra
+  can open a file in the preview or read the page it is looking at. It cannot
+  run a shell command or read a file you did not open.
+- **Light** - one process. About 80 MB of memory for a window, and no timer
+  running when the screen is not changing. Every number in
+  [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md) is measured, not estimated.
 
 Requires macOS 14 or later on Apple silicon.
+
+## Install
+
+Download the disk image from
+[the latest release](https://github.com/raniere57/vitra/releases/latest), drag
+Vitra to Applications, and clear the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Vitra.app
+```
+
+That last step is needed because the image is signed ad-hoc and not notarised -
+there is no Developer ID behind this build. It is worth understanding rather
+than pasting: the flag is what macOS puts on anything downloaded, and clearing
+it says you trust this copy.
 
 ## Build
 
@@ -26,13 +76,9 @@ scripts/make-icon.sh             # draws the icon and packs dist/AppIcon.icns
 scripts/release.sh               # size-optimised build, ad-hoc signature, dist/Vitra-<version>.dmg
 ```
 
-The disk image is signed ad-hoc, not notarised: there is no Developer ID behind
-this build, so Gatekeeper refuses a copy that arrived with the quarantine flag.
-Clearing it is one command, and worth understanding rather than pasting:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Vitra.app
-```
+Arranging the icons inside the image is done by scripting Finder, so the first
+run asks for Automation permission; without it the image still works, it just
+opens as a list. Every release is written up in [CHANGELOG.md](CHANGELOG.md).
 
 ## The CLI
 
