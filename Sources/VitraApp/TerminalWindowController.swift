@@ -649,7 +649,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     /// What this window is showing, in the form the next launch can rebuild.
     func layout(tabGroup: Int, sessions: [ClaudeSession] = []) -> Layout.Window? {
-        guard let window, let root = paneContainer.subviews.first else { return nil }
+        // A window with no panes left is one that has closed: nothing to save.
+        guard let window, !panes.isEmpty, let root = paneContainer.subviews.first else { return nil }
         let frame = window.frame
         return Layout.Window(
             directory: bookmark?.path,
@@ -1083,6 +1084,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         panes.forEach { $0.prepareForRemoval() }
         panes.forEach { $0.session.terminate() }
         panes.removeAll()
+        // The app keeps the controllers; a closed one has to be let go, or it
+        // lives on as a window with no panes — invisible, and saved into the
+        // layout as a tab that opens empty on the next launch.
+        if let window = notification.object as? NSWindow {
+            (NSApp.delegate as? AppDelegate)?.windowWillClose(window)
+        }
     }
 }
 
