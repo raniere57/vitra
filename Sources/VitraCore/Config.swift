@@ -6,7 +6,10 @@ import Foundation
 /// the default in place and adds a line to `problems`, which the preferences
 /// window shows. A typo in a config file should never stop a terminal opening.
 public struct Config: Equatable, Sendable {
-    public var fontName: String = "Menlo"
+    /// SF Mono: it ships with macOS, so there is nothing to install and nothing
+    /// to bundle, and it is the face most of this machine's other developer
+    /// tools already draw code in.
+    public var fontName: String = "SF Mono"
     public var fontSize: Double = 13
     public var theme: Theme = .dark
     /// 0.5–1. Below 1 the window is translucent.

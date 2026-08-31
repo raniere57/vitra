@@ -407,7 +407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let controller = try TerminalWindowController(
                 device: device,
-                fontName: "Menlo",
+                fontName: config.fontName,
                 fontSize: 13,
                 command: Self.commandFromArguments(),
                 attachments: attachments,

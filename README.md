@@ -429,7 +429,11 @@ instead of hanging.
 
 `~/.vitra/config.toml`, written on first launch. Saving it applies to every open
 window immediately — font, theme, opacity, padding, scrollback and shell, with no
-restart. `Cmd-,` opens a settings window that edits the same file, and `Cmd-+`
+restart. The default face is **SF Mono**, which ships with macOS - it carries no
+public family name, so Vitra resolves that one name through the system rather
+than through the font list; any other installed family is named as itself
+(`JetBrains Mono`, `Menlo`, `Fira Code`), and a name that resolves to nothing
+falls back to Menlo. `Cmd-,` opens a settings window that edits the same file, and `Cmd-+`
 and `Cmd--` write the font size into it — zooming is a setting like any other,
 so it survives a restart and reaches every window at once.
 

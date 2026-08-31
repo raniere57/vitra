@@ -1,3 +1,4 @@
+import AppKit
 import CoreText
 import Foundation
 
@@ -80,6 +81,13 @@ public struct FontSet: @unchecked Sendable {
     }
 
     private static func font(named name: String, size: CGFloat) -> CTFont? {
+        // SF Mono ships with macOS but carries no public family name: it is the
+        // monospaced face of the system font, and this is the only way to ask
+        // for it. Naming it in a config file should still work.
+        if name.caseInsensitiveCompare("SF Mono") == .orderedSame {
+            return NSFont.monospacedSystemFont(ofSize: size, weight: .regular) as CTFont
+        }
+
         let descriptor = CTFontDescriptorCreateWithAttributes([
             kCTFontFamilyNameAttribute: name as CFString,
         ] as CFDictionary)

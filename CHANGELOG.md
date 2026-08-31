@@ -13,6 +13,9 @@ Dates are the day the disk image was built.
   wreckage. A pane's size now reaches the program only while the pane is
   visible and wider than 100 points.
 - Fixed: the split's divider is no longer drawn over the maximised panel.
+- The default font is SF Mono instead of Menlo. It ships with macOS, so nothing
+  is installed and nothing is bundled; `family = "SF Mono"` in the config now
+  resolves through the system font, which is the only way to ask for it.
 
 ## 0.1.0 - 2026-08-31
 
