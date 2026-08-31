@@ -257,6 +257,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Tabs of one window share a tab group; separate windows do not. The
         // group is identified by position in the list so it survives the trip
         // through JSON.
+        // Read once for every window: a pane's session is recognised by the
+        // title it wears, and that needs the list of sessions on disk.
+        let sessions = ClaudeSessionStore.recent().sessions
         var groups: [ObjectIdentifier: Int] = [:]
         var saved: [Layout.Window] = []
         for controller in windows {
@@ -269,7 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     groups[key] = group
                 }
             }
-            guard let window = controller.layout(tabGroup: group) else { continue }
+            guard let window = controller.layout(tabGroup: group, sessions: sessions) else { continue }
             saved.append(window)
         }
 
@@ -288,7 +291,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         var leaders: [Int: NSWindow] = [:]
         for saved in layout.windows {
-            let bookmark = saved.directory.map {
+            // A window with no folder of its own still has panes that had one;
+            // without this the shell it opens starts at the root of the disk.
+            let folder = saved.directory ?? saved.root.panes.compactMap(\.directory).first
+            let bookmark = folder.map {
                 Bookmark(name: URL(fileURLWithPath: $0).lastPathComponent, path: $0)
             }
             makeWindow(asTabOf: leaders[saved.tabGroup], bookmark: bookmark, restoring: saved)

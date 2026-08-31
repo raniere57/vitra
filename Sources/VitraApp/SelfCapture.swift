@@ -41,6 +41,17 @@ enum SelfCapture {
                         FileHandle.standardError.write(Data("[self-shot] \(name): \(fired ? "sent" : "NOT FOUND")\n".utf8))
                         continue
                     }
+                    // "close" presses the window's own close button, which is
+                    // the path a menu item cannot reach: it asks the delegate
+                    // first, and the delegate is what decides tab or app.
+                    if name == "close" {
+                        let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible })
+                        window?.performClose(nil)
+                        let left = NSApp.windows.filter(\.isVisible).count
+                        FileHandle.standardError.write(Data("[self-shot] close: \(left) visible after\n".utf8))
+                        continue
+                    }
+
                     let selector = Selector(String(name))
                     // The responder chain only reaches anything when a key window
                     // exists, which it may not for a run launched from a shell, so

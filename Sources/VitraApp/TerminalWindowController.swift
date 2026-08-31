@@ -648,7 +648,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     // MARK: - Layout
 
     /// What this window is showing, in the form the next launch can rebuild.
-    func layout(tabGroup: Int) -> Layout.Window? {
+    func layout(tabGroup: Int, sessions: [ClaudeSession] = []) -> Layout.Window? {
         guard let window, let root = paneContainer.subviews.first else { return nil }
         let frame = window.frame
         return Layout.Window(
@@ -665,7 +665,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
                 width: sidebar.frame.width
             ),
             tabGroup: tabGroup,
-            root: node(of: root)
+            root: node(of: root, sessions: sessions)
         )
     }
 
@@ -674,13 +674,21 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// The proportions come from the frames rather than from a divider index:
     /// what is on screen is the truth, and it survives a window that was
     /// resized after the last drag.
-    private func node(of view: NSView) -> Layout.Node {
+    private func node(of view: NSView, sessions: [ClaudeSession]) -> Layout.Node {
         guard let split = view as? NSSplitView else {
-            let pane = view as? TerminalView
-            return .pane(Layout.Pane(
-                directory: pane?.session.currentDirectory?.path,
-                session: pane?.claudeSession
-            ))
+            guard let pane = view as? TerminalView else { return .pane(Layout.Pane()) }
+            let directory = pane.session.currentDirectory?.path ?? bookmark?.path
+            // The same recognition the sidebar's mark uses: most sessions were
+            // never launched from the sidebar, and those are exactly the ones
+            // worth reopening.
+            let session = pane.claudeSession ?? (pane.session.isRunningProgram
+                ? ClaudeSessionStore.matching(
+                    title: pane.programTitle,
+                    directory: directory,
+                    in: sessions
+                )?.id
+                : nil)
+            return .pane(Layout.Pane(directory: directory, session: session))
         }
 
         let children = split.arrangedSubviews
@@ -689,7 +697,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         return .split(
             vertical: split.isVertical,
             fractions: sizes.map { $0 / total },
-            children: children.map { node(of: $0) }
+            children: children.map { node(of: $0, sessions: sessions) }
         )
     }
 
@@ -698,6 +706,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         // A single pane is what a new window already is: nothing to rebuild,
         // and rebuilding it would throw away the pane the window was born with.
         if case let .pane(saved) = window.root {
+            // The window was born with one pane, in the folder it was opened on.
+            // When the saved pane was somewhere else, it is walked there rather
+            // than rebuilt: a fresh pane would lose the shell already running.
+            if let directory = saved.directory, directory != bookmark?.path {
+                focusedPane?.session.send(text: "cd " + ShellQuote.quote(directory) + "\n")
+            }
             resume(saved, in: focusedPane)
         } else if let built = build(window.root) {
             for pane in panes where pane.superview === paneContainer { pane.prepareForRemoval() }
@@ -1057,6 +1071,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// Cmd-Q quits, `Close Pane` closes one terminal, and the × in a pane's
     /// corner does the same.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        // A tab among others closes: that button means "close this tab", and
+        // the rest of the workspace stays on screen. The last window is the
+        // whole app, and hiding it is what keeps the shells running.
+        if let group = sender.tabGroup, group.windows.count > 1 { return true }
         NSApp.hide(nil)
         return false
     }

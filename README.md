@@ -223,6 +223,10 @@ session that took ten minutes to get into, so the red button puts Vitra away
 rather than closing it. Everything keeps running, and clicking the Dock icon
 brings it back exactly as it was — no restore, because nothing was lost.
 
+Closing a tab still closes it: that button means "close this tab", and the rest
+of the workspace stays on screen. It is the last window — the one that is the
+whole app — that hides instead.
+
 Quitting is `Cmd-Q`, or Quit from the Dock icon's menu, and that is when the
 layout is written down. `Close Window` in the File menu closes one window for
 real, ending what runs in it; `Close Pane` and the × in a pane's corner close
@@ -243,7 +247,8 @@ Quitting writes the arrangement to `~/.vitra/layout.json`, and the next launch
 opens it again: the windows and their tabs, the split tree at the proportions
 you left it, the folder each pane was in, the sidebar you had open and on which
 of its two halves. A pane that was in a Claude Code session runs
-`claude --resume <id>` for you, because that is the part that is minutes of work
+`claude --resume <id>` for you — recognised the same way the sidebar marks it,
+so a session started by hand comes back too, because that is the part that is minutes of work
 to rebuild by hand.
 
 The scrollback does not come back. A restored pane is a fresh shell in the same
