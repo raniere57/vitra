@@ -11,6 +11,10 @@ As datas são o dia em que a imagem de disco foi construída.
   `ssh -t <host> 'cd "<diretório>" && exec "$SHELL" -l'`. O caminho de um
   favorito remoto nunca é usado como diretório local, e a barra de título mostra
   `host:/diretório`.
+- Todo favorito ganhou um campo de **comando**, rodado quando a aba abre —
+  `claude`, por exemplo. Num favorito remoto ele roda do outro lado, depois do
+  `cd`, com um shell de login esperando por baixo: sair do que foi lançado deixa
+  você no servidor em vez de desconectar.
 
 - A barra de título sempre nomeia a pasta. Antes ela ficava vazia justamente no
   caso mais comum — o shell parado na raiz da pasta da janela —, que era quando

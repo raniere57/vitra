@@ -105,7 +105,11 @@ Um favorito pode morar em outra máquina. Preencha o **SSH host** na janela de
 pastas — `usuário@máquina`, ou um apelido do seu `~/.ssh/config` — e o campo do
 diretório passa a ser o diretório de lá. Clicar nele abre uma aba que roda
 `ssh -t <host> 'cd "<diretório>" && exec "$SHELL" -l'`: um shell de login
-naquela pasta, no servidor, e a barra de título mostra `host:/diretório`. Nada é
+naquela pasta, no servidor, e a barra de título mostra `host:/diretório`. Todo favorito — local ou remoto — tem um campo **Command**: o que estiver ali é
+rodado quando a aba abre. Escreva `claude` e o favorito remoto vira
+`ssh -t <host> 'cd "<diretório>" && claude; exec "$SHELL" -l'`, com o shell de
+login esperando por baixo, então sair do Claude deixa você no servidor em vez de
+desconectar. Nada é
 lido do disco daqui — o caminho de um favorito remoto nunca é tratado como
 caminho local — e a autenticação continua sendo a do seu ssh: o Vitra não guarda
 senha nem chave, só a linha que ele digita.

@@ -199,19 +199,21 @@ struct FolderEditor: View {
                     // there is nothing here to pick it from.
                     TextField("Directory", text: $bookmark.path, prompt: Text("/srv/app"))
                         .font(.system(size: 11, design: .monospaced))
-                    if let command = bookmark.remoteCommand {
-                        LabeledContent("Opens") {
-                            Text(command.trimmingCharacters(in: .newlines))
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                        }
-                    }
                 } else {
                     LabeledContent("Path") {
                         Text(bookmark.displayPath)
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(bookmark.exists ? .secondary : Color.red)
+                            .textSelection(.enabled)
+                    }
+                }
+                TextField("Command", text: commandBinding, prompt: Text("claude"))
+                    .font(.system(size: 11, design: .monospaced))
+                if let command = bookmark.remoteCommand {
+                    LabeledContent("Opens") {
+                        Text(command.trimmingCharacters(in: .newlines))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
                 }
@@ -281,6 +283,15 @@ struct FolderEditor: View {
         Binding(
             get: { bookmark.host ?? "" },
             set: { bookmark.host = $0.isEmpty ? nil : $0; onCommit() }
+        )
+    }
+
+    /// The command as a plain string, empty meaning none — the model keeps a
+    /// `nil` for that, like the host.
+    private var commandBinding: Binding<String> {
+        Binding(
+            get: { bookmark.command ?? "" },
+            set: { bookmark.command = $0.isEmpty ? nil : $0; onCommit() }
         )
     }
 

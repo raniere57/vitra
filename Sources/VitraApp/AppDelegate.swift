@@ -209,7 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A remote favourite opens a local shell that immediately becomes an
         // ssh session; the working directory stays home, because the path in
         // the favourite belongs to the other machine.
-        let command = command ?? bookmark.remoteCommand
+        let command = command ?? bookmark.launchCommand
         makeWindow(asTabOf: currentController?.window, bookmark: bookmark, running: command, session: session)
     }
 

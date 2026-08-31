@@ -99,6 +99,24 @@ func remoteBookmarkRunsSSH() throws {
     #expect(printed == "cd \"\(path)\" && exec \"$SHELL\" -l")
 }
 
+@Test("a command on a remote favourite runs after the cd, then hands back a shell")
+func remoteBookmarkRunsCommand() throws {
+    let bookmark = Bookmark(name: "Vannak", path: "/srv/app", host: "VANNAK", command: "claude")
+    #expect(
+        bookmark.remoteCommand == "ssh -t VANNAK 'cd \"/srv/app\" && claude; exec \"$SHELL\" -l'\n"
+    )
+    #expect(
+        Bookmark(name: "Box", path: "", host: "box", command: "claude").remoteCommand
+            == "ssh -t box 'claude; exec \"$SHELL\" -l'\n"
+    )
+}
+
+@Test("a command on a local favourite is typed as it stands")
+func localBookmarkRunsCommand() throws {
+    #expect(Bookmark(name: "Dev", path: "~/Dev", command: " claude ").launchCommand == "claude\n")
+    #expect(Bookmark(name: "Dev", path: "~/Dev", command: "  ").launchCommand == nil)
+}
+
 @Test("a remote favourite without a directory is a bare login")
 func remoteBookmarkWithoutDirectory() throws {
     #expect(Bookmark(name: "Box", path: "", host: "box").remoteCommand == "ssh box\n")

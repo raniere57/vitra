@@ -21,6 +21,9 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
     /// look alike.
     public var theme: String?
     public var tags: [String]
+    /// A command line to run when a tab opens on this favourite — `claude`,
+    /// say. On a remote favourite it runs on the other machine, after the `cd`.
+    public var command: String?
     /// An SSH destination — `user@host`, or an alias from `~/.ssh/config` — when
     /// the favourite is a machine rather than a directory on this one. `path` is
     /// then the directory over there, and nothing local is ever read from it.
@@ -35,7 +38,8 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
         colorHex: String? = nil,
         theme: String? = nil,
         tags: [String] = [],
-        host: String? = nil
+        host: String? = nil,
+        command: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -46,6 +50,17 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
         self.theme = theme
         self.tags = tags
         self.host = host
+        self.command = command
+    }
+
+    /// What a tab opened on this favourite types, or nil when there is nothing
+    /// to type: a local favourite already opens its shell in the right place.
+    public var launchCommand: String? {
+        if isRemote { return remoteCommand }
+        guard let line = command?.trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty else {
+            return nil
+        }
+        return line + "\n"
     }
 
     /// Whether this favourite lives on another machine.
@@ -59,17 +74,34 @@ public struct Bookmark: Codable, Equatable, Sendable, Identifiable {
     public var remoteCommand: String? {
         guard let host, isRemote else { return nil }
         let directory = path.trimmingCharacters(in: .whitespaces)
-        guard !directory.isEmpty else { return "ssh \(host)\n" }
+        let line = command?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !directory.isEmpty || !line.isEmpty else { return "ssh \(host)\n" }
+
         // Double quotes inside, single quotes outside: the far side expands
         // `$SHELL`, this side expands nothing, and the line stays readable —
         // which matters, because the user watches it run.
-        let escaped = directory
+        var script = directory.isEmpty ? "" : "cd \"\(Self.escapedForDoubleQuotes(directory))\""
+        if line.isEmpty {
+            // `&&`, so a directory that is gone stops here instead of dropping
+            // the user into a shell somewhere else on the machine.
+            script += " &&"
+        } else {
+            script += script.isEmpty ? line : " && " + line
+            // `;`, so quitting whatever was launched leaves a login shell on
+            // the far machine instead of disconnecting.
+            script += ";"
+        }
+        script += " exec \"$SHELL\" -l"
+        return "ssh -t " + host + " " + ShellQuote.quote(script) + "\n"
+    }
+
+    /// A path as one word inside double quotes on the far side.
+    private static func escapedForDoubleQuotes(_ text: String) -> String {
+        text
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "$", with: "\\$")
             .replacingOccurrences(of: "`", with: "\\`")
-        let remote = "cd \"\(escaped)\" && exec \"$SHELL\" -l"
-        return "ssh -t " + host + " " + ShellQuote.quote(remote) + "\n"
     }
 
     /// The symbol drawn for this folder.
