@@ -145,22 +145,50 @@ public enum ClaudeSessionStore {
     /// the directory it is run in.
     /// The session a terminal is showing, recognised by the title it wears.
     ///
-    /// Claude Code names the terminal after the conversation and decorates it
-    /// with a status glyph that changes while it works, so the comparison is
-    /// made on the letters alone. The directory is what keeps two projects with
-    /// a session called "Marketing" apart, and the newest wins when a project
-    /// has the same conversation twice.
+    /// Claude Code names the terminal after the conversation, behind a status
+    /// glyph, so the comparison is made on the letters alone. Titles drift —
+    /// the transcript's summary is rewritten as the conversation goes on, and a
+    /// long one arrives at the terminal cut short — so a title that is a prefix
+    /// of the other counts, and a pane that is plainly running Claude Code in a
+    /// project falls back to that project's newest session.
+    ///
+    /// The directory keeps two projects with a session called "Marketing"
+    /// apart, and the newest wins when one project has the name twice.
     public static func matching(
         title: String,
         directory: String?,
         in sessions: [ClaudeSession]
     ) -> ClaudeSession? {
         let wanted = plainTitle(title)
+        let candidates = sessions.filter { belongs(directory, to: $0) }
+
         // Two letters is not a name, it is a coincidence waiting to happen.
-        guard wanted.count >= 3 else { return nil }
-        return sessions
-            .filter { plainTitle($0.title) == wanted && belongs(directory, to: $0) }
-            .max { $0.modified < $1.modified }
+        if wanted.count >= 3 {
+            let named = candidates.filter { plainTitle($0.title) == wanted }
+            if let match = named.max(by: { $0.modified < $1.modified }) { return match }
+
+            // A summary cut short by the terminal, or one the transcript has
+            // since grown past. Eight letters is enough to be this conversation
+            // and not another.
+            let partial = candidates.filter { session in
+                let other = plainTitle(session.title)
+                let shortest = min(other.count, wanted.count)
+                guard shortest >= 8 else { return false }
+                return other.hasPrefix(wanted) || wanted.hasPrefix(other)
+            }
+            if let match = partial.max(by: { $0.modified < $1.modified }) { return match }
+        }
+
+        // Nothing matched by name, but the terminal is wearing Claude Code's own
+        // marker, so a session is running here and the project's newest is the
+        // only one it can reasonably be.
+        guard directory != nil, isClaudeCode(title) else { return nil }
+        return candidates.max { $0.modified < $1.modified }
+    }
+
+    /// Whether the title is one Claude Code set. It always leads with `✳`.
+    private static func isClaudeCode(_ title: String) -> Bool {
+        title.trimmingCharacters(in: .whitespaces).hasPrefix("✳")
     }
 
     /// Whether a terminal sitting in `directory` is inside a session's project.

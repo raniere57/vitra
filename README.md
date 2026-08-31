@@ -122,8 +122,12 @@ a heavier title, and its project opens to show it — a mark behind a fold answe
 the question for nobody. The session is known outright when the sidebar started
 it, and recognised otherwise: Claude Code names the terminal after the
 conversation, so a pane running a program in a folder that has sessions is
-matched to the one whose title it is wearing, which covers the ones started by
-hand, resumed from inside Claude Code, or begun by a compaction. It reads: with a dozen conversations sharing three or four names,
+matched to the one whose title it is wearing. Titles drift — the transcript's
+summary is rewritten as a conversation goes on, and a long one reaches the
+terminal cut short — so a title that is a prefix of the other counts, and a pane
+plainly running Claude Code in a project falls back to that project's newest
+session. Between them, the sessions started by hand, resumed from inside Claude
+Code, or begun by a compaction are all marked. It reads: with a dozen conversations sharing three or four names,
 "which one am I in" is otherwise a question the sidebar cannot answer. It is a
 mark and not a selection — selection is the row you clicked last, which is a
 different question — and it follows the keyboard from pane to pane, clearing

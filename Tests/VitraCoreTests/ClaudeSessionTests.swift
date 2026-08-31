@@ -323,5 +323,57 @@ private func writeIndexEntry(
     )
     #expect(ClaudeSessionStore.matching(title: "Marketing", directory: "/tmp", in: sessions) == nil)
     // A title too short to be a name matches nothing at all.
-    #expect(ClaudeSessionStore.matching(title: "✳ ok", directory: nil, in: sessions) == nil)
+    #expect(ClaudeSessionStore.matching(title: "ok", directory: nil, in: sessions) == nil)
+}
+
+@Test func aTitleCutShortStillFindsItsSession() {
+    let sessions = [
+        ClaudeSession(
+            id: "long", title: "Vitra: macOS terminal emulator", projectPath: "/Users/x/vitra",
+            modified: Date(), isArchived: false
+        ),
+    ]
+
+    // The terminal gets the summary cut short; the transcript keeps it whole.
+    #expect(
+        ClaudeSessionStore.matching(
+            title: "✳ Vitra: macOS terminal emu",
+            directory: "/Users/x/vitra",
+            in: sessions
+        )?.id == "long"
+    )
+    // Eight letters of overlap is the floor: "Vitra" alone is a coincidence.
+    #expect(
+        ClaudeSessionStore.matching(title: "Vitra", directory: "/Users/x/vitra", in: sessions) == nil
+    )
+}
+
+@Test func claudeCodesOwnMarkerFallsBackToTheProjectsNewest() {
+    let now = Date()
+    let sessions = [
+        ClaudeSession(
+            id: "newest", title: "Something else entirely", projectPath: "/Users/x/farol",
+            modified: now, isArchived: false
+        ),
+        ClaudeSession(
+            id: "older", title: "Older still", projectPath: "/Users/x/farol",
+            modified: now.addingTimeInterval(-60), isArchived: false
+        ),
+    ]
+
+    // A summary the sidebar has not caught up with yet: the ✳ says Claude Code
+    // is what is running, and the project's newest session is the only one it
+    // can reasonably be.
+    #expect(
+        ClaudeSessionStore.matching(title: "✳ A brand new summary", directory: "/Users/x/farol", in: sessions)?.id
+            == "newest"
+    )
+    // Without the marker, a pane running something else marks nothing.
+    #expect(
+        ClaudeSessionStore.matching(title: "vim README.md", directory: "/Users/x/farol", in: sessions) == nil
+    )
+    // And never outside the project.
+    #expect(
+        ClaudeSessionStore.matching(title: "✳ Anything", directory: "/tmp", in: sessions) == nil
+    )
 }
