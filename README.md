@@ -56,7 +56,9 @@ Nothing here is hidden behind a shortcut. The favourites live on a **rail** down
 the left edge - one click per folder, the window's own folder lit in its colour -
 and `+` at the bottom opens the rest (go to, open, star, manage). The title bar
 carries a **breadcrumb**: the folder, then where the focused shell has since
-wandered. Splitting and the preview panel sit in one cluster at the right.
+wandered. Two bare buttons sit before it — folders and sessions — each lit only
+while its sidebar is open; splitting and the preview panel sit in one cluster at
+the right.
 
 The rail is the sidebar collapsed. `Opt-Cmd-S`, the title bar button, or simply
 dragging the divider widens it into a **folder tree**: the favourites and home
@@ -102,17 +104,28 @@ app share, `~/.claude/projects/`. Clicking one types
 the conversation reopens where it was, in the terminal you are already looking
 at. The filter field searches titles and project names.
 
-Sessions are grouped by project, newest project first, with the count beside the
-name; clicking a project's name folds it away, which is what keeps one busy
-repository from burying the other twenty. A session run in a worktree is listed
-under its project, with the worktree named beside the date.
+Sessions are grouped by project, newest project first, with a colour dot and the
+count beside the name; clicking a project's name folds it away, which is what
+keeps one busy repository from burying the other twenty. A hairline separates
+one session from the next, and each row carries the title over the day and the
+hour it was last worked on — today and yesterday named by the system, anything
+older dated — because four sessions of the same project are told apart by *when*
+and not by "4 days ago". A session run in a worktree gets the worktree as a chip
+beside the date.
 
-Titles come from the transcript's own `custom-title`, falling back to the prompt
-the session started from, or to the slash command when that is all it was. Only
-the newest transcripts are read, and only 32 KB from the head and 64 KB from the
-tail of each: a session file runs to tens of megabytes and the sidebar needs one
-line out of it. The read happens off the main thread, the first time the list is
-shown — never at launch.
+Sessions archived in the desktop app stay out of the list. The app keeps one
+small JSON per session in `~/Library/Application Support/Claude/`, and that is
+the only place `isArchived` — and the title the user gave the session — exists;
+the transcript knows neither. When the app was never used here the index is
+simply absent and every transcript is shown. The footer says how many are hidden
+and puts them back with one click.
+
+Titles come from that index first, then from the transcript's own `custom-title`,
+falling back to the prompt the session started from, or to the slash command when
+that is all it was. Only the newest transcripts are read, and only 32 KB from the
+head and 64 KB from the tail of each: a session file runs to tens of megabytes
+and the sidebar needs one line out of it. The read happens off the main thread,
+the first time the list is shown — never at launch.
 
 ## Command blocks
 

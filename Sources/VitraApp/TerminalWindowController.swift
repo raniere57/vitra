@@ -191,11 +191,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             toggles: true
         )
 
-        let row = NSStackView(views: [makeCluster([sidebarButton, sessionsButton]), pathLabel])
+        // Bare buttons on this side: no well around them, only the open one
+        // lit. The well made the pair read as a single control with a smudge
+        // in the middle.
+        let row = NSStackView(views: [sidebarButton, sessionsButton, pathLabel])
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 8
+        row.spacing = 4
         row.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 8)
+        row.setCustomSpacing(10, after: sessionsButton)
         row.frame = NSRect(x: 0, y: 0, width: 320, height: 28)
 
         let accessory = NSTitlebarAccessoryViewController()
@@ -311,6 +315,18 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         sidebarButton.contentTintColor = onFolders ? .controlAccentColor : nil
         sessionsButton.state = onSessions ? .on : .off
         sessionsButton.contentTintColor = onSessions ? .controlAccentColor : nil
+        // The open one carries a tint behind its glyph: at twelve points a
+        // recoloured icon alone is a detail you have to look for.
+        tint(sidebarButton, on: onFolders)
+        tint(sessionsButton, on: onSessions)
+    }
+
+    private func tint(_ button: NSButton, on: Bool) {
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 6
+        button.layer?.backgroundColor = on
+            ? NSColor.controlAccentColor.withAlphaComponent(0.20).cgColor
+            : NSColor.clear.cgColor
     }
 
     /// A folder was chosen in the sidebar or the file list.

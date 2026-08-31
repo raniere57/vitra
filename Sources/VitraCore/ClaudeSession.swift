@@ -14,6 +14,8 @@ public struct ClaudeSession: Sendable, Equatable, Identifiable {
     /// slash with a dash and cannot be undone.
     public let projectPath: String
     public let modified: Date
+    /// Put away in the desktop app. Hidden here too, unless asked for.
+    public let isArchived: Bool
 
     /// The project this session belongs to.
     ///
@@ -43,11 +45,18 @@ public struct ClaudeSession: Sendable, Equatable, Identifiable {
         return index
     }
 
-    public init(id: String, title: String, projectPath: String, modified: Date) {
+    public init(
+        id: String,
+        title: String,
+        projectPath: String,
+        modified: Date,
+        isArchived: Bool = false
+    ) {
         self.id = id
         self.title = title
         self.projectPath = projectPath
         self.modified = modified
+        self.isArchived = isArchived
     }
 }
 
@@ -66,14 +75,36 @@ public enum ClaudeSessionStore {
     private static let headBytes = 32 * 1024
     private static let tailBytes = 64 * 1024
 
+    /// What the sidebar shows, and what it left out.
+    public struct Listing: Sendable, Equatable {
+        public let sessions: [ClaudeSession]
+        /// How many archived sessions were dropped, for the line that says so.
+        public let archivedHidden: Int
+
+        public init(sessions: [ClaudeSession], archivedHidden: Int) {
+            self.sessions = sessions
+            self.archivedHidden = archivedHidden
+        }
+    }
+
     /// The most recently touched sessions, newest first.
-    public static func recent(limit: Int = 80, in directory: URL = ClaudeSessionStore.directory) -> [ClaudeSession] {
+    ///
+    /// Archived ones are counted and dropped: they are sessions the user has
+    /// already put away in the app, and a list that ignores that is a list of
+    /// everything that ever happened.
+    public static func recent(
+        limit: Int = 80,
+        in directory: URL = ClaudeSessionStore.directory,
+        indexDirectory: URL = ClaudeSessionIndex.directory,
+        includeArchived: Bool = false
+    ) -> Listing {
+        let index = ClaudeSessionIndex.load(from: indexDirectory)
         let manager = FileManager.default
         guard let projects = try? manager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
-        ) else { return [] }
+        ) else { return Listing(sessions: [], archivedHidden: 0) }
 
         // Sorting by date before reading anything is what bounds the work: the
         // store holds hundreds of transcripts and the sidebar shows dozens.
@@ -89,7 +120,12 @@ public enum ClaudeSessionStore {
             .sorted { $0.modified > $1.modified }
             .prefix(limit)
 
-        return files.compactMap { session(at: $0.url, modified: $0.modified) }
+        let all = files.compactMap { session(at: $0.url, modified: $0.modified, index: index) }
+        let hidden = all.filter(\.isArchived).count
+        return Listing(
+            sessions: includeArchived ? all : all.filter { !$0.isArchived },
+            archivedHidden: hidden
+        )
     }
 
     /// The line a shell needs to reopen the session.
@@ -105,7 +141,11 @@ public enum ClaudeSessionStore {
     }
 
     /// Reads one transcript's head and tail and builds a session from them.
-    static func session(at url: URL, modified: Date) -> ClaudeSession? {
+    static func session(
+        at url: URL,
+        modified: Date,
+        index: [String: SessionIndexEntry] = [:]
+    ) -> ClaudeSession? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
 
@@ -125,17 +165,23 @@ public enum ClaudeSessionStore {
         let tailFields = fields(in: tail)
         guard let projectPath = headFields.cwd ?? tailFields.cwd else { return nil }
 
-        let title = tailFields.title
+        // The app's own title wins: it is the one the user reads in the app,
+        // and the one they renamed by hand when they renamed anything.
+        let id = url.deletingPathExtension().lastPathComponent
+        let entry = index[id]
+        let title = entry?.title
+            ?? tailFields.title
             ?? headFields.title
             ?? tailFields.prompt
             ?? headFields.prompt
-            ?? url.deletingPathExtension().lastPathComponent
+            ?? id
 
         return ClaudeSession(
-            id: url.deletingPathExtension().lastPathComponent,
+            id: id,
             title: Self.trim(title),
             projectPath: projectPath,
-            modified: modified
+            modified: modified,
+            isArchived: entry?.isArchived ?? false
         )
     }
 

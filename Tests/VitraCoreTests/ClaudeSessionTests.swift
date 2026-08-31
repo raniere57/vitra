@@ -46,7 +46,7 @@ private func makeStore() throws -> URL {
         ]
     )
 
-    let sessions = ClaudeSessionStore.recent(in: store)
+    let sessions = ClaudeSessionStore.recent(in: store, indexDirectory: store).sessions
 
     #expect(sessions.count == 1)
     #expect(sessions[0].title == "Renamed later")
@@ -67,7 +67,7 @@ private func makeStore() throws -> URL {
         ]
     )
 
-    #expect(ClaudeSessionStore.recent(in: store).first?.title == "fix the build")
+    #expect(ClaudeSessionStore.recent(in: store, indexDirectory: store).sessions.first?.title == "fix the build")
 }
 
 @Test func sessionsAreListedNewestFirst() throws {
@@ -89,7 +89,7 @@ private func makeStore() throws -> URL {
         modified: now
     )
 
-    #expect(ClaudeSessionStore.recent(in: store).map(\.id) == ["new", "old"])
+    #expect(ClaudeSessionStore.recent(in: store, indexDirectory: store).sessions.map(\.id) == ["new", "old"])
 }
 
 @Test func aTranscriptWithoutAWorkingDirectoryIsSkipped() throws {
@@ -102,7 +102,7 @@ private func makeStore() throws -> URL {
         lines: [["type": "queue-operation", "timestamp": "2026-08-18T20:00:05.331Z"]]
     )
 
-    #expect(ClaudeSessionStore.recent(in: store).isEmpty)
+    #expect(ClaudeSessionStore.recent(in: store, indexDirectory: store).sessions.isEmpty)
 }
 
 @Test func resumingCarriesTheDirectoryTheSessionBelongsTo() {
@@ -132,7 +132,7 @@ private func makeStore() throws -> URL {
         ]
     )
 
-    let title = try #require(ClaudeSessionStore.recent(in: store).first?.title)
+    let title = try #require(ClaudeSessionStore.recent(in: store, indexDirectory: store).sessions.first?.title)
     #expect(title.count == 80)
     #expect(title.hasSuffix("…"))
 }
@@ -154,7 +154,7 @@ private func makeStore() throws -> URL {
         ]
     )
 
-    #expect(ClaudeSessionStore.recent(in: store).first?.title == "arruma o gráfico")
+    #expect(ClaudeSessionStore.recent(in: store, indexDirectory: store).sessions.first?.title == "arruma o gráfico")
 }
 
 @Test func aSessionThatIsOnlyASlashCommandIsNamedAfterIt() throws {
@@ -177,7 +177,7 @@ private func makeStore() throws -> URL {
         ]
     )
 
-    #expect(ClaudeSessionStore.recent(in: store).first?.title == "/sessions")
+    #expect(ClaudeSessionStore.recent(in: store, indexDirectory: store).sessions.first?.title == "/sessions")
 }
 
 @Test func aWorktreeSessionBelongsToItsProject() {

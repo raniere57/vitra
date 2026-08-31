@@ -283,11 +283,6 @@ final class TerminalView: NSView, NSMenuItemValidation {
     /// Hands the gutter this frame's command blocks.
     private func updateCommandBlocks() {
         guard showsCommandBlocks else { return }
-        if ProcessInfo.processInfo.environment["VITRA_DEBUG_BLOCKS"] != nil {
-            let b = snapshot.commandBlocks.map { "\($0.rows.lowerBound)-\($0.rows.upperBound)@\($0.commandRow)" }
-            let s = commandStatuses.map { "\(String(describing: $0.exitCode))" }
-            FileHandle.standardError.write(Data("[blocks] \(b) statuses \(s)\n".utf8))
-        }
         blockGutter.frame = bounds
         blockGutter.update(
             blocks: snapshot.commandBlocks,
