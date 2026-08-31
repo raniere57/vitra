@@ -337,6 +337,11 @@ extension SessionListView {
         ClaudeSessionStore.matching(title: title, directory: directory, in: sessions)?.id
     }
 
+    /// The title of a session by id, for the label in the title bar.
+    func title(of id: String) -> String? {
+        sessions.first(where: { $0.id == id })?.title
+    }
+
     /// Marks the session the focused pane is running. Nil unmarks.
     ///
     /// Opens the project holding it: everything starts folded, and a mark

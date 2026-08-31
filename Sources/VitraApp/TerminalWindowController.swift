@@ -57,6 +57,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// The title bar breadcrumb: where the focused shell is.
     private let pathLabel = NSTextField(labelWithString: "")
 
+    /// The Claude Code session that pane is in, beside the breadcrumb.
+    ///
+    /// The sessions sidebar marks it too, but the sidebar is usually closed —
+    /// and "which session is this window" is exactly the question you have when
+    /// it is closed.
+    private let sessionLabel = NSTextField(labelWithString: "")
+
     /// The favourites down the left edge, and the folder tree beside them.
     private let sidebar = FolderSidebar()
     private var sidebarSplit: NSSplitView?
@@ -187,6 +194,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         pathLabel.lineBreakMode = .byTruncatingHead
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+        sessionLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        sessionLabel.textColor = .secondaryLabelColor
+        sessionLabel.lineBreakMode = .byTruncatingTail
+        sessionLabel.isHidden = true
+        sessionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        sessionLabel.maximumNumberOfLines = 1
+
         makeIconButton(
             symbol: "sidebar.left",
             tooltip: "Folders sidebar (⌥⌘S)",
@@ -205,13 +219,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         // Bare buttons on this side: no well around them, only the open one
         // lit. The well made the pair read as a single control with a smudge
         // in the middle.
-        let row = NSStackView(views: [sidebarButton, sessionsButton, pathLabel])
+        let row = NSStackView(views: [sidebarButton, sessionsButton, pathLabel, sessionLabel])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 4
         row.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 8)
         row.setCustomSpacing(10, after: sessionsButton)
-        row.frame = NSRect(x: 0, y: 0, width: 320, height: 28)
+        row.frame = NSRect(x: 0, y: 0, width: 520, height: 28)
 
         let accessory = NSTitlebarAccessoryViewController()
         accessory.view = row
@@ -471,19 +485,52 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// changes directory says nothing, but it does redraw and retitle, and
     /// polling the kernel on a clock is the idle cost this app exists to avoid.
     private func updateBreadcrumb() {
+        pathLabel.stringValue = breadcrumb()
+        updateSessionLabel()
+    }
+
+    /// The folder, then where the shell has wandered inside it.
+    ///
+    /// The folder is always named. It used to be left out whenever the shell
+    /// was sitting in the window's own folder — the common case — on the
+    /// grounds that the window was named elsewhere, which left the title bar
+    /// saying nothing at all about the most useful thing it knows.
+    private func breadcrumb() -> String {
         guard let directory = focusedPane?.session.currentDirectory else {
-            pathLabel.stringValue = ""
-            return
+            return bookmark?.name ?? ""
         }
 
         let path = directory.path
         if let root = bookmark?.url.path, path.hasPrefix(root) {
+            let name = bookmark?.name ?? (root as NSString).lastPathComponent
             let relative = String(path.dropFirst(root.count))
-            pathLabel.stringValue = relative.isEmpty ? "" : "/" + relative.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        } else {
-            let home = FileManager.default.homeDirectoryForCurrentUser.path
-            pathLabel.stringValue = path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return relative.isEmpty ? name : "\(name)/\(relative)"
         }
+
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
+
+    /// Names the session the focused pane is in, or hides the label.
+    private func updateSessionLabel() {
+        // A pane wearing Claude Code's title is the reason to read the sessions
+        // at all; the read answers on the main thread and comes back through
+        // onSessionsLoaded, which lands here again with a title to show.
+        if let pane = focusedPane, pane.claudeSession != nil
+            || ClaudeSessionStore.isClaudeCode(pane.programTitle)
+        {
+            sidebar.loadSessions()
+        }
+
+        guard let id = currentSession, let title = sidebar.sessionTitle(of: id) else {
+            sessionLabel.isHidden = true
+            sessionLabel.stringValue = ""
+            return
+        }
+        sessionLabel.stringValue = "✳ \(title)"
+        sessionLabel.toolTip = title
+        sessionLabel.isHidden = false
     }
 
     /// Every title bar icon, at one size and one weight.

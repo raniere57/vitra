@@ -3,6 +3,17 @@
 Cada versão, o que mudou nela, e as medições por trás das afirmações.
 As datas são o dia em que a imagem de disco foi construída.
 
+## Não publicado
+
+- A barra de título sempre nomeia a pasta. Antes ela ficava vazia justamente no
+  caso mais comum — o shell parado na raiz da pasta da janela —, que era quando
+  ela tinha mais a dizer.
+- A sessão do Claude Code do painel em foco aparece ao lado da pasta, com o
+  mesmo `✳` da barra lateral. Com a lateral recolhida não havia nada na tela
+  dizendo em qual conversa aquele terminal estava. As sessões são lidas na
+  primeira vez que um painel é visto rodando Claude Code — ainda nunca no
+  lançamento.
+
 ## 0.1.2 — 2026-08-31
 
 - Janelas que ninguém está olhando param de desenhar. Uma aba em segundo plano,

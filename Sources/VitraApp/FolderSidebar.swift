@@ -60,6 +60,15 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
     }
 
     /// The id of the session with this title in this folder, if there is one.
+    func sessionTitle(of id: String) -> String? { sessions.title(of: id) }
+
+    /// Reads the sessions once, without opening the sidebar.
+    ///
+    /// The title bar names the session a pane is in, and it cannot do that from
+    /// a list nobody has read yet. Still never at launch: this is called the
+    /// first time a pane is seen running Claude Code.
+    func loadSessions() { sessions.load() }
+
     func session(named title: String, in directory: String?) -> String? {
         sessions.session(named: title, in: directory)
     }

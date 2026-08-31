@@ -187,7 +187,7 @@ public enum ClaudeSessionStore {
     }
 
     /// Whether the title is one Claude Code set. It always leads with `✳`.
-    private static func isClaudeCode(_ title: String) -> Bool {
+    public static func isClaudeCode(_ title: String) -> Bool {
         title.trimmingCharacters(in: .whitespaces).hasPrefix("✳")
     }
 

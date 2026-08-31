@@ -106,7 +106,10 @@ favoritos são desenhados como SF Symbols em vez de emoji — um peso, um tamanh
 uma coluna — e o seletor na janela de pastas é esse mesmo conjunto; um favorito
 criado antes dos ícones existirem mantém o glifo que o emoji representava. A
 barra de título carrega uma **trilha**: a pasta, e depois para onde o shell em
-foco andou desde então. Dois botões discretos ficam antes dela — pastas e
+foco andou desde então — a pasta é sempre nomeada, inclusive quando o shell está
+na raiz dela. Ao lado dela vem a sessão do Claude Code em que o painel em foco
+está, com o mesmo `✳` que a barra lateral usa: com a lateral recolhida, essa é a
+única coisa na tela dizendo em qual conversa aquele terminal trabalha. Dois botões discretos ficam antes dela — pastas e
 sessões — cada um aceso só enquanto a barra lateral correspondente está aberta;
 dividir e o painel de visualização ficam num grupo à direita.
 
