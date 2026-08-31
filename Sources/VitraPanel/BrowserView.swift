@@ -457,12 +457,28 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     }
 
     /// Turns what someone typed into a URL, the way a browser bar does.
+    /// The schemes the panel loads. Everything else is a host that happened to
+    /// have a colon in it.
+    private static let schemes: Set<String> = ["http", "https", "file", "about", "data"]
+
     public static func url(from text: String) -> URL? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         if trimmed.hasPrefix("/") { return URL(fileURLWithPath: trimmed) }
-        if let url = URL(string: trimmed), url.scheme != nil { return url }
-        return URL(string: "https://\(trimmed)")
+        // Only a scheme the browser can actually load counts as one. Without
+        // this, `localhost:5173` parses as the scheme `localhost`, and the
+        // system is asked which app opens it — which is the wrong question.
+        if let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
+           Self.schemes.contains(scheme) {
+            return url
+        }
+        // A dev server is on this machine and speaks http; anything else on the
+        // open web is https by now.
+        let host = trimmed.split(separator: "/").first.map(String.init) ?? trimmed
+        let name = host.split(separator: ":").first.map(String.init)?.lowercased() ?? host
+        let local = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]"].contains(name)
+            || name.hasSuffix(".local") || name.hasSuffix(".localhost")
+        return URL(string: (local ? "http://" : "https://") + trimmed)
     }
 }
 

@@ -15,6 +15,10 @@ As datas são o dia em que a imagem de disco foi construída.
   abrem o navegador no painel com o cursor na barra de endereço. Ele existia desde a primeira versão, mas só um link clicado
   ou um agente conseguia abri-lo.
 - `Esc` fecha a janela de pastas.
+- Corrigido: `localhost:5173` na barra de endereço era lido como o esquema
+  `localhost`, e o macOS perguntava qual aplicativo abre esse tipo de URL. Só
+  `http`, `https`, `file`, `about` e `data` contam como esquema; o resto é
+  hospedeiro — e um hospedeiro local vai por `http`, o resto por `https`.
 - Todo favorito ganhou um campo de **comando**, rodado quando a aba abre —
   `claude`, por exemplo. Num favorito remoto ele roda do outro lado, depois do
   `cd`, num shell de login *e* interativo — sem isso o `claude` instalado pelo
