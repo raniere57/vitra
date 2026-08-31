@@ -42,6 +42,10 @@ enum AppLauncher {
         process.executableURL = executable
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
+        // This helper is spawned by an agent, and the app would otherwise
+        // inherit the markers describing that agent's session.
+        process.environment = ProcessInfo.processInfo.environment
+            .filter { !$0.key.hasPrefix("CLAUDE_") && $0.key != "CLAUDECODE" && $0.key != "AI_AGENT" }
         do {
             try process.run()
             return true

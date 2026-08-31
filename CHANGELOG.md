@@ -3,6 +3,14 @@
 Every release, what changed in it, and the measurements behind the claims.
 Dates are the day the disk image was built.
 
+## Unreleased
+
+- Fixed: a shell opened by Vitra no longer inherits the session markers of an
+  agent that launched Vitra (`CLAUDECODE`, `CLAUDE_CODE_*`, `AI_AGENT`). A
+  Claude Code started in such a pane believed it was a child of the session
+  that opened the window and turned its own transcript off. Anything the user
+  sets in a profile still comes back when the shell reads that profile.
+
 ## 0.1.1 - 2026-08-31
 
 - Double-clicking the preview panel's divider maximises it over the whole

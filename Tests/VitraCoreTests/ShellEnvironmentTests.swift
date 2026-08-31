@@ -115,3 +115,19 @@ import Testing
 
     #expect(environment["VITRA_ZDOTDIR"] == "/Users/someone")
 }
+
+/// A Vitra opened from inside an agent's session must not tell the shells it
+/// starts that they are part of that session: the agent running in one of them
+/// reads the marker and turns off its own transcript.
+@Test func theLaunchingAgentsSessionMarkersAreNotPassedOn() {
+    #expect(ShellEnvironment.isAgentSessionMarker("CLAUDECODE"))
+    #expect(ShellEnvironment.isAgentSessionMarker("CLAUDE_CODE_CHILD_SESSION"))
+    #expect(ShellEnvironment.isAgentSessionMarker("CLAUDE_CODE_SESSION_ID"))
+    #expect(ShellEnvironment.isAgentSessionMarker("AI_AGENT"))
+
+    // The user's own variables, and the keys programs actually need, stay.
+    #expect(!ShellEnvironment.isAgentSessionMarker("ANTHROPIC_API_KEY"))
+    #expect(!ShellEnvironment.isAgentSessionMarker("PATH"))
+    #expect(!ShellEnvironment.isAgentSessionMarker("HOME"))
+    #expect(!ShellEnvironment.isAgentSessionMarker("SHELL"))
+}

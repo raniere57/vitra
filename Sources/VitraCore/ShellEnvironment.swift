@@ -51,6 +51,12 @@ public enum ShellEnvironment {
         }
     }
 
+    /// Whether a variable describes the agent session that launched Vitra
+    /// rather than anything about this shell.
+    static func isAgentSessionMarker(_ key: String) -> Bool {
+        key == "CLAUDECODE" || key == "AI_AGENT" || key.hasPrefix("CLAUDE_")
+    }
+
     /// The environment for a new session: the current one, minus variables that
     /// would lie to the child, plus Vitra's own.
     public static func childEnvironment(
@@ -82,6 +88,17 @@ public enum ShellEnvironment {
         }
         if env["ZDOTDIR"] == ShellIntegration.directory.path {
             env["ZDOTDIR"] = inheritedZDOTDIR
+        }
+
+        // The markers an agent's harness sets to describe its own session. A
+        // Vitra opened from inside a Claude Code session - or by its own MCP
+        // helper, which runs there - would hand them to every shell it starts,
+        // and the agent running in that shell would believe it was a child of
+        // the one that opened the window: it turns off its own transcript.
+        // Anything the user really sets in a profile comes back when the shell
+        // reads that profile.
+        for key in env.keys where Self.isAgentSessionMarker(key) {
+            env.removeValue(forKey: key)
         }
 
         env["TERM"] = term
