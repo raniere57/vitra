@@ -184,6 +184,25 @@ enum SelfCapture {
             }
         }
 
+        // Moving one tab's terminals into another, which the button asks for
+        // through a menu no synthetic click can reach.
+        if ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_MERGE"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.75) {
+                let controllers = NSApp.windows.compactMap { $0.windowController as? TerminalWindowController }
+                guard let source = (NSApp.keyWindow?.windowController as? TerminalWindowController)
+                    ?? controllers.first,
+                    let target = controllers.first(where: { $0 !== source })
+                else {
+                    FileHandle.standardError.write(Data("[self-shot] merge: no second tab\n".utf8))
+                    return
+                }
+                source.move(into: target)
+                FileHandle.standardError.write(
+                    Data("[self-shot] merge: \(NSApp.windows.filter(\.isVisible).count) windows left\n".utf8)
+                )
+            }
+        }
+
         // A click at a point in the window, so behaviour that only a pointer can
         // reach - a link in the grid - can be checked from an automated run.
         // Hovering, which is the only way to reach a control that is hidden

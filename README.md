@@ -281,11 +281,18 @@ esquerda faz: `cd` num painel livre, aba nova num ocupado.
 
 ## Um painel sozinho
 
-Com o ponteiro sobre um painel, três botões aparecem no canto: o × fecha, o de
-setas dá a janela inteira àquele terminal, e o da caixa com a seta o leva para
-uma aba nova — o mesmo shell, o mesmo scrollback, outra aba. Esse último também
-arrasta: segure e arraste o painel, passe sobre outra aba (ela vem para a
-frente) e solte dentro dela para o terminal virar uma divisão de lá. `Esc` traz os outros de volta, no
+Com o ponteiro sobre um painel, quatro botões aparecem no canto: o × fecha, o de
+setas dá a janela inteira àquele terminal, o da caixa com a seta o leva para
+uma aba nova — o mesmo shell, o mesmo scrollback, outra aba — e os seis
+pontinhos são a alça: segure ali e arraste o painel para o lado de outro painel
+(a metade onde o cursor está acende) ou sobre outra aba, que vem para a frente
+para você soltar dentro dela.
+
+Uma aba inteira também se muda: o botão de setas convergindo, na direita da
+barra de título, lista as outras abas — o nome de cada uma e quantos terminais
+já tem — e a escolhida recebe todos os terminais desta, cada um contra o lado
+mais comprido de onde cai. Arrastar uma aba sobre a outra não faz isso: aquele
+gesto é da própria barra de abas do sistema, e ela só troca a ordem. `Esc` traz os outros de volta, no
 mesmo divisor de antes. Os painéis escondidos não são espremidos — são
 escondidos —, então nada reflui as linhas que segura por uma visão que ninguém
 está lendo.

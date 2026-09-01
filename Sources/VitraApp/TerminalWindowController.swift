@@ -288,16 +288,30 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             action: #selector(openBrowserFromButton)
         )
 
+        let mergeButton = makeIconButton(
+            symbol: "arrow.triangle.merge",
+            tooltip: "Move these terminals into another tab",
+            action: #selector(mergeIntoTabFromButton)
+        )
+
         let separator = NSBox()
         separator.boxType = .separator
         separator.translatesAutoresizingMaskIntoConstraints = false
 
+        let mergeSeparator = NSBox()
+        mergeSeparator.boxType = .separator
+        mergeSeparator.translatesAutoresizingMaskIntoConstraints = false
+
         // Bare here too, same as the pair on the left: the hairline is enough
         // to say the splits and the panel are different jobs.
-        let row = NSStackView(views: [splitRight, splitDown, separator, browserButton, panelButton])
+        let row = NSStackView(views: [
+            mergeButton, mergeSeparator, splitRight, splitDown, separator, browserButton, panelButton,
+        ])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 4
+        row.setCustomSpacing(8, after: mergeButton)
+        row.setCustomSpacing(8, after: mergeSeparator)
         row.setCustomSpacing(8, after: splitDown)
         row.setCustomSpacing(8, after: separator)
         row.edgeInsets = NSEdgeInsets(top: 0, left: 6, bottom: 0, right: 10)
@@ -305,6 +319,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         NSLayoutConstraint.activate([
             separator.heightAnchor.constraint(equalToConstant: 15),
             separator.widthAnchor.constraint(equalToConstant: 1),
+            mergeSeparator.heightAnchor.constraint(equalToConstant: 15),
+            mergeSeparator.widthAnchor.constraint(equalToConstant: 1),
         ])
 
         let accessory = NSTitlebarAccessoryViewController()
@@ -639,6 +655,86 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     @objc private func toggleSessionsFromButton(_ sender: Any?) { toggleSessions() }
     @objc private func toggleOpenCodeFromButton(_ sender: Any?) { toggleSessions(.openCode) }
+
+    /// The list of tabs these terminals can be moved into.
+    ///
+    /// Dragging one tab onto another is AppKit's gesture and AppKit only ever
+    /// reorders the strip with it, so the move is a menu: every other tab of
+    /// this window group, named and counted, and the terminals of this tab go
+    /// into the one that is picked.
+    @objc private func mergeIntoTabFromButton(_ sender: NSButton) {
+        let menu = NSMenu()
+        let others = tabSiblings()
+        if others.isEmpty {
+            let empty = menu.addItem(withTitle: "No other tabs to move into", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+        } else {
+            let header = menu.addItem(
+                withTitle: panes.count == 1 ? "Move this terminal to…" : "Move these \(panes.count) terminals to…",
+                action: nil,
+                keyEquivalent: ""
+            )
+            header.isEnabled = false
+            menu.addItem(.separator())
+            for controller in others {
+                let item = menu.addItem(
+                    withTitle: controller.tabDescription,
+                    action: #selector(mergeIntoTab(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = controller
+                if let symbol = controller.bookmark?.symbolName {
+                    item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                        .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .regular))
+                }
+            }
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+    }
+
+    /// How a tab names itself in that list: the folder it was opened for, the
+    /// title its shell reports, and how many terminals are already in it.
+    var tabDescription: String {
+        let name = window?.title.isEmpty == false ? window!.title : (bookmark?.name ?? "Terminal")
+        let count = panes.count == 1 ? "1 terminal" : "\(panes.count) terminals"
+        return "\(name) — \(count)"
+    }
+
+    /// The other tabs of this window's group.
+    private func tabSiblings() -> [TerminalWindowController] {
+        guard let window, let group = window.tabGroup else { return [] }
+        return group.windows
+            .filter { $0 !== window }
+            .compactMap { $0.windowController as? TerminalWindowController }
+    }
+
+    @objc private func mergeIntoTab(_ sender: NSMenuItem) {
+        guard let target = sender.representedObject as? TerminalWindowController else { return }
+        move(into: target)
+    }
+
+    /// Hands every terminal of this tab to another one, which ends this tab.
+    ///
+    /// Each pane is placed against the longer side of whatever it lands beside,
+    /// so a tab of four terminals arriving in another does not turn into four
+    /// slivers of a column.
+    func move(into target: TerminalWindowController) {
+        guard target !== self else { return }
+        restorePanes()
+        target.restorePanes()
+        for pane in panes {
+            guard let beside = target.focusedPane ?? target.panes.first else { break }
+            target.accept(pane, beside: beside, on: target.edgeSplitting(beside))
+        }
+        target.window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// The side to put a new pane on: whichever cut leaves both halves closer to
+    /// square.
+    private func edgeSplitting(_ pane: TerminalView) -> PaneEdge {
+        pane.bounds.width >= pane.bounds.height ? .trailing : .bottom
+    }
 
     @objc private func splitRightFromButton(_ sender: Any?) { splitFocusedPane(vertical: true) }
     @objc private func splitDownFromButton(_ sender: Any?) { splitFocusedPane(vertical: false) }

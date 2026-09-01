@@ -5,6 +5,15 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Mudar os terminais de uma aba para outra
+
+- Botão novo na direita da barra de título: ele lista as outras abas — nome e
+  quantos terminais cada uma tem — e a escolhida recebe **todos os terminais
+  desta aba**, cada um contra o lado mais comprido do painel onde cai. A aba
+  esvaziada fecha.
+- Era o que arrastar uma aba sobre a outra deveria fazer e nunca fez: aquele
+  gesto pertence à barra de abas do sistema, que só reordena a fila.
+
 ### Marcas próprias para as duas sidebars
 
 - Os botões do Claude Code e do opencode agora usam **as mesmas duas marcas que
