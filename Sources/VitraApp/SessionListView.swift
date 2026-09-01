@@ -9,7 +9,7 @@ import VitraCore
 final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     /// A session was chosen. It resumes in the pane that has the keyboard,
     /// which is the whole point: the sidebar drives the terminal you are in.
-    var onOpen: ((ClaudeSession) -> Void)?
+    var onOpen: ((AgentSession) -> Void)?
 
     /// The list finished reading. Whoever marks the current session asks again
     /// here: the answer is a lookup in a list that did not exist a moment ago.
@@ -21,7 +21,7 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
     private let footer = NSStackView()
     private let archivedLabel = NSTextField(labelWithString: "")
     private let archivedButton = NSButton()
-    private var sessions: [ClaudeSession] = []
+    private var sessions: [AgentSession] = []
     /// The visible rows: a project header, then its sessions, and so on.
     private var rows: [Row] = []
     private var filter = ""
@@ -38,7 +38,7 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
     /// grouping into rows is what lets a plain table draw it, headers and all.
     private enum Row {
         case project(String, count: Int, collapsed: Bool)
-        case session(ClaudeSession)
+        case session(AgentSession)
     }
 
     /// Projects the user has opened. Everything starts folded: one busy project
@@ -202,7 +202,7 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
         // newest first inside them: the list reads as recent work, not as a
         // directory listing.
         var order: [String] = []
-        var grouped: [String: [ClaudeSession]] = [:]
+        var grouped: [String: [AgentSession]] = [:]
         for session in matching {
             if grouped[session.projectName] == nil { order.append(session.projectName) }
             grouped[session.projectName, default: []].append(session)
@@ -227,7 +227,7 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
         return color
     }
 
-    private func session(atRow row: Int) -> ClaudeSession? {
+    private func session(atRow row: Int) -> AgentSession? {
         guard row >= 0, row < rows.count, case let .session(session) = rows[row] else { return nil }
         return session
     }

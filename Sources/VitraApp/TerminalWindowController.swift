@@ -340,7 +340,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         sidebar.setCurrentSession(session)
     }
 
-    private func openSession(_ session: ClaudeSession) {
+    private func openSession(_ session: AgentSession) {
         // A pane with a program in the foreground reads what it is handed as
         // input: clicking a session while Claude Code was running typed
         // `claude --resume ...` into its chat box. That one opens in a tab.
@@ -350,13 +350,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
                     name: URL(fileURLWithPath: session.projectPath).lastPathComponent,
                     path: session.projectPath
                 ),
-                running: ClaudeSessionStore.resumeCommand(for: session),
+                running: session.resumeCommand,
                 session: session.id
             )
             return
         }
         pane.claudeSession = session.id
-        pane.session.send(text: ClaudeSessionStore.resumeCommand(for: session))
+        pane.session.send(text: session.resumeCommand)
         window?.makeFirstResponder(pane)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             self?.refreshDirectory()
@@ -716,7 +716,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     // MARK: - Layout
 
     /// What this window is showing, in the form the next launch can rebuild.
-    func layout(tabGroup: Int, sessions: [ClaudeSession] = []) -> Layout.Window? {
+    func layout(tabGroup: Int, sessions: [AgentSession] = []) -> Layout.Window? {
         // A window with no panes left is one that has closed: nothing to save.
         guard let window, !panes.isEmpty, let root = paneContainer.subviews.first else { return nil }
         let frame = window.frame
@@ -743,7 +743,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// The proportions come from the frames rather than from a divider index:
     /// what is on screen is the truth, and it survives a window that was
     /// resized after the last drag.
-    private func node(of view: NSView, sessions: [ClaudeSession]) -> Layout.Node {
+    private func node(of view: NSView, sessions: [AgentSession]) -> Layout.Node {
         guard let split = view as? NSSplitView else {
             guard let pane = view as? TerminalView else { return .pane(Layout.Pane()) }
             let directory = pane.session.currentDirectory?.path ?? bookmark?.path

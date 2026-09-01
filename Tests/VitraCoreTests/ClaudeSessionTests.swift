@@ -106,7 +106,7 @@ private func makeStore() throws -> URL {
 }
 
 @Test func resumingCarriesTheDirectoryTheSessionBelongsTo() {
-    let session = ClaudeSession(
+    let session = AgentSession(
         id: "a680e56f",
         title: "Report",
         projectPath: "/Users/me/Dev/it's here",
@@ -114,7 +114,7 @@ private func makeStore() throws -> URL {
     )
 
     #expect(
-        ClaudeSessionStore.resumeCommand(for: session)
+        session.resumeCommand
             == "cd '/Users/me/Dev/it'\\''s here' && claude --resume a680e56f\n"
     )
 }
@@ -181,7 +181,7 @@ private func makeStore() throws -> URL {
 }
 
 @Test func aWorktreeSessionBelongsToItsProject() {
-    let session = ClaudeSession(
+    let session = AgentSession(
         id: "ggg",
         title: "Corrigir README",
         projectPath: "/Users/me/Dev/farol/.claude/worktrees/charming-noyce-e37669",
@@ -193,7 +193,7 @@ private func makeStore() throws -> URL {
 }
 
 @Test func aPlainSessionHasNoWorktree() {
-    let session = ClaudeSession(id: "hhh", title: "x", projectPath: "/Users/me/Dev/farol", modified: Date())
+    let session = AgentSession(id: "hhh", title: "x", projectPath: "/Users/me/Dev/farol", modified: Date())
 
     #expect(session.projectName == "farol")
     #expect(session.worktree == nil)
@@ -288,15 +288,15 @@ private func writeIndexEntry(
 @Test func aTerminalIsMatchedToTheSessionItIsNamedAfter() {
     let now = Date()
     let sessions = [
-        ClaudeSession(
+        AgentSession(
             id: "old", title: "Marketing", projectPath: "/Users/x/farol",
             modified: now.addingTimeInterval(-3600), isArchived: false
         ),
-        ClaudeSession(
+        AgentSession(
             id: "new", title: "Marketing", projectPath: "/Users/x/farol",
             modified: now, isArchived: false
         ),
-        ClaudeSession(
+        AgentSession(
             id: "other", title: "Marketing", projectPath: "/Users/x/vitra",
             modified: now, isArchived: false
         ),
@@ -328,7 +328,7 @@ private func writeIndexEntry(
 
 @Test func aTitleCutShortStillFindsItsSession() {
     let sessions = [
-        ClaudeSession(
+        AgentSession(
             id: "long", title: "Vitra: macOS terminal emulator", projectPath: "/Users/x/vitra",
             modified: Date(), isArchived: false
         ),
@@ -351,11 +351,11 @@ private func writeIndexEntry(
 @Test func claudeCodesOwnMarkerFallsBackToTheProjectsNewest() {
     let now = Date()
     let sessions = [
-        ClaudeSession(
+        AgentSession(
             id: "newest", title: "Something else entirely", projectPath: "/Users/x/farol",
             modified: now, isArchived: false
         ),
-        ClaudeSession(
+        AgentSession(
             id: "older", title: "Older still", projectPath: "/Users/x/farol",
             modified: now.addingTimeInterval(-60), isArchived: false
         ),

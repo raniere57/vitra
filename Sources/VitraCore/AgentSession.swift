@@ -1,11 +1,11 @@
 import Foundation
 
-/// One Claude Code conversation, as it sits on disk.
+/// One agent conversation, as it sits on disk.
 ///
 /// The CLI and the desktop app write the same store — `~/.claude/projects/`,
 /// one directory per project, one `.jsonl` per session — so a session started
 /// in the app is a session the terminal can resume.
-public struct ClaudeSession: Sendable, Equatable, Identifiable {
+public struct AgentSession: Sendable, Equatable, Identifiable {
     /// The session id, which is the file's name and what `--resume` takes.
     public let id: String
     public let title: String
@@ -16,6 +16,8 @@ public struct ClaudeSession: Sendable, Equatable, Identifiable {
     public let modified: Date
     /// Put away in the desktop app. Hidden here too, unless asked for.
     public let isArchived: Bool
+    /// Which agent wrote it, and therefore which line resumes it.
+    public let harness: Harness
 
     /// The project this session belongs to.
     ///
@@ -50,13 +52,32 @@ public struct ClaudeSession: Sendable, Equatable, Identifiable {
         title: String,
         projectPath: String,
         modified: Date,
-        isArchived: Bool = false
+        isArchived: Bool = false,
+        harness: Harness = .claudeCode
     ) {
         self.id = id
         self.title = title
         self.projectPath = projectPath
         self.modified = modified
         self.isArchived = isArchived
+        self.harness = harness
+    }
+
+    /// The line a shell needs to reopen this conversation.
+    public var resumeCommand: String { harness.resumeCommand(for: self) }
+
+    /// What a sidebar shows, and what it left out.
+    public struct Listing: Sendable, Equatable {
+        public let sessions: [AgentSession]
+        /// How many archived sessions were dropped, for the line that says so.
+        public let archivedHidden: Int
+
+        public static let empty = Listing(sessions: [], archivedHidden: 0)
+
+        public init(sessions: [AgentSession], archivedHidden: Int) {
+            self.sessions = sessions
+            self.archivedHidden = archivedHidden
+        }
     }
 }
 
@@ -75,18 +96,6 @@ public enum ClaudeSessionStore {
     private static let headBytes = 32 * 1024
     private static let tailBytes = 64 * 1024
 
-    /// What the sidebar shows, and what it left out.
-    public struct Listing: Sendable, Equatable {
-        public let sessions: [ClaudeSession]
-        /// How many archived sessions were dropped, for the line that says so.
-        public let archivedHidden: Int
-
-        public init(sessions: [ClaudeSession], archivedHidden: Int) {
-            self.sessions = sessions
-            self.archivedHidden = archivedHidden
-        }
-    }
-
     /// The most recently touched sessions, newest first.
     ///
     /// Archived ones are counted and dropped: they are sessions the user has
@@ -97,14 +106,14 @@ public enum ClaudeSessionStore {
         in directory: URL = ClaudeSessionStore.directory,
         indexDirectory: URL = ClaudeSessionIndex.directory,
         includeArchived: Bool = false
-    ) -> Listing {
+    ) -> AgentSession.Listing {
         let index = ClaudeSessionIndex.load(from: indexDirectory)
         let manager = FileManager.default
         guard let projects = try? manager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
-        ) else { return Listing(sessions: [], archivedHidden: 0) }
+        ) else { return AgentSession.Listing(sessions: [], archivedHidden: 0) }
 
         // Sorting by date before reading anything is what bounds the work: the
         // store holds hundreds of transcripts and the sidebar shows dozens.
@@ -133,7 +142,7 @@ public enum ClaudeSessionStore {
                 return seen.insert(session.projectPath + "\u{0}" + session.title).inserted
             }
         let hidden = all.filter(\.isArchived).count
-        return Listing(
+        return AgentSession.Listing(
             sessions: includeArchived ? all : all.filter { !$0.isArchived },
             archivedHidden: hidden
         )
@@ -157,8 +166,8 @@ public enum ClaudeSessionStore {
     public static func matching(
         title: String,
         directory: String?,
-        in sessions: [ClaudeSession]
-    ) -> ClaudeSession? {
+        in sessions: [AgentSession]
+    ) -> AgentSession? {
         let wanted = plainTitle(title)
         let candidates = sessions.filter { belongs(directory, to: $0) }
 
@@ -194,7 +203,7 @@ public enum ClaudeSessionStore {
     /// Whether a terminal sitting in `directory` is inside a session's project.
     /// A worktree runs under the project it belongs to, and a session's own path
     /// can be the worktree while the terminal is at the root.
-    private static func belongs(_ directory: String?, to session: ClaudeSession) -> Bool {
+    private static func belongs(_ directory: String?, to session: AgentSession) -> Bool {
         guard let directory else { return true }
         return directory == session.projectPath
             || directory.hasPrefix(session.projectPath + "/")
@@ -209,10 +218,6 @@ public enum ClaudeSessionStore {
             .lowercased()
     }
 
-    public static func resumeCommand(for session: ClaudeSession) -> String {
-        "cd " + ShellQuote.quote(session.projectPath) + " && claude --resume " + session.id + "\n"
-    }
-
     private static func modificationDate(of url: URL) -> Date {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
     }
@@ -222,7 +227,7 @@ public enum ClaudeSessionStore {
         at url: URL,
         modified: Date,
         index: SessionIndex = .empty
-    ) -> ClaudeSession? {
+    ) -> AgentSession? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
 
@@ -261,7 +266,7 @@ public enum ClaudeSessionStore {
         // Nothing said, nothing named: a uuid in the list is a row nobody clicks.
         else { return nil }
 
-        return ClaudeSession(
+        return AgentSession(
             id: id,
             title: Self.trim(title),
             projectPath: projectPath,

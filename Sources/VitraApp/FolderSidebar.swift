@@ -47,7 +47,7 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
     private(set) var mode: Mode = .folders
 
     /// A Claude Code session was chosen; it resumes in the focused pane.
-    var onOpenSession: ((ClaudeSession) -> Void)? {
+    var onOpenSession: ((AgentSession) -> Void)? {
         get { sessions.onOpen }
         set { sessions.onOpen = newValue }
     }
