@@ -106,6 +106,17 @@ public enum ShellEnvironment {
         env["TERM_PROGRAM"] = "vitra"
         env["TERM_PROGRAM_VERSION"] = Vitra.version
 
+        // Claude Code moved its transcript onto the alternate screen, where the
+        // terminal keeps nothing that has scrolled off: a selection cannot
+        // reach back into a long answer, and the wheel belongs to the program.
+        // Asked to stay on the main screen, it prints the way it did and the
+        // scrollback, the selection and the wheel are the terminal's again -
+        // which is the whole point of hosting it in one. Only when the user
+        // has not decided otherwise in their own environment.
+        if env["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"] == nil {
+            env["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"] = "1"
+        }
+
         // BSD tools ship colourless: `ls` on macOS prints the same grey for a
         // directory, a symlink and an executable unless CLICOLOR says otherwise.
         // Only set when the user has not already decided.

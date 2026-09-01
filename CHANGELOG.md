@@ -5,6 +5,16 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### O Claude Code volta para a tela principal
+
+- Versões recentes do Claude Code desenham a conversa na **tela alternativa**,
+  onde o terminal não guarda nada que rolou para fora: a seleção que rola
+  sozinha parava de alcançar respostas longas, e a roda passou a ser do
+  programa. O Vitra agora exporta `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`
+  para os shells que abre, e o CC imprime como antes — scrollback, seleção e
+  roda de volta ao terminal. Quem preferir o modo novo define a variável como
+  vazia no próprio perfil; o Vitra não sobrescreve o que já está definido.
+
 ### Mudar os terminais de uma aba para outra
 
 - Botão novo na direita da barra de título: ele lista as outras abas — nome e

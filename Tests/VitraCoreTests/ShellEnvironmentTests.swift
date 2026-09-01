@@ -21,6 +21,8 @@ import Testing
     #expect(env["COLORTERM"] == "truecolor")
     #expect(env["TERM_PROGRAM"] == "vitra")
     #expect(env["TERM_PROGRAM_VERSION"] == Vitra.version)
+    // Claude Code stays on the main screen, where the scrollback is ours.
+    #expect(env["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"] == "1")
 }
 
 @Test func childEnvironmentDropsInheritedTerminalState() {
