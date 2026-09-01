@@ -304,6 +304,13 @@ seu navegador. O ponteiro vira uma mão sobre um deles. Hosts `www.` sem esquema
 contam, um ponto final no fim da frase não, e um colchete que o link nunca abriu
 fica para trás.
 
+## Selecionar mais do que cabe na tela
+
+Duas formas. Arrastando: segure o arraste além da borda de cima ou de baixo e a
+tela rola sozinha enquanto a seleção cresce — mais rápido quanto mais longe da
+borda. Sem arrastar: clique onde a seleção começa, role até onde ela termina
+(roda, trackpad ou `Shift-PageUp`) e **shift-clique** ali. `Cmd-C` copia.
+
 ## Sair
 
 `Cmd-Q` só encerra se for segurado por um segundo — uma placa aparece dizendo

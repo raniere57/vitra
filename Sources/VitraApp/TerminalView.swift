@@ -659,6 +659,18 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         if window?.firstResponder !== self { window?.makeFirstResponder(self) }
         let position = cell(for: event)
         pressedCell = position
+        // Shift-click extends what is already selected, from wherever it
+        // started — the way a long selection is made in every other app, and
+        // the way one longer than the pane is made here: click, scroll,
+        // shift-click.
+        guard !event.modifierFlags.contains(.shift) else {
+            session.extendSelection(
+                column: position.column,
+                row: position.row,
+                rectangle: event.modifierFlags.contains(.option)
+            )
+            return
+        }
         session.beginSelection(column: position.column, row: position.row, clickCount: event.clickCount)
     }
 

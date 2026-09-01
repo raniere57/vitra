@@ -191,9 +191,13 @@ public final class TerminalSession: @unchecked Sendable {
         }
     }
 
-    public func endSelection() {
-        queue.async { [weak self] in self?.selectionAnchor = nil }
-    }
+    /// Ends the drag, keeping the anchor.
+    ///
+    /// The anchor outlives the gesture on purpose: shift-clicking somewhere
+    /// else extends the selection from it, which is how a selection longer than
+    /// the screen is made without holding the button down across a scroll.
+    /// `clearSelection` is what forgets it.
+    public func endSelection() {}
 
     public func selectAll() {
         queue.async { [weak self] in

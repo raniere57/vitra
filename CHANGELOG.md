@@ -15,6 +15,9 @@ As datas são o dia em que a imagem de disco foi construída.
 - Clicar numa sessão na barra lateral abre um **painel novo** ao lado, com
   aquela sessão, em vez de tomar o painel que está com o teclado. A conversa em
   que você já estava continua lá, e você fecha quando quiser.
+- **Shift-clique estende a seleção**: clique onde começa, role à vontade (roda,
+  trackpad, `Shift-PageUp`), shift-clique onde termina. É o caminho sem arrastar
+  para copiar algo mais longo que a tela.
 - Corrigido: arrastar uma seleção para além da borda não rolava a tela, então
   só dava para selecionar o que coubesse nela. Agora a rolagem continua enquanto
   o ponteiro fica parado fora do painel, mais rápida quanto mais longe da borda,
