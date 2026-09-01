@@ -77,7 +77,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     var onPaneDragMoved: ((NSPoint) -> Void)?
 
     /// A pane was dropped on this one; it belongs here now.
-    var onPaneDropped: ((TerminalView) -> Void)?
+    var onPaneDropped: ((TerminalView, PaneEdge) -> Void)?
 
     /// What a dragged pane puts on the pasteboard. The pane itself travels in
     /// `draggedPane`: it is a live view with a running shell, and nothing about
@@ -144,6 +144,13 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     }
     private var isDropTarget = false
 
+    /// The side a pane being dragged would land on, while it is over this one.
+    private var dropEdge: PaneEdge?
+
+    /// Paints the half a dropped pane would take, so the split is chosen with
+    /// the eyes rather than guessed and undone.
+    private let dropShade = PassthroughView()
+
     /// Whether the pane is being drawn at all. See `setDrawingActive`.
     private var isDrawingActive = true
 
@@ -202,6 +209,13 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         tabButton.onClick = { [weak self] in self?.onMoveToNewTab?() }
         tabButton.onDrag = { [weak self] event in self?.beginPaneDrag(with: event) }
         addSubview(tabButton)
+
+        dropShade.wantsLayer = true
+        dropShade.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor
+        dropShade.layer?.borderColor = NSColor.controlAccentColor.cgColor
+        dropShade.layer?.borderWidth = 2
+        dropShade.isHidden = true
+        addSubview(dropShade)
 
         focusBar.wantsLayer = true
         focusBar.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor
@@ -944,8 +958,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
         if isPaneDrag(sender) {
-            isDropTarget = true
-            setNeedsRender()
+            showDropHalf(for: sender)
             return .move
         }
         guard PasteboardAttachments.fileURLs(from: sender.draggingPasteboard)?.isEmpty == false else {
@@ -956,17 +969,45 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         return .copy
     }
 
+    /// The edge is answered continuously: a drag that crosses the middle of a
+    /// pane means the other side, and the highlight has to say so as it happens.
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard isPaneDrag(sender) else { return isDropTarget ? .copy : [] }
+        showDropHalf(for: sender)
+        return .move
+    }
+
     override func draggingExited(_ sender: (any NSDraggingInfo)?) {
         isDropTarget = false
+        hideDropHalf()
         setNeedsRender()
+    }
+
+    private func showDropHalf(for sender: any NSDraggingInfo) {
+        isDropTarget = true
+        let point = convert(sender.draggingLocation, from: nil)
+        let edge = PaneEdge.nearest(to: point, in: bounds)
+        if edge != dropEdge {
+            dropEdge = edge
+            dropShade.frame = edge.half(of: bounds)
+        }
+        dropShade.isHidden = false
+        setNeedsRender()
+    }
+
+    private func hideDropHalf() {
+        dropEdge = nil
+        dropShade.isHidden = true
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         isDropTarget = false
+        let edge = dropEdge ?? .trailing
+        hideDropHalf()
         setNeedsRender()
 
         if isPaneDrag(sender), let dragged = TerminalView.draggedPane {
-            onPaneDropped?(dragged)
+            onPaneDropped?(dragged, edge)
             return true
         }
 

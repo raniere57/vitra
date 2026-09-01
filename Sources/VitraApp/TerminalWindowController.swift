@@ -732,9 +732,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         pane.onPaneDragMoved = { point in
             (NSApp.delegate as? AppDelegate)?.revealTab(under: point)
         }
-        pane.onPaneDropped = { [weak self, weak pane] dropped in
+        pane.onPaneDropped = { [weak self, weak pane] dropped, edge in
             guard let pane else { return }
-            self?.accept(dropped, beside: pane)
+            self?.accept(dropped, beside: pane, on: edge)
         }
         session.onCommandStarted = { [weak pane] in
             pane?.commandStarted()
@@ -947,8 +947,16 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     }
 
     /// Puts `newPane` next to `pane`, splitting whatever holds it.
+    ///
+    /// `pane` is any view of the split tree — a pane, or a whole split when a
+    /// pane is being moved to an edge of the window.
     @discardableResult
-    private func insert(_ newPane: TerminalView, beside pane: TerminalView, vertical: Bool) -> Bool {
+    private func insert(
+        _ newPane: TerminalView,
+        beside pane: NSView,
+        vertical: Bool,
+        before: Bool = false
+    ) -> Bool {
         guard let window else { return false }
 
         // Where the pane sits has to be recorded before it is detached:
@@ -970,8 +978,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         pane.removeFromSuperview()
         pane.autoresizingMask = [.width, .height]
         newPane.autoresizingMask = [.width, .height]
-        split.addArrangedSubview(pane)
-        split.addArrangedSubview(newPane)
+        if before {
+            split.addArrangedSubview(newPane)
+            split.addArrangedSubview(pane)
+        } else {
+            split.addArrangedSubview(pane)
+            split.addArrangedSubview(newPane)
+        }
 
         if let parentSplit, let indexInParent {
             parentSplit.insertArrangedSubview(split, at: indexInParent)
@@ -989,6 +1002,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             (vertical ? split.bounds.width : split.bounds.height) / 2,
             ofDividerAt: 0
         )
+        // A pane that was detached — moved here from another split, or to an
+        // edge of this window — is off the list until it is put back on it.
+        if !panes.contains(where: { $0 === newPane }) { panes.append(newPane) }
         window.makeFirstResponder(newPane)
         refreshFocusIndicators()
         syncMaximizeButtons()
@@ -997,7 +1013,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     /// Takes in a pane dropped from another window, or another split of this
     /// one, and puts it beside the pane it was dropped on.
-    func accept(_ dropped: TerminalView, beside target: TerminalView) {
+    func accept(_ dropped: TerminalView, beside target: TerminalView, on edge: PaneEdge = .trailing) {
         guard dropped !== target else { return }
         let delegate = NSApp.delegate as? AppDelegate
         let source = delegate?.controller(owning: dropped) ?? self
@@ -1005,7 +1021,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         restorePanes()
         source.hand(over: dropped)
         if source !== self { adopt(dropped) }
-        insert(dropped, beside: target, vertical: true)
+        insert(dropped, beside: target, vertical: edge.isVertical, before: edge.isBefore)
         window?.makeKeyAndOrderFront(nil)
         window?.makeFirstResponder(dropped)
         source.syncMaximizeButtons()
@@ -1108,6 +1124,23 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             return
         }
         window?.makeFirstResponder(panes.first { $0.window != nil })
+        syncMaximizeButtons()
+    }
+
+    /// Moves the focused pane to one edge of the window.
+    ///
+    /// The same rearranging as dragging a pane onto another, for the times the
+    /// pointer is not where the hands are: the pane leaves its split, whatever
+    /// it leaves behind closes up, and it comes back against that wall.
+    func moveFocusedPane(to edge: PaneEdge) {
+        restorePanes()
+        guard panes.count > 1, let pane = focusedPane else {
+            NSSound.beep()
+            return
+        }
+        remove(pane)
+        guard let rest = paneContainer.subviews.first else { return }
+        insert(pane, beside: rest, vertical: edge.isVertical, before: edge.isBefore)
         syncMaximizeButtons()
     }
 

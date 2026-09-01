@@ -575,6 +575,7 @@ padrão fica, e o motivo é impresso.
 | Tecla | Ação |
 |---|---|
 | `Cmd-T` / `Cmd-N` | aba / janela nova |
+| `Ctrl-Cmd-setas` | move o painel em foco para aquela parede da janela |
 | `Cmd-D` / `Cmd-Shift-D` | dividir à direita / abaixo |
 | `Cmd-W` | fechar painel |
 | `Cmd-Shift-P` | painel de visualização |

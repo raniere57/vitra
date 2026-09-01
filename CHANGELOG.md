@@ -5,6 +5,15 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Painéis que se reorganizam
+
+- **Arrastar um painel para cima de outro escolhe o lado.** A metade do painel
+  onde o cursor está acende, e é ali que ele entra: esquerda, direita, em cima
+  ou embaixo. Antes o painel solto sempre virava uma coluna à direita, que é
+  justamente o que ficava fino demais.
+- **`Ctrl`-`Cmd`-setas move o painel em foco** para aquela parede da janela —
+  o mesmo rearranjo sem tirar as mãos do teclado (File → Move Pane).
+
 - `Cmd-Q` agora precisa ser **segurado** por um segundo, com uma placa na tela
   dizendo isso e uma barra enchendo — como no Chrome. Num terminal, a tecla de
   sair fica ao lado da de fechar painel, e um deslize levava quatro shells

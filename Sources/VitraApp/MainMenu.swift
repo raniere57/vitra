@@ -38,6 +38,24 @@ enum MainMenu {
         let splitDown = fileMenu.addItem(withTitle: "Split Down", action: #selector(AppDelegate.splitVertically(_:)), keyEquivalent: key("split_right", keybindings))
         splitDown.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(.separator())
+        // Ctrl-Cmd-arrow moves the focused pane against that wall of the
+        // window: the same rearranging as dragging a pane onto another one,
+        // for when the hands are on the keyboard.
+        for (title, key, edge) in [
+            ("Move Pane Left", NSLeftArrowFunctionKey, "leading"),
+            ("Move Pane Right", NSRightArrowFunctionKey, "trailing"),
+            ("Move Pane Up", NSUpArrowFunctionKey, "top"),
+            ("Move Pane Down", NSDownArrowFunctionKey, "bottom"),
+        ] {
+            let item = fileMenu.addItem(
+                withTitle: title,
+                action: #selector(AppDelegate.movePane(_:)),
+                keyEquivalent: String(UnicodeScalar(UInt32(key))!)
+            )
+            item.keyEquivalentModifierMask = [.command, .control]
+            item.representedObject = edge
+        }
+        fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Close Pane", action: #selector(AppDelegate.closePane(_:)), keyEquivalent: key("close_pane", keybindings))
         let closeWindow = fileMenu.addItem(withTitle: "Close Window", action: #selector(AppDelegate.closeWindow(_:)), keyEquivalent: key("close_pane", keybindings))
         closeWindow.keyEquivalentModifierMask = [.command, .shift]

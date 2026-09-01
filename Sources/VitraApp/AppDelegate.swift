@@ -92,6 +92,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         currentController?.splitFocusedPane(vertical: true)
     }
 
+    @objc func movePane(_ sender: Any?) {
+        let edges: [String: PaneEdge] = [
+            "leading": .leading, "trailing": .trailing, "top": .top, "bottom": .bottom,
+        ]
+        guard let name = (sender as? NSMenuItem)?.representedObject as? String,
+              let edge = edges[name]
+        else { return }
+        currentController?.moveFocusedPane(to: edge)
+    }
+
     @objc func splitVertically(_ sender: Any?) {
         currentController?.splitFocusedPane(vertical: false)
     }
