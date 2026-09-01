@@ -18,6 +18,9 @@ As datas são o dia em que a imagem de disco foi construída.
 - **Shift-clique estende a seleção**: clique onde começa, role à vontade (roda,
   trackpad, `Shift-PageUp`), shift-clique onde termina. É o caminho sem arrastar
   para copiar algo mais longo que a tela.
+- **Shift-clique estende a seleção** a partir de onde ela começou, mesmo depois
+  de rolar a tela: clique no começo, role com a roda, shift-clique no fim. É o
+  caminho para copiar um trecho maior que o painel sem segurar o botão.
 - Corrigido: arrastar uma seleção para além da borda não rolava a tela, então
   só dava para selecionar o que coubesse nela. Agora a rolagem continua enquanto
   o ponteiro fica parado fora do painel, mais rápida quanto mais longe da borda,
