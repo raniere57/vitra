@@ -40,43 +40,59 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
         set { tree.onOpenRemote = newValue }
     }
 
-    /// What the expanded half of the sidebar is showing.
-    enum Mode { case folders, sessions }
+    /// What the expanded half of the sidebar is showing: the folder tree, or
+    /// one agent's sessions.
+    enum Mode: Equatable {
+        case folders
+        case sessions(Harness)
+
+        static let claudeSessions = Mode.sessions(.claudeCode)
+        static let openCodeSessions = Mode.sessions(.openCode)
+
+        var harness: Harness? {
+            guard case let .sessions(harness) = self else { return nil }
+            return harness
+        }
+    }
 
     private(set) var isExpanded = false
     private(set) var mode: Mode = .folders
 
-    /// A Claude Code session was chosen; it resumes in the focused pane.
+    /// A session was chosen; it resumes in the focused pane.
     var onOpenSession: ((AgentSession) -> Void)? {
-        get { sessions.onOpen }
-        set { sessions.onOpen = newValue }
+        didSet { lists.values.forEach { $0.onOpen = onOpenSession } }
     }
 
     private let rail = FolderRail()
     private let tree = DirectoryTreeView()
-    private let sessions = SessionListView()
+    /// One list per agent, all laid out, one visible.
+    private let lists: [Harness: SessionListView] = Dictionary(
+        uniqueKeysWithValues: Harness.allCases.map { ($0, SessionListView(harness: $0)) }
+    )
 
-    /// Marks the session the focused pane is running.
-    func setCurrentSession(_ id: String?) { sessions.setCurrent(id) }
+    /// Marks the session the focused pane is running. Told to every list: the
+    /// pane's session belongs to whichever agent wrote it.
+    func setCurrentSession(_ id: String?) { lists.values.forEach { $0.setCurrent(id) } }
 
-    /// The session list finished reading.
+    /// A session list finished reading.
     var onSessionsLoaded: (() -> Void)? {
-        get { sessions.onLoaded }
-        set { sessions.onLoaded = newValue }
+        didSet { lists.values.forEach { $0.onLoaded = onSessionsLoaded } }
     }
 
-    /// The id of the session with this title in this folder, if there is one.
-    func sessionTitle(of id: String) -> String? { sessions.title(of: id) }
+    /// The title of that session, whichever agent it belongs to.
+    func sessionTitle(of id: String) -> String? {
+        lists.values.compactMap { $0.title(of: id) }.first
+    }
 
-    /// Reads the sessions once, without opening the sidebar.
+    /// Reads one agent's sessions once, without opening the sidebar.
     ///
     /// The title bar names the session a pane is in, and it cannot do that from
     /// a list nobody has read yet. Still never at launch: this is called the
-    /// first time a pane is seen running Claude Code.
-    func loadSessions() { sessions.load() }
+    /// first time a pane is seen running that agent.
+    func loadSessions(_ harness: Harness = .claudeCode) { lists[harness]?.load() }
 
-    func session(named title: String, in directory: String?) -> String? {
-        sessions.session(named: title, in: directory)
+    func session(named title: String, in directory: String?, of harness: Harness) -> String? {
+        lists[harness]?.session(named: title, in: directory)
     }
     private let divider = NSBox()
     private let search = NSSearchField()
@@ -106,14 +122,16 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
         search.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         search.translatesAutoresizingMaskIntoConstraints = false
 
-        sessions.translatesAutoresizingMaskIntoConstraints = false
-        sessions.isHidden = true
+        for list in lists.values {
+            list.translatesAutoresizingMaskIntoConstraints = false
+            list.isHidden = true
+        }
 
         addSubview(rail)
         addSubview(divider)
         addSubview(search)
         addSubview(tree)
-        addSubview(sessions)
+        lists.values.forEach(addSubview)
 
         NSLayoutConstraint.activate([
             rail.topAnchor.constraint(equalTo: topAnchor),
@@ -131,9 +149,12 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
             tree.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 8),
             tree.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            sessions.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 6),
-            sessions.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
+        ] + lists.values.flatMap { list in
+            [
+                list.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 6),
+                list.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ]
+        })
 
         // Collapsed, the sidebar is 52pt wide — the rail and nothing else. The
         // expanded half is hidden but still laid out, and a required rail plus a
@@ -145,9 +166,12 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
             search.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -SidebarStyle.inset),
             tree.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             tree.trailingAnchor.constraint(equalTo: trailingAnchor),
-            sessions.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
-            sessions.trailingAnchor.constraint(equalTo: trailingAnchor),
-        ] {
+        ] + lists.values.flatMap { list in
+            [
+                list.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+                list.trailingAnchor.constraint(equalTo: trailingAnchor),
+            ]
+        } {
             constraint.priority = .defaultHigh
             constraint.isActive = true
         }
@@ -167,11 +191,12 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
     }
 
     private func applyMode() {
-        let showsSessions = isExpanded && mode == .sessions
         tree.isHidden = !isExpanded || mode != .folders
-        sessions.isHidden = !showsSessions
+        for (harness, list) in lists {
+            list.isHidden = !(isExpanded && mode == .sessions(harness))
+        }
         search.placeholderString = mode == .folders ? "Filter folders" : "Filter sessions"
-        if showsSessions { sessions.load() }
+        if isExpanded, let harness = mode.harness { lists[harness]?.load() }
     }
 
     func setExpanded(_ expanded: Bool) {
@@ -189,7 +214,7 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
         guard !search.stringValue.isEmpty else { return }
         search.stringValue = ""
         tree.setFilter("")
-        sessions.setFilter("")
+        lists.values.forEach { $0.setFilter("") }
     }
 
     @objc private func searchChanged() {
@@ -199,7 +224,7 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
     private func filterChanged() {
         switch mode {
         case .folders: tree.setFilter(search.stringValue)
-        case .sessions: sessions.setFilter(search.stringValue)
+        case let .sessions(harness): lists[harness]?.setFilter(search.stringValue)
         }
     }
 
@@ -244,6 +269,6 @@ final class FolderSidebar: NSView, NSSearchFieldDelegate {
         layer?.backgroundColor = background.blended(withFraction: 0.04, of: .white)?.cgColor
         rail.apply(config)
         tree.apply(config)
-        sessions.apply(config)
+        lists.values.forEach { $0.apply(config) }
     }
 }

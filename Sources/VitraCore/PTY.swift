@@ -255,6 +255,20 @@ public final class PTY: @unchecked Sendable {
         return path.isEmpty ? nil : URL(fileURLWithPath: path, isDirectory: true)
     }
 
+    /// The name of the program holding the terminal, or of the shell.
+    ///
+    /// Asked of the kernel rather than of the title: a program that never
+    /// retitles the terminal — opencode, and most others — is invisible to a
+    /// title, and this is how a pane running one can still be recognised.
+    public var foregroundName: String? {
+        let foreground = tcgetpgrp(masterFD)
+        let pid = foreground > 0 ? foreground : processID
+        var buffer = [CChar](repeating: 0, count: 2 * Int(MAXCOMLEN) + 1)
+        guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        let name = String(cString: buffer)
+        return name.isEmpty ? nil : name
+    }
+
     /// Whether something other than the shell holds the terminal.
     ///
     /// The shell's own process group is the shell; a job it started has its

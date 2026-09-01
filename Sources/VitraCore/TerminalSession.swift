@@ -82,6 +82,9 @@ public final class TerminalSession: @unchecked Sendable {
     /// Whether a program - not the shell - is holding the terminal.
     public var isRunningProgram: Bool { pty.hasForegroundJob }
 
+    /// The program holding the terminal, by name.
+    public var foregroundName: String? { pty.foregroundName }
+
     /// Starts reading the child's output.
     ///
     /// Separate from `init` on purpose: the shell can write before the caller's

@@ -43,6 +43,55 @@ public enum Harness: String, Codable, Sendable, CaseIterable, Identifiable {
         }
     }
 
+    /// Where this agent keeps its conversations, for the line a sidebar shows
+    /// when it has none to list.
+    public var storeDescription: String {
+        switch self {
+        case .claudeCode: return "~/.claude/projects"
+        case .openCode: return "opencode's store"
+        }
+    }
+
+    /// The most recently touched sessions this agent wrote.
+    public func recent(limit: Int = 80, includeArchived: Bool = false) -> AgentSession.Listing {
+        switch self {
+        case .claudeCode:
+            return ClaudeSessionStore.recent(limit: limit, includeArchived: includeArchived)
+        case .openCode:
+            return OpenCodeSessionStore.recent(limit: limit, includeArchived: includeArchived)
+        }
+    }
+
+    /// The session a pane is in, as far as the pane can say.
+    ///
+    /// Claude Code names the terminal after the conversation, so its own
+    /// matching works on the title. opencode names nothing, so the directory is
+    /// all there is: the newest session there is the one it can reasonably be.
+    public func matching(
+        title: String,
+        directory: String?,
+        in sessions: [AgentSession]
+    ) -> AgentSession? {
+        switch self {
+        case .claudeCode:
+            return ClaudeSessionStore.matching(title: title, directory: directory, in: sessions)
+        case .openCode:
+            guard let directory else { return nil }
+            return sessions
+                .filter { directory == $0.projectPath || directory.hasPrefix($0.projectPath + "/") }
+                .max { $0.modified < $1.modified }
+        }
+    }
+
+    /// The agent a process name belongs to, if it belongs to one.
+    ///
+    /// What the pane is actually running, asked of the kernel: a title is set
+    /// by whoever cares to set one, and opencode does not.
+    public static func running(_ processName: String?) -> Harness? {
+        guard let processName, !processName.isEmpty else { return nil }
+        return allCases.first { $0.command == processName }
+    }
+
     /// The line that reopens `session` in a shell.
     ///
     /// The directory comes first because both agents list and resume the

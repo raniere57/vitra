@@ -80,6 +80,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         currentController?.toggleSessions()
     }
 
+    @objc func toggleOpenCodeSidebar(_ sender: Any?) {
+        currentController?.toggleSessions(.openCode)
+    }
+
     @objc func splitHorizontally(_ sender: Any?) {
         currentController?.splitFocusedPane(vertical: true)
     }
@@ -288,7 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // through JSON.
         // Read once for every window: a pane's session is recognised by the
         // title it wears, and that needs the list of sessions on disk.
-        let sessions = ClaudeSessionStore.recent().sessions
+        let sessions = Harness.allCases.flatMap { $0.recent().sessions }
         var groups: [ObjectIdentifier: Int] = [:]
         var saved: [Layout.Window] = []
         for controller in windows {

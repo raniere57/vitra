@@ -50,6 +50,7 @@ public struct Config: Equatable, Sendable {
         "preview_panel": "p",
         "folder_sidebar": "s",
         "sessions_sidebar": "c",
+        "opencode_sidebar": "o",
         "clear": "k",
     ]
 

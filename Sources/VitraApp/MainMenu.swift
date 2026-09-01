@@ -123,6 +123,13 @@ enum MainMenu {
         )
         toggleSessions.keyEquivalentModifierMask = [.command, .option]
 
+        let toggleOpenCode = viewMenu.addItem(
+            withTitle: "opencode Sessions",
+            action: #selector(AppDelegate.toggleOpenCodeSidebar(_:)),
+            keyEquivalent: key("opencode_sidebar", keybindings)
+        )
+        toggleOpenCode.keyEquivalentModifierMask = [.command, .option]
+
         viewMenu.addItem(.separator())
         // Cmd-+ is typed as Cmd-Shift-=, and Cmd-= without the shift is what
         // most hands actually do, so both reach the same action.

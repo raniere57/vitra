@@ -1,10 +1,12 @@
 import AppKit
 import VitraCore
 
-/// The Claude Code sessions on this machine, newest first.
+/// One agent's sessions on this machine, newest first.
 ///
-/// The same store the CLI reads, so a conversation started in the desktop app
-/// is one click from being resumed in whichever pane has the keyboard.
+/// The same store the agent's own CLI reads, so a conversation started outside
+/// the terminal is one click from being resumed in whichever pane has the
+/// keyboard. One instance per harness: the lists are read from different places
+/// and resumed with different lines, and everything between is this view.
 @MainActor
 final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     /// A session was chosen. It resumes in the pane that has the keyboard,
@@ -57,8 +59,12 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
     ]
     private var dotColor: [String: NSColor] = [:]
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+    /// Whose sessions these are.
+    let harness: Harness
+
+    init(harness: Harness = .claudeCode) {
+        self.harness = harness
+        super.init(frame: .zero)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("session"))
         column.resizingMask = .autoresizingMask
@@ -163,8 +169,9 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
         status.stringValue = "Reading sessions…"
 
         let includeArchived = showsArchived
+        let harness = self.harness
         DispatchQueue.global(qos: .userInitiated).async {
-            let listing = ClaudeSessionStore.recent(includeArchived: includeArchived)
+            let listing = harness.recent(includeArchived: includeArchived)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.sessions = listing.sessions
@@ -172,7 +179,7 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
                 self.applyFilter()
                 self.status.isHidden = !listing.sessions.isEmpty
                 if listing.sessions.isEmpty {
-                    self.status.stringValue = "No sessions in ~/.claude/projects"
+                    self.status.stringValue = "No sessions in \(self.harness.storeDescription)"
                 }
                 self.syncArchivedFooter()
                 self.onLoaded?()
@@ -334,7 +341,7 @@ final class SessionListView: NSView, NSTableViewDataSource, NSTableViewDelegate 
 extension SessionListView {
     /// The session wearing this title in this folder, if the list holds it.
     func session(named title: String, in directory: String?) -> String? {
-        ClaudeSessionStore.matching(title: title, directory: directory, in: sessions)?.id
+        harness.matching(title: title, directory: directory, in: sessions)?.id
     }
 
     /// The title of a session by id, for the label in the title bar.

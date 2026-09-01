@@ -70,6 +70,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// The title bar buttons that open the sidebar on folders and on sessions.
     private let sidebarButton = NSButton()
     private let sessionsButton = NSButton()
+    private let openCodeButton = NSButton()
 
     /// Everything right of the rail: the panes, and the panel when it is open.
     private let bodyView = NSView()
@@ -216,22 +217,29 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             toggles: true
         )
         makeIconButton(
-            symbol: "clock.arrow.circlepath",
+            symbol: Harness.claudeCode.symbolName,
             tooltip: "Claude Code sessions (⌥⌘C)",
             action: #selector(toggleSessionsFromButton),
             button: sessionsButton,
+            toggles: true
+        )
+        makeIconButton(
+            symbol: Harness.openCode.symbolName,
+            tooltip: "opencode sessions (⌥⌘O)",
+            action: #selector(toggleOpenCodeFromButton),
+            button: openCodeButton,
             toggles: true
         )
 
         // Bare buttons on this side: no well around them, only the open one
         // lit. The well made the pair read as a single control with a smudge
         // in the middle.
-        let row = NSStackView(views: [sidebarButton, sessionsButton, pathLabel, sessionLabel])
+        let row = NSStackView(views: [sidebarButton, sessionsButton, openCodeButton, pathLabel, sessionLabel])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 4
         row.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 8)
-        row.setCustomSpacing(10, after: sessionsButton)
+        row.setCustomSpacing(10, after: openCodeButton)
         row.frame = NSRect(x: 0, y: 0, width: 520, height: 28)
 
         let accessory = NSTitlebarAccessoryViewController()
@@ -309,9 +317,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         show(.folders)
     }
 
-    /// The same sidebar, showing the Claude Code sessions on this machine.
-    func toggleSessions() {
-        show(.sessions)
+    /// The same sidebar, showing one agent's sessions on this machine.
+    func toggleSessions(_ harness: Harness = .claudeCode) {
+        show(.sessions(harness))
     }
 
     /// Opens the sidebar on `mode`, or closes it when it is already there.
@@ -334,7 +342,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// one: the sidebar marks the pane that is in it.
     func run(_ command: String, session: String? = nil) {
         guard let pane = focusedPane else { return }
-        pane.claudeSession = session
+        pane.agentSession = session
         pane.session.send(text: command)
         window?.makeFirstResponder(pane)
         sidebar.setCurrentSession(session)
@@ -355,7 +363,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             )
             return
         }
-        pane.claudeSession = session.id
+        pane.agentSession = session.id
         pane.session.send(text: session.resumeCommand)
         window?.makeFirstResponder(pane)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -379,16 +387,19 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     }
 
     private func syncSidebarButton() {
-        let onFolders = sidebar.isExpanded && sidebar.mode == .folders
-        let onSessions = sidebar.isExpanded && sidebar.mode == .sessions
-        sidebarButton.state = onFolders ? .on : .off
-        sidebarButton.contentTintColor = onFolders ? .controlAccentColor : nil
-        sessionsButton.state = onSessions ? .on : .off
-        sessionsButton.contentTintColor = onSessions ? .controlAccentColor : nil
-        // The open one carries a tint behind its glyph: at twelve points a
-        // recoloured icon alone is a detail you have to look for.
-        tint(sidebarButton, on: onFolders)
-        tint(sessionsButton, on: onSessions)
+        let open = sidebar.isExpanded ? sidebar.mode : nil
+        let states: [(NSButton, Bool)] = [
+            (sidebarButton, open == .folders),
+            (sessionsButton, open == .sessions(.claudeCode)),
+            (openCodeButton, open == .sessions(.openCode)),
+        ]
+        for (button, isOn) in states {
+            button.state = isOn ? .on : .off
+            button.contentTintColor = isOn ? .controlAccentColor : nil
+            // The open one carries a tint behind its glyph: at twelve points a
+            // recoloured icon alone is a detail you have to look for.
+            tint(button, on: isOn)
+        }
     }
 
     private func tint(_ button: NSButton, on: Bool) {
@@ -488,8 +499,21 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// them, and all of the ones the mark was missing.
     private var currentSession: String? {
         guard let pane = focusedPane, pane.session.isRunningProgram else { return nil }
-        if let explicit = pane.claudeSession { return explicit }
-        return sidebar.session(named: pane.programTitle, in: pane.session.currentDirectory?.path)
+        if let explicit = pane.agentSession { return explicit }
+        guard let harness = runningHarness(in: pane) else { return nil }
+        return sidebar.session(
+            named: pane.programTitle,
+            in: pane.session.currentDirectory?.path,
+            of: harness
+        )
+    }
+
+    /// The agent a pane is running, by what holds its terminal — and, for
+    /// Claude Code, by the title it wears: a pane running `claude` through a
+    /// wrapper still says so in the title bar.
+    private func runningHarness(in pane: TerminalView) -> Harness? {
+        if let harness = Harness.running(pane.session.foregroundName) { return harness }
+        return ClaudeSessionStore.isClaudeCode(pane.programTitle) ? .claudeCode : nil
     }
 
     /// Shows where the focused shell is, relative to the window's folder.
@@ -533,18 +557,16 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         // A pane wearing Claude Code's title is the reason to read the sessions
         // at all; the read answers on the main thread and comes back through
         // onSessionsLoaded, which lands here again with a title to show.
-        if let pane = focusedPane, pane.claudeSession != nil
-            || ClaudeSessionStore.isClaudeCode(pane.programTitle)
-        {
-            sidebar.loadSessions()
-        }
+        let harness = focusedPane.flatMap(runningHarness(in:))
+        if let harness { sidebar.loadSessions(harness) }
+        else if focusedPane?.agentSession != nil { Harness.allCases.forEach(sidebar.loadSessions) }
 
         guard let id = currentSession, let title = sidebar.sessionTitle(of: id) else {
             sessionLabel.isHidden = true
             sessionLabel.stringValue = ""
             return
         }
-        sessionLabel.stringValue = "✳ \(title)"
+        sessionLabel.stringValue = "\(harness?.marker ?? Harness.claudeCode.marker) \(title)"
         sessionLabel.toolTip = title
         sessionLabel.isHidden = false
     }
@@ -582,6 +604,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     @objc private func toggleSidebarFromButton(_ sender: Any?) { toggleSidebar() }
 
     @objc private func toggleSessionsFromButton(_ sender: Any?) { toggleSessions() }
+    @objc private func toggleOpenCodeFromButton(_ sender: Any?) { toggleSessions(.openCode) }
 
     @objc private func splitRightFromButton(_ sender: Any?) { splitFocusedPane(vertical: true) }
     @objc private func splitDownFromButton(_ sender: Any?) { splitFocusedPane(vertical: false) }
@@ -730,7 +753,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             ),
             sidebar: Layout.Sidebar(
                 expanded: sidebar.isExpanded,
-                mode: sidebar.mode == .sessions ? "sessions" : "folders",
+                mode: sidebar.mode.harness?.rawValue ?? "folders",
                 width: sidebar.frame.width
             ),
             tabGroup: tabGroup,
@@ -750,13 +773,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             // The same recognition the sidebar's mark uses: most sessions were
             // never launched from the sidebar, and those are exactly the ones
             // worth reopening.
-            let session = pane.claudeSession ?? (pane.session.isRunningProgram
-                ? ClaudeSessionStore.matching(
-                    title: pane.programTitle,
-                    directory: directory,
-                    in: sessions
-                )?.id
-                : nil)
+            let session = pane.agentSession ?? runningHarness(in: pane)?.matching(
+                title: pane.programTitle,
+                directory: directory,
+                in: sessions
+            )?.id
             return .pane(Layout.Pane(directory: directory, session: session))
         }
 
@@ -795,7 +816,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         }
 
         if window.sidebar.expanded {
-            sidebar.setMode(window.sidebar.mode == "sessions" ? .sessions : .folders)
+            // "sessions" is what the old layouts called Claude Code's list.
+            let saved = window.sidebar.mode == "sessions" ? Harness.claudeCode.rawValue : window.sidebar.mode
+            sidebar.setMode(Harness(rawValue: saved).map(FolderSidebar.Mode.sessions) ?? .folders)
             setSidebar(expanded: true)
         }
         refreshFocusIndicators()
@@ -847,7 +870,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// Puts a pane back in the Claude Code session it was in.
     private func resume(_ saved: Layout.Pane, in pane: TerminalView?) {
         guard let pane, let id = saved.session else { return }
-        pane.claudeSession = id
+        pane.agentSession = id
         let command = "claude --resume " + id + "\n"
         // The shell has to be up to read what it is handed; the same hop a new
         // tab opening on a command already makes.

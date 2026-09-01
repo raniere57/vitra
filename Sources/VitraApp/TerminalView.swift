@@ -34,7 +34,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
     /// The Claude Code session this pane was told to resume, while it is still
     /// running one. Set by whoever opened it, cleared when the program ends:
     /// this is what the sessions sidebar marks as "you are here".
-    var claudeSession: String?
+    var agentSession: String?
 
     /// The last title the program in this pane set, kept per pane rather than
     /// per window: an unfocused split has a title too, and it is how a session
@@ -355,7 +355,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
         // pane is in no session now. Cleared here rather than on every refresh:
         // a shell takes a moment to start what it was handed, and a mark that
         // clears itself in that gap never appears at all.
-        claudeSession = nil
+        agentSession = nil
         commandStatuses.insert(status, at: 0)
         if commandStatuses.count > 200 { commandStatuses.removeLast() }
         commandStartedAt = nil
