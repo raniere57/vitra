@@ -83,12 +83,12 @@ final class PaneCornerButton: NSView {
         tracking = area
     }
 
-    /// The open hand over the handle, the closed one while it carries: the
-    /// pointer is what says a thing can be picked up before anything is.
-    override func resetCursorRects() {
-        guard kind == .grip else { return super.resetCursorRects() }
-        addCursorRect(bounds, cursor: .openHand)
-    }
+    /// The open hand over the handle, the pointing one over the rest: the
+    /// pointer is what says a thing can be picked up or pressed before it is.
+    ///
+    /// Set by the pane rather than through a cursor rect, because the pane sets
+    /// its own I-beam on every mouse move and would win.
+    var cursor: NSCursor { kind == .grip ? .openHand : .pointingHand }
 
     override func mouseEntered(with event: NSEvent) { hovering = true }
     override func mouseExited(with event: NSEvent) { hovering = false }

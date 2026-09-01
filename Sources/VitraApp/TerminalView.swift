@@ -774,9 +774,19 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         autoScroll = nil
     }
 
-    /// The pointing hand over a link, the I-beam everywhere else.
+    /// The corner buttons' own cursor over them, the pointing hand over a link,
+    /// the I-beam everywhere else.
     override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let button = cornerButtons.first(where: { !$0.isHidden && $0.frame.contains(point) }) {
+            button.cursor.set()
+            return
+        }
         if link(for: event) != nil { NSCursor.pointingHand.set() } else { NSCursor.iBeam.set() }
+    }
+
+    private var cornerButtons: [PaneCornerButton] {
+        [closeButton, zoomButton, tabButton, gripButton]
     }
 
     override func layout() {
