@@ -8,6 +8,15 @@ As datas são o dia em que a imagem de disco foi construída.
 - Clicar numa sessão na barra lateral abre um **painel novo** ao lado, com
   aquela sessão, em vez de tomar o painel que está com o teclado. A conversa em
   que você já estava continua lá, e você fecha quando quiser.
+- Corrigido: arrastar uma seleção para além da borda não rolava a tela, então
+  só dava para selecionar o que coubesse nela. Agora a rolagem continua enquanto
+  o ponteiro fica parado fora do painel, mais rápida quanto mais longe da borda,
+  e a seleção acompanha — a âncora é uma posição na tela do terminal, não na
+  janela de visualização.
+- **Arrastar um painel para outra aba**: segurando o botão de aba no canto e
+  arrastando, passar sobre uma aba a traz para a frente, e soltar dentro dela
+  coloca o terminal ali como divisão. A barra de abas nativa não avisa nada a
+  ninguém, mas o ponteiro é nosso enquanto o arraste é nosso.
 - Um terceiro botão no canto do painel o leva para uma **aba nova**, com o shell
   e o scrollback intactos — o painel muda de janela, não é recriado.
 

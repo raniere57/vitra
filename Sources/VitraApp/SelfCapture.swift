@@ -257,6 +257,42 @@ enum SelfCapture {
             }
         }
 
+        // A selection drag held past an edge, which is the only way to test the
+        // scrolling that keeps it going: "x1,y1,x2,y2", never released.
+        if let drag = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_DRAG"] {
+            let parts = drag.split(separator: ",").compactMap { Double($0) }
+            if parts.count >= 4 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.6) {
+                    guard let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible }),
+                          let pane = window.contentView?.hitTest(NSPoint(x: parts[0], y: parts[1])) as? TerminalView
+                    else {
+                        FileHandle.standardError.write(Data("[self-shot] no pane to drag in\n".utf8))
+                        return
+                    }
+                    func event(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent? {
+                        NSEvent.mouseEvent(
+                            with: type,
+                            location: point,
+                            modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime,
+                            windowNumber: window.windowNumber,
+                            context: nil,
+                            eventNumber: 0,
+                            clickCount: 1,
+                            pressure: type == .leftMouseDown ? 1 : 0
+                        )
+                    }
+                    if let down = event(.leftMouseDown, NSPoint(x: parts[0], y: parts[1])) {
+                        pane.mouseDown(with: down)
+                    }
+                    if let dragged = event(.leftMouseDragged, NSPoint(x: parts[2], y: parts[3])) {
+                        pane.mouseDragged(with: dragged)
+                    }
+                    FileHandle.standardError.write(Data("[self-shot] dragging to \(parts[2]),\(parts[3])\n".utf8))
+                }
+            }
+        }
+
         // Scrollback moved before the shot: a wheel gesture cannot be faked from
         // a headless run, and scrolling is the one behaviour a screenshot of the
         // live screen can never show.

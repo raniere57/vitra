@@ -283,7 +283,9 @@ esquerda faz: `cd` num painel livre, aba nova num ocupado.
 
 Com o ponteiro sobre um painel, três botões aparecem no canto: o × fecha, o de
 setas dá a janela inteira àquele terminal, e o da caixa com a seta o leva para
-uma aba nova — o mesmo shell, o mesmo scrollback, outra aba. `Esc` traz os outros de volta, no
+uma aba nova — o mesmo shell, o mesmo scrollback, outra aba. Esse último também
+arrasta: segure e arraste o painel, passe sobre outra aba (ela vem para a
+frente) e solte dentro dela para o terminal virar uma divisão de lá. `Esc` traz os outros de volta, no
 mesmo divisor de antes. Os painéis escondidos não são espremidos — são
 escondidos —, então nada reflui as linhas que segura por uma visão que ninguém
 está lendo.

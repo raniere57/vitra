@@ -464,6 +464,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The window a pane belongs to, for a pane in mid-flight between two.
+    func controller(owning pane: TerminalView) -> TerminalWindowController? {
+        windows.first { $0.holds(pane) }
+    }
+
+    /// Brings the tab under a point to the front, while a pane is dragged.
+    ///
+    /// The tab bar is AppKit's and says nothing about where its tabs are, so
+    /// the strip is measured — from the top of the content to the bottom of the
+    /// title bar — and divided by the number of tabs, which is how it is drawn.
+    func revealTab(under screenPoint: NSPoint) {
+        for controller in windows {
+            guard let window = controller.window,
+                  let group = window.tabGroup,
+                  group.windows.count > 1,
+                  window.frame.contains(screenPoint)
+            else { continue }
+
+            let contentHeight = window.contentRect(forFrameRect: window.frame).height
+            let barTop = window.frame.minY + contentHeight
+            let barBottom = window.frame.minY + window.contentLayoutRect.maxY
+            guard screenPoint.y > barBottom, screenPoint.y < barTop else { continue }
+
+            let width = window.frame.width / CGFloat(group.windows.count)
+            let index = Int((screenPoint.x - window.frame.minX) / max(width, 1))
+            guard group.windows.indices.contains(index) else { continue }
+            let wanted = group.windows[index]
+            guard group.selectedWindow !== wanted else { return }
+            group.selectedWindow = wanted
+            return
+        }
+    }
+
     private func controller(for window: NSWindow?) -> TerminalWindowController? {
         windows.first { $0.window === window }
     }

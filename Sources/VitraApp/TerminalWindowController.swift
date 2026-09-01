@@ -729,6 +729,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             guard let pane else { return }
             self?.moveToNewTab(pane)
         }
+        pane.onPaneDragMoved = { point in
+            (NSApp.delegate as? AppDelegate)?.revealTab(under: point)
+        }
+        pane.onPaneDropped = { [weak self, weak pane] dropped in
+            guard let pane else { return }
+            self?.accept(dropped, beside: pane)
+        }
         session.onCommandStarted = { [weak pane] in
             pane?.commandStarted()
         }
@@ -752,6 +759,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         panes.append(pane)
         refreshFocusIndicators()
     }
+
+    /// Whether this window holds that pane.
+    func holds(_ pane: TerminalView) -> Bool { panes.contains { $0 === pane } }
 
     /// Takes over a pane another window built, keeping its shell running.
     func adopt(_ pane: TerminalView) {
@@ -924,16 +934,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     @discardableResult
     func splitFocusedPane(vertical: Bool, in directory: String? = nil) -> TerminalView? {
         restorePanes()
-        guard let window, let pane = focusedPane else { return nil }
-
-        // Where the pane sits has to be recorded before it is detached:
-        // removing it from the container clears the relationship, so asking
-        // afterwards gives the wrong answer.
-        let wasRoot = pane.superview === paneContainer
-        let parentSplit = pane.superview as? NSSplitView
-        let indexInParent = parentSplit?.arrangedSubviews.firstIndex(of: pane)
-        guard wasRoot || (parentSplit != nil && indexInParent != nil) else { return nil }
-
+        guard let pane = focusedPane else { return nil }
         let newPane: TerminalView
         do {
             newPane = try makePane(in: directory)
@@ -941,6 +942,22 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             NSSound.beep()
             return nil
         }
+        guard insert(newPane, beside: pane, vertical: vertical) else { return nil }
+        return newPane
+    }
+
+    /// Puts `newPane` next to `pane`, splitting whatever holds it.
+    @discardableResult
+    private func insert(_ newPane: TerminalView, beside pane: TerminalView, vertical: Bool) -> Bool {
+        guard let window else { return false }
+
+        // Where the pane sits has to be recorded before it is detached:
+        // removing it from the container clears the relationship, so asking
+        // afterwards gives the wrong answer.
+        let wasRoot = pane.superview === paneContainer
+        let parentSplit = pane.superview as? NSSplitView
+        let indexInParent = parentSplit?.arrangedSubviews.firstIndex(of: pane)
+        guard wasRoot || (parentSplit != nil && indexInParent != nil) else { return false }
 
         let split = PaneSplitView()
         // isVertical means the divider runs vertically, which puts the panes
@@ -975,7 +992,34 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         window.makeFirstResponder(newPane)
         refreshFocusIndicators()
         syncMaximizeButtons()
-        return newPane
+        return true
+    }
+
+    /// Takes in a pane dropped from another window, or another split of this
+    /// one, and puts it beside the pane it was dropped on.
+    func accept(_ dropped: TerminalView, beside target: TerminalView) {
+        guard dropped !== target else { return }
+        let delegate = NSApp.delegate as? AppDelegate
+        let source = delegate?.controller(owning: dropped) ?? self
+        source.restorePanes()
+        restorePanes()
+        source.hand(over: dropped)
+        if source !== self { adopt(dropped) }
+        insert(dropped, beside: target, vertical: true)
+        window?.makeKeyAndOrderFront(nil)
+        window?.makeFirstResponder(dropped)
+        source.syncMaximizeButtons()
+    }
+
+    /// Lets a pane go without closing it: the window that receives it wires it
+    /// up again. A window left with nothing closes, as it does on the last ×.
+    private func hand(over pane: TerminalView) {
+        guard remove(pane) else {
+            window?.close()
+            return
+        }
+        window?.makeFirstResponder(panes.first { $0.window != nil })
+        syncMaximizeButtons()
     }
 
     /// Gives one pane the whole window, or gives the others their space back.
@@ -1011,7 +1055,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         window?.makeFirstResponder(pane)
     }
 
-    private func restorePanes() {
+    func restorePanes() {
         guard let pane = maximizedPane else { return }
         if let monitor = paneEscapeMonitor {
             NSEvent.removeMonitor(monitor)

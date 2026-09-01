@@ -16,7 +16,7 @@ private final class PassthroughView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-final class TerminalView: NSView, NSMenuItemValidation {
+final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     let session: TerminalSession
 
     private var renderer: TerminalRenderer
@@ -71,6 +71,19 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     /// The pane was asked to leave for a tab of its own.
     var onMoveToNewTab: (() -> Void)?
+
+    /// A pane is being dragged over this point on screen, so whoever owns the
+    /// windows can bring the tab under it to the front.
+    var onPaneDragMoved: ((NSPoint) -> Void)?
+
+    /// A pane was dropped on this one; it belongs here now.
+    var onPaneDropped: ((TerminalView) -> Void)?
+
+    /// What a dragged pane puts on the pasteboard. The pane itself travels in
+    /// `draggedPane`: it is a live view with a running shell, and nothing about
+    /// it can be serialised.
+    static let paneType = NSPasteboard.PasteboardType("dev.vitra.pane")
+    private(set) static weak var draggedPane: TerminalView?
 
     /// Whether the corner offers the zoom button at all: one pane in a window
     /// already has the whole window.
@@ -174,7 +187,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
         }
 
         // Files dropped anywhere on the terminal become attachments.
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes([.fileURL, TerminalView.paneType])
 
         blockGutter.autoresizingMask = [.width, .height]
         addSubview(blockGutter)
@@ -187,6 +200,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
         zoomButton.onClick = { [weak self] in self?.onToggleMaximized?() }
         addSubview(zoomButton)
         tabButton.onClick = { [weak self] in self?.onMoveToNewTab?() }
+        tabButton.onDrag = { [weak self] event in self?.beginPaneDrag(with: event) }
         addSubview(tabButton)
 
         focusBar.wantsLayer = true
@@ -652,14 +666,13 @@ final class TerminalView: NSView, NSMenuItemValidation {
         let position = cell(for: event)
         // Option turns the drag into a rectangular selection, the convention
         // every terminal that supports it uses.
-        session.extendSelection(
-            column: position.column,
-            row: position.row,
-            rectangle: event.modifierFlags.contains(.option)
-        )
+        let rectangle = event.modifierFlags.contains(.option)
+        session.extendSelection(column: position.column, row: position.row, rectangle: rectangle)
+        updateAutoScroll(for: event, rectangle: rectangle)
     }
 
     override func mouseUp(with event: NSEvent) {
+        stopAutoScroll()
         session.endSelection()
 
         // A click, not a drag: the pointer never left the cell it went down in,
@@ -670,6 +683,53 @@ final class TerminalView: NSView, NSMenuItemValidation {
         guard !moved, event.clickCount == 1, let url = link(for: event) else { return }
         session.clearSelection()
         onOpenLink?(url, event.modifierFlags.contains(.command))
+    }
+
+    /// Keeps the viewport moving while a selection drag sits past an edge.
+    ///
+    /// A drag stops sending events the moment the pointer stops moving, and a
+    /// selection that needs three screens of scrollback is a drag that spends
+    /// most of its time held still against the bottom of the pane. The anchor
+    /// is a position in the screen, not in the viewport, so scrolling under a
+    /// held selection extends it rather than moving it.
+    private func updateAutoScroll(for event: NSEvent, rectangle: Bool) {
+        let point = convert(event.locationInWindow, from: nil)
+        let beyond = point.y < 0 ? point.y : (point.y > bounds.height ? point.y - bounds.height : 0)
+        guard beyond != 0 else {
+            stopAutoScroll()
+            return
+        }
+
+        // One line per tick at the edge, more the further out the pointer is:
+        // a long transcript is unreachable at twenty lines a second.
+        let cellHeight = max(renderer.metrics.cellHeight / scale, 1)
+        let lines = min(Int(abs(beyond) / cellHeight) + 1, TerminalView.autoScrollMaxLines)
+        autoScroll = (beyond < 0 ? -lines : lines, cell(for: event), rectangle)
+
+        guard autoScrollTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stepAutoScroll() }
+        }
+        // Common modes, because a mouse drag puts the run loop in event
+        // tracking and a default-mode timer would never fire during one.
+        RunLoop.main.add(timer, forMode: .common)
+        autoScrollTimer = timer
+    }
+
+    private func stepAutoScroll() {
+        guard let state = autoScroll else { return }
+        session.scroll(lines: state.lines)
+        session.extendSelection(
+            column: state.position.column,
+            row: state.position.row,
+            rectangle: state.rectangle
+        )
+    }
+
+    private func stopAutoScroll() {
+        autoScrollTimer?.invalidate()
+        autoScrollTimer = nil
+        autoScroll = nil
     }
 
     /// The pointing hand over a link, the I-beam everywhere else.
@@ -785,6 +845,12 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     private var scrollAccumulator: CGFloat = 0
     private var pressedCell: (column: UInt16, row: UInt16)?
+    /// Where a selection drag is pulling the viewport, while it is held past an
+    /// edge: how many lines a tick, and the cell the selection ends at.
+    private var autoScroll: (lines: Int, position: (column: UInt16, row: UInt16), rectangle: Bool)?
+    private var autoScrollTimer: Timer?
+    /// Fast enough to cross a long transcript, slow enough to stop on a line.
+    private static let autoScrollMaxLines = 6
     private var linkTracking: NSTrackingArea?
 
     // MARK: - Clipboard
@@ -841,6 +907,11 @@ final class TerminalView: NSView, NSMenuItemValidation {
     // MARK: - Drag and drop
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        if isPaneDrag(sender) {
+            isDropTarget = true
+            setNeedsRender()
+            return .move
+        }
         guard PasteboardAttachments.fileURLs(from: sender.draggingPasteboard)?.isEmpty == false else {
             return []
         }
@@ -858,12 +929,77 @@ final class TerminalView: NSView, NSMenuItemValidation {
         isDropTarget = false
         setNeedsRender()
 
+        if isPaneDrag(sender), let dragged = TerminalView.draggedPane {
+            onPaneDropped?(dragged)
+            return true
+        }
+
         guard let urls = PasteboardAttachments.fileURLs(from: sender.draggingPasteboard), !urls.isEmpty
         else { return false }
 
         window?.makeFirstResponder(self)
         attach(urls.map { Attachment(url: $0, isTemporary: false) })
         return true
+    }
+
+    // MARK: - NSDraggingSource
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        .move
+    }
+
+    /// Where the pane is right now, in screen points.
+    ///
+    /// This is what makes dropping into another tab possible at all: the tab
+    /// bar belongs to AppKit and answers nothing, but the pointer is ours to
+    /// follow, and the tab under it can be brought to the front from here.
+    func draggingSession(_ session: NSDraggingSession, movedTo screenPoint: NSPoint) {
+        onPaneDragMoved?(screenPoint)
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        TerminalView.draggedPane = nil
+    }
+
+    /// Whether the drag carries a pane of this app's own.
+    private func isPaneDrag(_ sender: any NSDraggingInfo) -> Bool {
+        guard sender.draggingPasteboard.availableType(from: [TerminalView.paneType]) != nil,
+              let dragged = TerminalView.draggedPane
+        else { return false }
+        return dragged !== self
+    }
+
+    /// Starts carrying this pane, from the corner button that began the drag.
+    private func beginPaneDrag(with event: NSEvent) {
+        let item = NSPasteboardItem()
+        item.setString("pane", forType: TerminalView.paneType)
+        let dragItem = NSDraggingItem(pasteboardWriter: item)
+        // A plate the size of the pane, quarter scale: a Metal layer cannot be
+        // asked for a bitmap, and what is being moved is the whole terminal.
+        let size = NSSize(width: bounds.width / 4, height: bounds.height / 4)
+        let image = NSImage(size: size, flipped: false) { rect in
+            NSColor(white: 0.16, alpha: 0.92).setFill()
+            let plate = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: 6, yRadius: 6)
+            plate.fill()
+            NSColor.controlAccentColor.withAlphaComponent(0.8).setStroke()
+            plate.lineWidth = 2
+            plate.stroke()
+            return true
+        }
+        let origin = convert(event.locationInWindow, from: nil)
+        dragItem.setDraggingFrame(
+            NSRect(x: origin.x - size.width / 2, y: origin.y - size.height / 2, width: size.width, height: size.height),
+            contents: image
+        )
+        TerminalView.draggedPane = self
+        beginDraggingSession(with: [dragItem], event: event, source: self)
     }
 
     // MARK: - Keyboard

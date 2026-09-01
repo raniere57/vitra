@@ -20,6 +20,10 @@ final class PaneCornerButton: NSView {
 
     var onClick: (() -> Void)?
 
+    /// The button was dragged rather than clicked. Only `.tab` uses it: the
+    /// pane goes wherever it is dropped.
+    var onDrag: ((NSEvent) -> Void)?
+
     /// Each button is 18pt, laid out `margin` in from the pane's corner.
     static let size: CGFloat = 18
     static let margin: CGFloat = 6
@@ -41,6 +45,8 @@ final class PaneCornerButton: NSView {
     }
 
     private var tracking: NSTrackingArea?
+    /// Set once a press turns into a drag, so the release is not also a click.
+    private var dragged = false
 
     init(kind: Kind) {
         self.kind = kind
@@ -79,10 +85,21 @@ final class PaneCornerButton: NSView {
     override func mouseDown(with event: NSEvent) {
         // Swallowed rather than passed on: a click meant for the button is not
         // a click in the grid, and must not move the selection.
+        dragged = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let onDrag, !dragged else { return }
+        // Three points, so a click with an unsteady hand is still a click.
+        let start = convert(event.locationInWindow, from: nil)
+        guard !bounds.insetBy(dx: -3, dy: -3).contains(start) || abs(event.deltaX) + abs(event.deltaY) > 3
+        else { return }
+        dragged = true
+        onDrag(event)
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        guard !dragged, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         onClick?()
     }
 
