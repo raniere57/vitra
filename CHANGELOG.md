@@ -5,6 +5,15 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+- **opencode** ao lado do Claude Code. `Opt-Cmd-O`, ou o terceiro botão da barra
+  de título, abre uma barra lateral com as sessões do opencode — lidas do banco
+  SQLite dele, só para leitura, sem sub-sessões de subagentes — e clicar numa
+  delas roda `opencode --session <id>` no painel em foco. Um painel rodando
+  opencode é reconhecido pelo processo que segura o terminal, não pelo título,
+  e a barra de título mostra `◆ <sessão>`. O servidor MCP do Vitra funciona
+  igual para os dois: registrado em `~/.config/opencode/opencode.json`, o
+  opencode usa o mesmo navegador e o mesmo painel de visualização.
+
 - Um favorito pode ser um **servidor SSH**. Preenchendo o campo de host na
   janela de pastas, o favorito passa a apontar para outra máquina, aparece no
   trilho e na árvore como qualquer pasta, e clicar nele abre uma aba rodando

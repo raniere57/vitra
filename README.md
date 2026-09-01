@@ -186,6 +186,36 @@ app desktop compartilham, `~/.claude/projects/`. Clicar numa delas digita
 conversa reabre onde estava, no terminal que você já está olhando. O campo de
 filtro busca títulos e nomes de projeto.
 
+### opencode
+
+`Opt-Cmd-O`, ou o terceiro botão da barra de título, abre a mesma barra lateral
+nas **sessões do opencode** — a lista tem as mesmas linhas, o mesmo filtro e a
+mesma marca de "é esta que está rodando aqui", lida do banco SQLite do opencode
+(`~/.local/share/opencode/opencode.db`, aberto só para leitura) e reaberta com
+`cd <projeto> && opencode --session <id>`. Sub-sessões de subagentes ficam fora
+da lista, e uma conversa que o opencode ainda não nomeou é chamada pela pasta.
+
+Um painel rodando opencode é reconhecido pelo processo que segura o terminal, e
+não pelo título — o opencode não renomeia o terminal —, então a barra de título
+diz `◆ <sessão>` como diz `✳ <sessão>` para o Claude Code.
+
+Para o opencode usar o navegador embutido e o painel de visualização, registre o
+servidor MCP dele no `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "mcp": {
+    "vitra": {
+      "type": "local",
+      "command": ["/Applications/Vitra.app/Contents/Helpers/vitra", "mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+`opencode mcp list` deve dizer `vitra ✓ connected`.
+
 As sessões são agrupadas por projeto, projeto mais recente primeiro, com um
 ponto colorido e a contagem ao lado do nome; projetos começam dobrados e um
 clique abre um, o que impede que um repositório movimentado enterre os outros
