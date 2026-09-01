@@ -16,11 +16,14 @@ final class PaneCornerButton: NSView {
         case zoom
         /// Moves the pane out into a tab of its own.
         case tab
+        /// The handle the pane is dragged by. Drags only: there is nothing a
+        /// click on a handle could mean.
+        case grip
     }
 
     var onClick: (() -> Void)?
 
-    /// The button was dragged rather than clicked. Only `.tab` uses it: the
+    /// The button was dragged rather than clicked. `.grip` is made of this: the
     /// pane goes wherever it is dropped.
     var onDrag: ((NSEvent) -> Void)?
 
@@ -64,6 +67,7 @@ final class PaneCornerButton: NSView {
         case .close: return "Close this terminal"
         case .zoom: return isOn ? "Back to the other terminals (esc)" : "Give this terminal the window"
         case .tab: return "Move this terminal to a new tab"
+        case .grip: return "Drag this terminal to another side, pane or tab"
         }
     }
 
@@ -77,6 +81,13 @@ final class PaneCornerButton: NSView {
         )
         addTrackingArea(area)
         tracking = area
+    }
+
+    /// The open hand over the handle, the closed one while it carries: the
+    /// pointer is what says a thing can be picked up before anything is.
+    override func resetCursorRects() {
+        guard kind == .grip else { return super.resetCursorRects() }
+        addCursorRect(bounds, cursor: .openHand)
     }
 
     override func mouseEntered(with event: NSEvent) { hovering = true }
@@ -95,7 +106,9 @@ final class PaneCornerButton: NSView {
         guard !bounds.insetBy(dx: -3, dy: -3).contains(start) || abs(event.deltaX) + abs(event.deltaY) > 3
         else { return }
         dragged = true
+        if kind == .grip { NSCursor.closedHand.push() }
         onDrag(event)
+        if kind == .grip { NSCursor.pop() }
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -113,6 +126,7 @@ final class PaneCornerButton: NSView {
         case .close: drawCross(in: plate, ink: ink)
         case .zoom: drawCorners(in: plate, ink: ink)
         case .tab: drawTab(in: plate, ink: ink)
+        case .grip: drawGrip(in: plate, ink: ink)
         }
     }
 
@@ -120,7 +134,7 @@ final class PaneCornerButton: NSView {
         guard hovering else { return NSColor(white: 0.30, alpha: 0.55) }
         switch kind {
         case .close: return NSColor(srgbRed: 0.78, green: 0.28, blue: 0.32, alpha: 0.92)
-        case .zoom, .tab: return NSColor(white: 0.45, alpha: 0.92)
+        case .zoom, .tab, .grip: return NSColor(white: 0.45, alpha: 0.92)
         }
     }
 
@@ -166,6 +180,29 @@ final class PaneCornerButton: NSView {
         arrow.lineCapStyle = .round
         arrow.lineJoinStyle = .round
         arrow.stroke()
+    }
+
+    /// Six dots: the grab handle this system puts on anything that is dragged
+    /// by hand, at the size the other corner buttons are drawn.
+    private func drawGrip(in plate: NSRect, ink: NSColor) {
+        let box = plate.insetBy(dx: plate.width * 0.30, dy: plate.height * 0.24)
+        let radius = box.width * 0.13
+        ink.setFill()
+        for column in 0..<2 {
+            for row in 0..<3 {
+                let centre = NSPoint(
+                    x: box.minX + radius + CGFloat(column) * (box.width - 2 * radius),
+                    y: box.minY + radius + CGFloat(row) * (box.height - 2 * radius) / 2
+                )
+                let dot = NSRect(
+                    x: centre.x - radius,
+                    y: centre.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                )
+                NSBezierPath(ovalIn: dot).fill()
+            }
+        }
     }
 
     /// Two brackets pointing out to maximise, in to come back: the same shape

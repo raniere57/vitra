@@ -11,6 +11,9 @@ As datas são o dia em que a imagem de disco foi construída.
   onde o cursor está acende, e é ali que ele entra: esquerda, direita, em cima
   ou embaixo. Antes o painel solto sempre virava uma coluna à direita, que é
   justamente o que ficava fino demais.
+- **Alça própria para arrastar**: os seis pontinhos no canto do painel, com a
+  mãozinha no cursor. O botão de nova aba voltou a ser só clique — arrastar por
+  ele era um significado a mais escondido no mesmo ícone.
 - **`Ctrl`-`Cmd`-setas move o painel em foco** para aquela parede da janela —
   o mesmo rearranjo sem tirar as mãos do teclado (File → Move Pane).
 

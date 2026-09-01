@@ -62,6 +62,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     private let closeButton = PaneCornerButton(kind: .close)
     private let zoomButton = PaneCornerButton(kind: .zoom)
     private let tabButton = PaneCornerButton(kind: .tab)
+    private let gripButton = PaneCornerButton(kind: .grip)
 
     /// The pane was asked to close from its own corner.
     var onClose: (() -> Void)?
@@ -98,6 +99,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
             let hidden = !canRearrange || closeButton.isHidden
             zoomButton.isHidden = hidden
             tabButton.isHidden = hidden
+            gripButton.isHidden = hidden
         }
     }
 
@@ -207,8 +209,9 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         zoomButton.onClick = { [weak self] in self?.onToggleMaximized?() }
         addSubview(zoomButton)
         tabButton.onClick = { [weak self] in self?.onMoveToNewTab?() }
-        tabButton.onDrag = { [weak self] event in self?.beginPaneDrag(with: event) }
         addSubview(tabButton)
+        gripButton.onDrag = { [weak self] event in self?.beginPaneDrag(with: event) }
+        addSubview(gripButton)
 
         dropShade.wantsLayer = true
         dropShade.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor
@@ -401,6 +404,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         )
         zoomButton.frame = closeButton.frame.offsetBy(dx: -(PaneCornerButton.size + 4), dy: 0)
         tabButton.frame = zoomButton.frame.offsetBy(dx: -(PaneCornerButton.size + 4), dy: 0)
+        gripButton.frame = tabButton.frame.offsetBy(dx: -(PaneCornerButton.size + 4), dy: 0)
         scrollIndicator.update(snapshot.scroll)
         guard showsCommandBlocks else { return }
         blockGutter.frame = bounds
@@ -798,6 +802,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         closeButton.isHidden = false
         zoomButton.isHidden = !canRearrange
         tabButton.isHidden = !canRearrange
+        gripButton.isHidden = !canRearrange
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -805,6 +810,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         closeButton.isHidden = true
         zoomButton.isHidden = true
         tabButton.isHidden = true
+        gripButton.isHidden = true
     }
 
     /// What the viewport is doing right now, for a measured run to print.
