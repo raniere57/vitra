@@ -28,6 +28,7 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     private let address = NSTextField()
     private let progress = NSProgressIndicator()
     private var pendingLoads: [(Result<Void, Error>) -> Void] = []
+    private lazy var findBar = FindBar(browser: self)
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -394,6 +395,8 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         let back = navigationButton("chevron.left", action: #selector(backClicked))
         let forward = navigationButton("chevron.right", action: #selector(forwardClicked))
         let reloadButton = navigationButton("arrow.clockwise", action: #selector(reloadClicked))
+        let externalButton = navigationButton("arrow.up.forward.app", action: #selector(openExternally))
+        externalButton.toolTip = "Open this page in the default browser"
 
         address.font = PanelStyle.monospaced(10.5)
         address.textColor = PanelStyle.primaryText
@@ -406,7 +409,7 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         address.action = #selector(addressEntered)
         address.translatesAutoresizingMaskIntoConstraints = false
 
-        let row = NSStackView(views: [back, forward, reloadButton, address])
+        let row = NSStackView(views: [back, forward, reloadButton, address, externalButton])
         row.orientation = .horizontal
         row.spacing = 6
         row.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
@@ -455,6 +458,56 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     @objc private func backClicked() { goBack() }
     @objc private func forwardClicked() { goForward() }
     @objc private func reloadClicked() { reload() }
+
+    /// Hands the current page to the system's default browser: some things —
+    /// a login flow, a heavy app, a download — belong there, not in a panel.
+    @objc private func openExternally() {
+        guard let url = webView?.url, !url.isFileURL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    // MARK: - Zoom and find
+
+    /// Page magnification, one step per press, clamped so it never disappears
+    /// or fills the panel with a single word.
+    private static let zoomStep: CGFloat = 0.1
+    private static let zoomRange: ClosedRange<CGFloat> = 0.5 ... 3.0
+
+    private func zoom(by delta: CGFloat) {
+        guard let webView else { return }
+        webView.pageZoom = min(max(webView.pageZoom + delta, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
+    }
+
+    private func resetZoom() { webView?.pageZoom = 1 }
+
+    /// The standard browser shortcuts the panel answers itself: find, and zoom.
+    /// A panel is not a key window the menu drives, so the keys are read here.
+    public override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.command) else { return super.performKeyEquivalent(with: event) }
+        switch event.charactersIgnoringModifiers {
+        case "f": showFind(); return true
+        case "+", "=": zoom(by: Self.zoomStep); return true
+        case "-": zoom(by: -Self.zoomStep); return true
+        case "0": resetZoom(); return true
+        default: return super.performKeyEquivalent(with: event)
+        }
+    }
+
+    private func showFind() {
+        findBar.reveal(in: self)
+    }
+
+    /// Runs a find and moves the selection, forwards or back.
+    func find(_ query: String, forward: Bool) {
+        guard let webView, !query.isEmpty else { return }
+        let configuration = WKFindConfiguration()
+        configuration.backwards = !forward
+        configuration.wraps = true
+        configuration.caseSensitive = false
+        webView.find(query, configuration: configuration) { [weak self] result in
+            self?.findBar.report(found: result.matchFound)
+        }
+    }
 
     @objc private func addressEntered() {
         guard let url = BrowserView.url(from: address.stringValue) else { return }

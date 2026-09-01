@@ -303,7 +303,12 @@ O botão de globo na barra de título, `Cmd-Shift-B` ou **View → Browser** abr
 o navegador no painel com o cursor já
 na barra de endereço: digite `google.com` e Enter. Antes disso o navegador só
 aparecia por um link clicado ou por um agente pedindo — o que não é ter um
-navegador.
+navegador. As sessões e cookies ficam salvos em disco, então um login sobrevive
+ao painel fechar e ao app reiniciar.
+
+`Cmd-F` abre a busca na página, `Cmd`-`+`/`-`/`0` dão o zoom, e o botão de seta
+no fim da barra de endereço joga a página aberta no seu navegador do sistema —
+para um login pesado ou um download que não cabem num painel.
 
 Uma URL na saída é um link: um clique abre no painel de visualização — uma
 página que você olha de relance sem sair da janela — e `Cmd`-clique entrega ao

@@ -5,6 +5,15 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Buscar, zoom e abrir no sistema
+
+- **`Cmd-F`** abre a busca na página — próximo com Enter, anterior com
+  Shift-Enter, `Esc` fecha; um pontinho verde ou vermelho diz se achou.
+- **`Cmd`-`+` / `-` / `0`** dão o zoom da página.
+- **Botão de seta** no fim da barra de endereço abre a página atual no navegador
+  do sistema, para o que não cabe num painel.
+- Tudo nativo do WebKit: nenhum peso a mais no app.
+
 ### O browser lembra os logins
 
 - As sessões e cookies do navegador agora **persistem em disco**, no container
