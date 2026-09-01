@@ -5,6 +5,14 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### O agente não te arrasta mais de volta
+
+- Uma chamada de ferramenta trazia a janela pra frente **ativando o app inteiro**
+  (`NSApp.activate`), então enquanto um agente mexia no browser você era puxado
+  de volta pro Vitra de qualquer outro app. Agora a janela só sobe dentro do
+  Vitra, sem roubar o foco: ela está lá e à frente quando você voltar por conta
+  própria.
+
 ### Buscar, zoom e abrir no sistema
 
 - **`Cmd-F`** abre a busca na página — próximo com Enter, anterior com

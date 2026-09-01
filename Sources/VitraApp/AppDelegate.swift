@@ -424,12 +424,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.closeFocusedPane()
     }
 
-    /// Brings the app and a window to the front, for a tool call that has
-    /// something to show: the agent's browser is no use in a process the user
-    /// is not looking at, and an MCP call arrives with the app in the back.
+    /// Orders a window forward for a tool call that has something to show,
+    /// without stealing focus.
+    ///
+    /// Deliberately not `NSApp.activate`: an agent working in the background is
+    /// not a reason to yank the user out of whatever app they are in. The window
+    /// is raised within Vitra, so it is there and in front the moment they come
+    /// back on their own — the panel it opened is already in it.
     func surface() {
-        NSApp.activate(ignoringOtherApps: true)
-        (currentController?.window ?? windows.last?.window)?.makeKeyAndOrderFront(nil)
+        (currentController?.window ?? windows.last?.window)?.orderFront(nil)
     }
 
     /// The window a command should act on.
