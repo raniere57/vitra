@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windows: [TerminalWindowController] = []
     private var device: MTLDevice?
     private let attachments = AttachmentStore()
+    private let holdToQuit = HoldToQuit()
 
     /// Files handed to the app before it had a window to show them in.
     private var pendingPreviews: [URL] = []
@@ -36,6 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // way in, off the main thread so it never delays the first window.
         let store = attachments
         DispatchQueue.global(qos: .utility).async { store.purgeExpired() }
+
+        // Cmd-Q is one key from Cmd-W in a window holding four shells.
+        holdToQuit.install()
 
         loadConfiguration()
         bookmarks = bookmarkStore.load()

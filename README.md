@@ -304,6 +304,13 @@ seu navegador. O ponteiro vira uma mão sobre um deles. Hosts `www.` sem esquema
 contam, um ponto final no fim da frase não, e um colchete que o link nunca abriu
 fica para trás.
 
+## Sair
+
+`Cmd-Q` só encerra se for segurado por um segundo — uma placa aparece dizendo
+isso, com a barra enchendo. Num terminal a tecla de sair mora ao lado da de
+fechar painel, e o preço de um deslize é toda sessão que estava rodando. Pelo
+menu, Quit encerra na hora.
+
 ## Teclas que o Mac já tem
 
 `Cmd-Backspace`, `Cmd-Delete`, `Cmd-←` e `Cmd-→` fazem num shell o que fazem em

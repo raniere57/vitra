@@ -23,6 +23,8 @@ enum MainMenu {
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Settings…", action: #selector(AppDelegate.showPreferences(_:)), keyEquivalent: ",")
         appMenu.addItem(.separator())
+        // The key equivalent is still ⌘Q, and still shown as one: what answers
+        // it is HoldToQuit, which asks for the second the shells are worth.
         appMenu.addItem(withTitle: "Quit Vitra", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)

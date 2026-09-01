@@ -103,15 +103,17 @@ enum SelfCapture {
                     isARepeat: false,
                     keyCode: code
                 ) else { return }
-                // A Command chord belongs to the menu, which is what turns it
-                // into an action; anything else goes straight to the pane.
-                if flags.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
                 // "post+53" goes through the application's own event stream,
-                // which is the only way to reach an event monitor.
+                // which is the only way to reach an event monitor — and the
+                // only way to exercise a key a monitor answers before the menu
+                // ever sees it.
                 if parts.contains("post") {
                     NSApp.postEvent(event, atStart: true)
                     return
                 }
+                // A Command chord belongs to the menu, which is what turns it
+                // into an action; anything else goes straight to the pane.
+                if flags.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
                 let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible })
                 (window?.firstResponder as? TerminalView)?.keyDown(with: event)
             }

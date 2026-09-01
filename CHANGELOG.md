@@ -5,6 +5,13 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+- `Cmd-Q` agora precisa ser **segurado** por um segundo, com uma placa na tela
+  dizendo isso e uma barra enchendo — como no Chrome. Num terminal, a tecla de
+  sair fica ao lado da de fechar painel, e um deslize levava quatro shells
+  junto. Um toque não fecha mais nada: mostra a placa e ela some sozinha. O item
+  do menu continua fechando na hora, porque escolher Quit com o ponteiro é
+  deliberado.
+
 - Clicar numa sessão na barra lateral abre um **painel novo** ao lado, com
   aquela sessão, em vez de tomar o painel que está com o teclado. A conversa em
   que você já estava continua lá, e você fecha quando quiser.
