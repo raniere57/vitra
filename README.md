@@ -278,6 +278,14 @@ Claude Code, vim, less — nada é digitado nele: o tty diz quem segura o termin
 e a lista se move sozinha. A mesma regra decide o que uma pasta na barra lateral
 esquerda faz: `cd` num painel livre, aba nova num ocupado.
 
+## Um painel sozinho
+
+Com o ponteiro sobre um painel, dois botões aparecem no canto: o × fecha, e o de
+setas dá a janela inteira àquele terminal. `Esc` traz os outros de volta, no
+mesmo divisor de antes. Os painéis escondidos não são espremidos — são
+escondidos —, então nada reflui as linhas que segura por uma visão que ninguém
+está lendo.
+
 ## Links
 
 O botão de globo na barra de título, `Cmd-Shift-B` ou **View → Browser** abrem

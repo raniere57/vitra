@@ -34,6 +34,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// The width the panes had before the panel took the whole window, and the
     /// monitor that watches for the Escape that gives it back.
     private var panelRestoreWidth: CGFloat?
+    /// The pane holding the window on its own, and what it hid to get there.
+    private var maximizedPane: TerminalView?
+    private var hiddenForMaximize: [NSView] = []
+    /// How the splits above the maximised pane were divided, as fractions, so
+    /// coming back does not redistribute the window.
+    private var maximizeProportions: [(split: NSSplitView, fractions: [CGFloat])] = []
+    private var paneEscapeMonitor: Any?
     private var panelEscapeMonitor: Any?
 
     /// The window's permanent content view.
@@ -693,6 +700,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             guard let pane else { return }
             self?.close(pane)
         }
+        pane.onToggleMaximized = { [weak self, weak pane] in
+            guard let pane else { return }
+            self?.toggleMaximized(pane)
+        }
         session.onCommandStarted = { [weak pane] in
             pane?.commandStarted()
         }
@@ -814,6 +825,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             place(window.root, in: built)
             self.window?.makeFirstResponder(panes.first)
         }
+        syncMaximizeButtons()
 
         if window.sidebar.expanded {
             // "sessions" is what the old layouts called Claude Code's list.
@@ -881,6 +893,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     /// Splits the focused pane, side by side or stacked.
     func splitFocusedPane(vertical: Bool) {
+        restorePanes()
         guard let window, let pane = focusedPane else { return }
 
         // Where the pane sits has to be recorded before it is detached:
@@ -931,10 +944,88 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         )
         window.makeFirstResponder(newPane)
         refreshFocusIndicators()
+        syncMaximizeButtons()
+    }
+
+    /// Gives one pane the whole window, or gives the others their space back.
+    ///
+    /// The siblings are hidden rather than squeezed, for the same reason the
+    /// preview panel hides them: a pane resized to a sliver reflows every line
+    /// it holds, twice, for a view nobody is reading.
+    func toggleMaximized(_ pane: TerminalView) {
+        maximizedPane == nil ? maximize(pane) : restorePanes()
+    }
+
+    private func maximize(_ pane: TerminalView) {
+        guard maximizedPane == nil, panes.count > 1 else { return }
+        var child: NSView = pane
+        while let split = child.superview as? NSSplitView {
+            maximizeProportions.append((split, fractions(of: split)))
+            for sibling in split.arrangedSubviews where sibling !== child && !sibling.isHidden {
+                sibling.isHidden = true
+                hiddenForMaximize.append(sibling)
+            }
+            split.adjustSubviews()
+            child = split
+        }
+        maximizedPane = pane
+        pane.isMaximized = true
+        // Escape reaches this before anything in the pane sees it, which is
+        // what makes the way back the same key everywhere in this app.
+        paneEscapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return event }
+            self?.restorePanes()
+            return nil
+        }
+        window?.makeFirstResponder(pane)
+    }
+
+    private func restorePanes() {
+        guard let pane = maximizedPane else { return }
+        if let monitor = paneEscapeMonitor {
+            NSEvent.removeMonitor(monitor)
+            paneEscapeMonitor = nil
+        }
+        hiddenForMaximize.forEach { $0.isHidden = false }
+        hiddenForMaximize = []
+        maximizedPane = nil
+        pane.isMaximized = false
+
+        // Outermost first: a divider set in a split that is itself about to be
+        // resized ends up somewhere else.
+        for (split, fractions) in maximizeProportions.reversed() {
+            split.adjustSubviews()
+            split.layoutSubtreeIfNeeded()
+            let total = split.isVertical ? split.bounds.width : split.bounds.height
+            var offset: CGFloat = 0
+            for (index, fraction) in fractions.dropLast().enumerated() {
+                offset += fraction * total
+                split.setPosition(offset, ofDividerAt: index)
+                offset += split.dividerThickness
+            }
+        }
+        maximizeProportions = []
+        panes.forEach { $0.becameVisible() }
+        window?.makeFirstResponder(pane)
+    }
+
+    /// How a split's panes divide it, as fractions of its length.
+    private func fractions(of split: NSSplitView) -> [CGFloat] {
+        let sizes = split.arrangedSubviews.map { split.isVertical ? $0.frame.width : $0.frame.height }
+        let total = max(sizes.reduce(0, +), 1)
+        return sizes.map { $0 / total }
+    }
+
+    /// Only a window with something to hide offers the button.
+    private func syncMaximizeButtons() {
+        panes.forEach { $0.canMaximize = panes.count > 1 }
     }
 
     /// Removes a pane and collapses any split that is left with a single child.
     func close(_ pane: TerminalView) {
+        // A window rearranged while one pane holds it would leave hidden views
+        // nobody is tracking any more.
+        restorePanes()
         panes.removeAll { $0 === pane }
         pane.prepareForRemoval()
         refreshFocusIndicators()
@@ -969,6 +1060,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         }
 
         window.makeFirstResponder(panes.first { $0.window != nil })
+        syncMaximizeButtons()
     }
 
     // MARK: - Preview panel

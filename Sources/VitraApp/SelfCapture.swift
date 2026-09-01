@@ -180,6 +180,39 @@ enum SelfCapture {
 
         // A click at a point in the window, so behaviour that only a pointer can
         // reach - a link in the grid - can be checked from an automated run.
+        // Hovering, which is the only way to reach a control that is hidden
+        // until the pointer is over its pane: the corner buttons.
+        if let point = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_HOVER"] {
+            let parts = point.split(separator: ",").compactMap { Double($0) }
+            if parts.count >= 2 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.65) {
+                    guard let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible })
+                    else { return }
+                    let location = NSPoint(x: parts[0], y: parts[1])
+                    guard let pane = window.contentView?.hitTest(location) as? TerminalView,
+                          // `mouseEvent(with:)` refuses to build an entered
+                          // event; a moved one carries the same fields.
+                          let event = NSEvent.mouseEvent(
+                              with: .mouseMoved,
+                              location: location,
+                              modifierFlags: [],
+                              timestamp: ProcessInfo.processInfo.systemUptime,
+                              windowNumber: window.windowNumber,
+                              context: nil,
+                              eventNumber: 0,
+                              clickCount: 0,
+                              pressure: 0
+                          )
+                    else {
+                        FileHandle.standardError.write(Data("[self-shot] no pane at \(parts)\n".utf8))
+                        return
+                    }
+                    pane.mouseEntered(with: event)
+                    FileHandle.standardError.write(Data("[self-shot] hovered \(location)\n".utf8))
+                }
+            }
+        }
+
         if let point = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_CLICK"] {
             let parts = point.split(separator: ",").compactMap { Double($0) }
             if parts.count >= 2 {

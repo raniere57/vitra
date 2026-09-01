@@ -59,10 +59,32 @@ final class TerminalView: NSView, NSMenuItemValidation {
     /// One rail per command, drawn in the left padding.
     private let blockGutter = CommandBlockView()
     private let scrollIndicator = ScrollIndicator()
-    private let closeButton = PaneCloseButton()
+    private let closeButton = PaneCornerButton(kind: .close)
+    private let zoomButton = PaneCornerButton(kind: .zoom)
 
     /// The pane was asked to close from its own corner.
     var onClose: (() -> Void)?
+
+    /// The pane was asked for, or asked to give back, the whole window.
+    var onToggleMaximized: (() -> Void)?
+
+    /// Whether the corner offers the zoom button at all: one pane in a window
+    /// already has the whole window.
+    var canMaximize = false {
+        didSet {
+            guard canMaximize != oldValue else { return }
+            // The pointer may already be in the pane — splitting it is how it
+            // got a sibling — so the button appears without waiting for the
+            // mouse to leave and come back.
+            zoomButton.isHidden = !canMaximize || closeButton.isHidden
+        }
+    }
+
+    /// Whether this pane currently holds the window on its own.
+    var isMaximized: Bool {
+        get { zoomButton.isOn }
+        set { zoomButton.isOn = newValue }
+    }
     private var showsCommandBlocks = true
 
     /// How commands ended, newest first, as the shell reported them.
@@ -152,8 +174,10 @@ final class TerminalView: NSView, NSMenuItemValidation {
         scrollIndicator.autoresizingMask = [.width, .height]
         scrollIndicator.isHidden = true
         addSubview(scrollIndicator)
-        closeButton.onClose = { [weak self] in self?.onClose?() }
+        closeButton.onClick = { [weak self] in self?.onClose?() }
         addSubview(closeButton)
+        zoomButton.onClick = { [weak self] in self?.onToggleMaximized?() }
+        addSubview(zoomButton)
 
         focusBar.wantsLayer = true
         focusBar.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor
@@ -331,12 +355,13 @@ final class TerminalView: NSView, NSMenuItemValidation {
     private func updateCommandBlocks() {
         scrollIndicator.frame = bounds
         closeButton.frame = NSRect(
-            x: bounds.maxX - PaneCloseButton.size - PaneCloseButton.margin,
+            x: bounds.maxX - PaneCornerButton.size - PaneCornerButton.margin,
             // The view is flipped, so the top of the pane is the low y.
-            y: bounds.minY + PaneCloseButton.margin,
-            width: PaneCloseButton.size,
-            height: PaneCloseButton.size
+            y: bounds.minY + PaneCornerButton.margin,
+            width: PaneCornerButton.size,
+            height: PaneCornerButton.size
         )
+        zoomButton.frame = closeButton.frame.offsetBy(dx: -(PaneCornerButton.size + 4), dy: 0)
         scrollIndicator.update(snapshot.scroll)
         guard showsCommandBlocks else { return }
         blockGutter.frame = bounds
@@ -662,11 +687,13 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     override func mouseEntered(with event: NSEvent) {
         closeButton.isHidden = false
+        zoomButton.isHidden = !canMaximize
     }
 
     override func mouseExited(with event: NSEvent) {
         NSCursor.arrow.set()
         closeButton.isHidden = true
+        zoomButton.isHidden = true
     }
 
     /// What the viewport is doing right now, for a measured run to print.

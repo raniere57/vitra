@@ -5,6 +5,12 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+- Um painel pode tomar a janela inteira: ao lado do × que aparece com o
+  ponteiro, um segundo botão dá a janela toda àquele terminal, e `Esc` devolve
+  os outros — com o divisor de volta onde estava, e não redistribuído. Os
+  painéis escondidos param de desenhar enquanto estão fora, como já acontece
+  com o painel de visualização maximizado.
+
 - **opencode** ao lado do Claude Code. `Opt-Cmd-O`, ou o terceiro botão da barra
   de título, abre uma barra lateral com as sessões do opencode — lidas do banco
   SQLite dele, só para leitura, sem sub-sessões de subagentes — e clicar numa
