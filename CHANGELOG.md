@@ -11,6 +11,9 @@ As datas são o dia em que a imagem de disco foi construída.
   quantos terminais cada uma tem — e a escolhida recebe **todos os terminais
   desta aba**, cada um contra o lado mais comprido do painel onde cai. A aba
   esvaziada fecha.
+- Os botões da barra de título **acendem sob o ponteiro** — uma placa fraca, e
+  mais forte ainda na que está aberta. Ícone pequeno sem rótulo e sem reação ao
+  mouse é decoração, não controle.
 - Era o que arrastar uma aba sobre a outra deveria fazer e nunca fez: aquele
   gesto pertence à barra de abas do sistema, que só reordena a fila.
 

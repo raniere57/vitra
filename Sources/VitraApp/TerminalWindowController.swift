@@ -52,7 +52,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     private var config: Config
 
     /// The title bar button that opens and closes the preview panel.
-    private let panelButton = NSButton()
+    private let panelButton = TitleBarButton()
 
     /// The folder this window was opened for, if it came from a favourite.
     ///
@@ -75,9 +75,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     private let sidebar = FolderSidebar()
     private var sidebarSplit: NSSplitView?
     /// The title bar buttons that open the sidebar on folders and on sessions.
-    private let sidebarButton = NSButton()
-    private let sessionsButton = NSButton()
-    private let openCodeButton = NSButton()
+    private let sidebarButton = TitleBarButton()
+    private let sessionsButton = TitleBarButton()
+    private let openCodeButton = TitleBarButton()
 
     /// Everything right of the rail: the panes, and the panel when it is open.
     private let bodyView = NSView()
@@ -418,7 +418,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     private func syncSidebarButton() {
         let open = sidebar.isExpanded ? sidebar.mode : nil
-        let states: [(NSButton, Bool)] = [
+        let states: [(TitleBarButton, Bool)] = [
             (sidebarButton, open == .folders),
             (sessionsButton, open == .sessions(.claudeCode)),
             (openCodeButton, open == .sessions(.openCode)),
@@ -432,12 +432,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         }
     }
 
-    private func tint(_ button: NSButton, on: Bool) {
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 6
-        button.layer?.backgroundColor = on
-            ? NSColor.controlAccentColor.withAlphaComponent(0.20).cgColor
-            : NSColor.clear.cgColor
+    private func tint(_ button: TitleBarButton, on: Bool) {
+        button.isLit = on
     }
 
     /// A folder was chosen in the sidebar or the file list.
@@ -611,9 +607,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         symbol: String,
         tooltip: String,
         action: Selector,
-        button: NSButton = NSButton(),
+        button: TitleBarButton = TitleBarButton(),
         toggles: Bool = false
-    ) -> NSButton {
+    ) -> TitleBarButton {
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .regular))
         return makeIconButton(
@@ -631,9 +627,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         image: NSImage?,
         tooltip: String,
         action: Selector,
-        button: NSButton = NSButton(),
+        button: TitleBarButton = TitleBarButton(),
         toggles: Bool = false
-    ) -> NSButton {
+    ) -> TitleBarButton {
         button.image = image
         button.image?.accessibilityDescription = tooltip
         button.bezelStyle = .texturedRounded

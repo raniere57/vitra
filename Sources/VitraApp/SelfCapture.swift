@@ -214,7 +214,12 @@ enum SelfCapture {
                     guard let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible })
                     else { return }
                     let location = NSPoint(x: parts[0], y: parts[1])
-                    guard let pane = window.contentView?.hitTest(location) as? TerminalView,
+                    // The title bar is not in the content view's tree, so the
+                    // whole window is searched: hovering a button up there is
+                    // as much a thing to measure as hovering a pane.
+                    let hit = window.contentView?.hitTest(location)
+                        ?? window.contentView?.superview?.hitTest(location)
+                    guard let target = hit,
                           // `mouseEvent(with:)` refuses to build an entered
                           // event; a moved one carries the same fields.
                           let event = NSEvent.mouseEvent(
@@ -229,10 +234,13 @@ enum SelfCapture {
                               pressure: 0
                           )
                     else {
-                        FileHandle.standardError.write(Data("[self-shot] no pane at \(parts)\n".utf8))
+                        FileHandle.standardError.write(Data("[self-shot] nothing at \(parts)\n".utf8))
                         return
                     }
-                    pane.mouseEntered(with: event)
+                    target.mouseEntered(with: event)
+                    FileHandle.standardError.write(
+                        Data("[self-shot] hover: \(type(of: target))\n".utf8)
+                    )
                     FileHandle.standardError.write(Data("[self-shot] hovered \(location)\n".utf8))
                 }
             }
