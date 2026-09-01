@@ -27,6 +27,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var frontController: TerminalWindowController? { currentController }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // One GUI, always. A `vitra mcp` helper that cannot reach the socket
+        // launches the app; if the app was already up but slow to answer, that
+        // second copy would run windowless and quietly take the tools over,
+        // which is exactly the browser opening where nobody can see it. A live
+        // socket owner means this process is the spare — step aside for it.
+        if SocketProbe.anotherInstanceIsServing() {
+            NSApp.terminate(nil)
+            return
+        }
+
         guard let device = MTLCreateSystemDefaultDevice() else {
             fail("Vitra needs a Metal-capable GPU.")
             return
@@ -412,6 +422,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func closePane(_ sender: Any?) {
         guard let controller = currentController else { return }
         controller.closeFocusedPane()
+    }
+
+    /// Brings the app and a window to the front, for a tool call that has
+    /// something to show: the agent's browser is no use in a process the user
+    /// is not looking at, and an MCP call arrives with the app in the back.
+    func surface() {
+        NSApp.activate(ignoringOtherApps: true)
+        (currentController?.window ?? windows.last?.window)?.makeKeyAndOrderFront(nil)
     }
 
     /// The window a command should act on.

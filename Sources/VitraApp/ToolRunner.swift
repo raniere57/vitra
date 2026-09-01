@@ -111,6 +111,12 @@ final class ToolRunner {
         guard let controller = app.frontController else {
             throw ToolError("Vitra has no window open")
         }
+        // A tool call arrives with the app in the back, often on another Space.
+        // Whatever it is about — a page, a file — is for the user to see, so the
+        // window comes forward with it. Without this the browser opens in a
+        // window nobody is looking at, which reads as "the agent says it opened
+        // but nothing is here".
+        app.surface()
         return controller
     }
 

@@ -5,6 +5,17 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Uma GUI só, e sempre à vista
+
+- O Vitra passou a ser **instância única**. Um helper `vitra mcp` que não
+  alcança o socket abre o app; se o app já estava de pé mas lento pra responder,
+  aquela segunda cópia rodava sem janela e tomava as ferramentas pra si — era o
+  browser abrindo num processo que ninguém via. Agora a cópia extra detecta o
+  dono vivo do socket e sai.
+- Toda chamada de ferramenta **traz o app e a janela pra frente**. O browser de
+  um agente não serve numa janela que está atrás, noutra Space; agora ela sobe
+  junto com o que foi aberto.
+
 ### O Claude Code volta para a tela principal
 
 - Versões recentes do Claude Code desenham a conversa na **tela alternativa**,
