@@ -119,13 +119,16 @@ enum SelfCapture {
             }
         }
 
-        if let keys = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_KEYS"] {
+        // The same typing, after the click: a key pressed over a selection is
+        // the whole of what "type over the selected word" means.
+        for (name, fraction) in [("VITRA_SELF_SHOT_KEYS", 0.5), ("VITRA_SELF_SHOT_KEYS_LATE", 0.9)] {
+        if let keys = ProcessInfo.processInfo.environment[name] {
             // One key every 150ms rather than a burst inside one runloop turn:
             // a person types with gaps, and a frame that only ever lands after
             // the last key would hide exactly the bug this measures.
             let gap = 0.15
             for (index, character) in keys.enumerated() {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.5 + Double(index) * gap) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay * fraction + Double(index) * gap) {
                     let text = String(character)
                     guard let event = NSEvent.keyEvent(
                         with: .keyDown,
@@ -153,6 +156,7 @@ enum SelfCapture {
                     }
                 }
             }
+        }
         }
 
         // Text typed into the focused pane before the shot, so terminal

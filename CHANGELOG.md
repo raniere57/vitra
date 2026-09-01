@@ -5,6 +5,16 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Digitar por cima da palavra selecionada
+
+- **Duplo clique numa palavra da linha que você está digitando e digite**: a
+  palavra é substituída, e `backspace` a apaga. O terminal move o cursor do
+  próprio programa com setas e apaga com backspaces, que é a única linguagem que
+  ele entende — seleção de terminal é marcação de células, o programa do outro
+  lado nunca soube dela.
+- Vale só para a linha do cursor, na tela viva e fora da tela alternativa: uma
+  palavra selecionada no histórico não é texto que alguém está editando.
+
 ### Painéis que se reorganizam
 
 - **Arrastar um painel para cima de outro escolhe o lado.** A metade do painel

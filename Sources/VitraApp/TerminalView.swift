@@ -1142,6 +1142,18 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     override func keyDown(with event: NSEvent) {
         if scrolled(by: event) { return }
 
+        // A word selected on the line being typed is replaced by what comes
+        // next, the way it is in every other text field.
+        if let edit = selectionEdit(for: event) {
+            apply(edit)
+            if event.keyCode == Self.backspaceKeyCode {
+                // The selection *was* the deletion; passing the key on as well
+                // would take the character before it too.
+                session.clearSelection()
+                return
+            }
+        }
+
         // Command belongs to the app, not the terminal: it drives the menu.
         if event.modifierFlags.contains(.command) {
             let others: NSEvent.ModifierFlags = [.option, .control, .shift]
@@ -1172,6 +1184,77 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         // cares about whatever was selected.
         session.scrollToBottom()
         session.clearSelection()
+    }
+
+    /// The backspace key, by keycode.
+    private static let backspaceKeyCode: UInt16 = 0x33
+    private static let leftArrowKeyCode: UInt16 = 0x7B
+    private static let rightArrowKeyCode: UInt16 = 0x7C
+
+    /// The keystrokes that would delete the selection out of the program's own
+    /// line, when there is a selection on the line being typed and a key that
+    /// means to replace it.
+    private func selectionEdit(for event: NSEvent) -> SelectionEdit? {
+        guard replacesSelection(event),
+              // The alternate screen is a program drawing its own window: what
+              // is selected there is not a line anyone is editing.
+              !snapshot.isAlternateScreen,
+              snapshot.scroll.isAtBottom,
+              let cursor = snapshot.cursor,
+              let span = selectedSpan(),
+              span.row == Int(cursor.row)
+        else { return nil }
+        return SelectionEdit.replacing(
+            selectionRow: span.row,
+            start: span.start,
+            end: span.end,
+            cursorRow: Int(cursor.row),
+            cursorColumn: Int(cursor.column)
+        )
+    }
+
+    /// Whether this keystroke is one that would type over a selection: text, or
+    /// the backspace that deletes it.
+    private func replacesSelection(_ event: NSEvent) -> Bool {
+        if event.keyCode == Self.backspaceKeyCode {
+            return event.modifierFlags.isDisjoint(with: [.command, .control, .option])
+        }
+        guard event.modifierFlags.isDisjoint(with: [.command, .control]),
+              let characters = event.characters, !characters.isEmpty
+        else { return false }
+        // Control characters — return, tab, escape — mean something to the
+        // program that has nothing to do with what is selected.
+        return characters.unicodeScalars.allSatisfy { $0.value >= 0x20 && $0.value != 0x7F }
+    }
+
+    /// The selected cells, when they are all on one row of the viewport.
+    private func selectedSpan() -> (row: Int, start: Int, end: Int)? {
+        var found: (row: Int, start: Int, end: Int)?
+        for row in 0 ..< Int(snapshot.rows) {
+            for column in 0 ..< Int(snapshot.columns) where snapshot[column, row].flags.contains(.selected) {
+                guard var span = found else {
+                    found = (row, column, column)
+                    continue
+                }
+                // A selection reaching a second row is not one word on the line
+                // being typed, and is left to the clipboard.
+                guard span.row == row else { return nil }
+                span.end = column
+                found = span
+            }
+        }
+        return found
+    }
+
+    /// Presses the arrows and backspaces the edit asks for.
+    private func apply(_ edit: SelectionEdit) {
+        let arrow = edit.move < 0 ? Self.leftArrowKeyCode : Self.rightArrowKeyCode
+        for _ in 0 ..< abs(edit.move) {
+            session.send(KeyEvent(keyCode: arrow))
+        }
+        for _ in 0 ..< edit.backspaces {
+            session.send(KeyEvent(keyCode: Self.backspaceKeyCode))
+        }
     }
 
     override func flagsChanged(with event: NSEvent) {
