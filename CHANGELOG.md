@@ -12,8 +12,9 @@ As datas são o dia em que a imagem de disco foi construída.
   próprio programa com setas e apaga com backspaces, que é a única linguagem que
   ele entende — seleção de terminal é marcação de células, o programa do outro
   lado nunca soube dela.
-- Vale só para a linha do cursor, na tela viva e fora da tela alternativa: uma
-  palavra selecionada no histórico não é texto que alguém está editando.
+- Vale só para a linha do cursor, na tela viva — inclusive na tela alternativa,
+  que é onde o Claude Code desenha o prompt dele. Uma palavra selecionada no
+  histórico rolado não é texto que alguém está editando, e ali nada é enviado.
 
 ### Painéis que se reorganizam
 

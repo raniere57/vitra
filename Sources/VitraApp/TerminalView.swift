@@ -1196,9 +1196,9 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// means to replace it.
     private func selectionEdit(for event: NSEvent) -> SelectionEdit? {
         guard replacesSelection(event),
-              // The alternate screen is a program drawing its own window: what
-              // is selected there is not a line anyone is editing.
-              !snapshot.isAlternateScreen,
+              // The alternate screen is not excluded: the agents this terminal
+              // is for draw their prompt there, and their prompt is exactly the
+              // line this is for.
               snapshot.scroll.isAtBottom,
               let cursor = snapshot.cursor,
               let span = selectedSpan(),
