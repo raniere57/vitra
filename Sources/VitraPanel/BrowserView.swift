@@ -336,7 +336,12 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
 
     private func buildWebView() {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
+        // The default store keeps cookies and local storage on disk, in the
+        // app's own WebKit container: a login here outlives the panel closing
+        // and the app restarting, which is the difference between a browser and
+        // a throwaway. The file preview view stays non-persistent — it shows
+        // local files, not sites anyone logs into.
+        configuration.websiteDataStore = .default()
 
         let controller = configuration.userContentController
         controller.add(self, contentWorld: .page, name: "vitraConsole")

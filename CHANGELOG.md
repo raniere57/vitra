@@ -5,6 +5,13 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### O browser lembra os logins
+
+- As sessões e cookies do navegador agora **persistem em disco**, no container
+  WebKit do próprio app: um login sobrevive ao painel fechar e ao app reiniciar,
+  em vez de precisar entrar em tudo de novo toda vez. O painel de preview de
+  arquivos continua sem persistir — ele mostra arquivos locais, não sites.
+
 ### O MCP para de cair no meio do trabalho
 
 - O helper `vitra mcp` atendia **uma requisição por vez, travando**. Uma chamada
