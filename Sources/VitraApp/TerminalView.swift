@@ -832,6 +832,12 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         // with it, which leaves no way to reach the terminal's own scrollback —
         // and no way to select what has already scrolled off.
         if snapshot.mouseTracking, !event.modifierFlags.contains(.shift) {
+            // The program is about to repaint the same cells with different
+            // text, and a selection is a range of cells: left alone it would
+            // sit there highlighting whatever landed under it. Ending it is
+            // the honest answer — Shift on the wheel is how the terminal's own
+            // scrollback is reached, and there a selection does follow its text.
+            session.clearSelection()
             report(wheel: lines, at: cell(for: event))
         } else if snapshot.isAlternateScreen {
             // Up is 126 and Down is 125; the encoder is what knows whether the

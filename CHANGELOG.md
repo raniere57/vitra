@@ -18,6 +18,11 @@ As datas são o dia em que a imagem de disco foi construída.
 - Corrigido: a rolagem durante o arraste só começava quando o ponteiro saía do
   painel — e numa janela que ocupa a tela inteira o ponteiro para na borda e
   nunca sai. Agora ela começa a doze pontos da borda, por dentro.
+- A seleção é desfeita quando a roda é entregue ao programa. Ela marca células,
+  e um programa que rola a própria visão repinta aquelas mesmas células com
+  outro texto — a marca ficava lá, parecendo que a seleção tinha mudado sozinha.
+  No scrollback do terminal (`Shift` + roda) a seleção continua acompanhando o
+  texto dela, como sempre acompanhou.
 - **`Shift` + roda rola o scrollback do terminal** mesmo com um programa que
   pediu o mouse. Dentro do Claude Code a roda é dele, o que deixava o histórico
   do terminal inalcançável — e com ele a seleção do que já rolou para fora.
@@ -27,6 +32,11 @@ As datas são o dia em que a imagem de disco foi construída.
 - Corrigido: a rolagem durante o arraste só começava quando o ponteiro saía do
   painel — e numa janela que ocupa a tela inteira o ponteiro para na borda e
   nunca sai. Agora ela começa a doze pontos da borda, por dentro.
+- A seleção é desfeita quando a roda é entregue ao programa. Ela marca células,
+  e um programa que rola a própria visão repinta aquelas mesmas células com
+  outro texto — a marca ficava lá, parecendo que a seleção tinha mudado sozinha.
+  No scrollback do terminal (`Shift` + roda) a seleção continua acompanhando o
+  texto dela, como sempre acompanhou.
 - **`Shift` + roda rola o scrollback do terminal** mesmo com um programa que
   pediu o mouse. Dentro do Claude Code a roda é dele, o que deixava o histórico
   do terminal inalcançável — e com ele a seleção do que já rolou para fora.
