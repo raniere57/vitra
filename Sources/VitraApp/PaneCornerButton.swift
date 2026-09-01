@@ -14,6 +14,8 @@ final class PaneCornerButton: NSView {
         case close
         /// Gives the pane the whole window, and gives it back.
         case zoom
+        /// Moves the pane out into a tab of its own.
+        case tab
     }
 
     var onClick: (() -> Void)?
@@ -55,6 +57,7 @@ final class PaneCornerButton: NSView {
         switch kind {
         case .close: return "Close this terminal"
         case .zoom: return isOn ? "Back to the other terminals (esc)" : "Give this terminal the window"
+        case .tab: return "Move this terminal to a new tab"
         }
     }
 
@@ -92,6 +95,7 @@ final class PaneCornerButton: NSView {
         switch kind {
         case .close: drawCross(in: plate, ink: ink)
         case .zoom: drawCorners(in: plate, ink: ink)
+        case .tab: drawTab(in: plate, ink: ink)
         }
     }
 
@@ -99,7 +103,7 @@ final class PaneCornerButton: NSView {
         guard hovering else { return NSColor(white: 0.30, alpha: 0.55) }
         switch kind {
         case .close: return NSColor(srgbRed: 0.78, green: 0.28, blue: 0.32, alpha: 0.92)
-        case .zoom: return NSColor(white: 0.45, alpha: 0.92)
+        case .zoom, .tab: return NSColor(white: 0.45, alpha: 0.92)
         }
     }
 
@@ -114,6 +118,37 @@ final class PaneCornerButton: NSView {
         cross.lineCapStyle = .round
         ink.setStroke()
         cross.stroke()
+    }
+
+    /// A pane leaving its window: a box, and an arrow going out of the top.
+    private func drawTab(in plate: NSRect, ink: NSColor) {
+        let box = plate.insetBy(dx: plate.width * 0.28, dy: plate.height * 0.28)
+        ink.setStroke()
+
+        // The box is drawn short of the top-right, where the arrow leaves it.
+        let frame = NSBezierPath(
+            roundedRect: NSRect(
+                x: box.minX,
+                y: box.minY,
+                width: box.width * 0.7,
+                height: box.height * 0.7
+            ),
+            xRadius: 1.5,
+            yRadius: 1.5
+        )
+        frame.lineWidth = 1.3
+        frame.stroke()
+
+        let arrow = NSBezierPath()
+        arrow.move(to: NSPoint(x: box.midX, y: box.midY))
+        arrow.line(to: NSPoint(x: box.maxX, y: box.maxY))
+        arrow.move(to: NSPoint(x: box.maxX - box.width * 0.34, y: box.maxY))
+        arrow.line(to: NSPoint(x: box.maxX, y: box.maxY))
+        arrow.line(to: NSPoint(x: box.maxX, y: box.maxY - box.height * 0.34))
+        arrow.lineWidth = 1.4
+        arrow.lineCapStyle = .round
+        arrow.lineJoinStyle = .round
+        arrow.stroke()
     }
 
     /// Two brackets pointing out to maximise, in to come back: the same shape

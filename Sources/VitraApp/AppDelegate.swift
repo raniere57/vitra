@@ -411,12 +411,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ?? windows.last
     }
 
+    /// Puts a pane another window is giving up into a tab of its own.
+    func openTab(adopting pane: TerminalView, from controller: TerminalWindowController) {
+        makeWindow(asTabOf: controller.window, bookmark: controller.bookmark, adopting: pane)
+    }
+
     private func makeWindow(
         asTabOf sibling: NSWindow?,
         bookmark: Bookmark? = nil,
         running: String? = nil,
         session: String? = nil,
-        restoring: Layout.Window? = nil
+        restoring: Layout.Window? = nil,
+        adopting: TerminalView? = nil
     ) {
         guard let device else { return }
         do {
@@ -427,7 +433,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 command: Self.commandFromArguments(),
                 attachments: attachments,
                 config: config,
-                bookmark: bookmark
+                bookmark: bookmark,
+                adopting: adopting
             )
             windows.append(controller)
 

@@ -5,6 +5,12 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+- Clicar numa sessão na barra lateral abre um **painel novo** ao lado, com
+  aquela sessão, em vez de tomar o painel que está com o teclado. A conversa em
+  que você já estava continua lá, e você fecha quando quiser.
+- Um terceiro botão no canto do painel o leva para uma **aba nova**, com o shell
+  e o scrollback intactos — o painel muda de janela, não é recriado.
+
 - Um painel pode tomar a janela inteira: ao lado do × que aparece com o
   ponteiro, um segundo botão dá a janela toda àquele terminal, e `Esc` devolve
   os outros — com o divisor de volta onde estava, e não redistribuído. Os

@@ -61,6 +61,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
     private let scrollIndicator = ScrollIndicator()
     private let closeButton = PaneCornerButton(kind: .close)
     private let zoomButton = PaneCornerButton(kind: .zoom)
+    private let tabButton = PaneCornerButton(kind: .tab)
 
     /// The pane was asked to close from its own corner.
     var onClose: (() -> Void)?
@@ -68,15 +69,22 @@ final class TerminalView: NSView, NSMenuItemValidation {
     /// The pane was asked for, or asked to give back, the whole window.
     var onToggleMaximized: (() -> Void)?
 
+    /// The pane was asked to leave for a tab of its own.
+    var onMoveToNewTab: (() -> Void)?
+
     /// Whether the corner offers the zoom button at all: one pane in a window
     /// already has the whole window.
-    var canMaximize = false {
+    /// Whether the corner offers the arrange buttons at all: one pane in a
+    /// window already has the window, and already is the tab.
+    var canRearrange = false {
         didSet {
-            guard canMaximize != oldValue else { return }
+            guard canRearrange != oldValue else { return }
             // The pointer may already be in the pane — splitting it is how it
-            // got a sibling — so the button appears without waiting for the
+            // got a sibling — so the buttons appear without waiting for the
             // mouse to leave and come back.
-            zoomButton.isHidden = !canMaximize || closeButton.isHidden
+            let hidden = !canRearrange || closeButton.isHidden
+            zoomButton.isHidden = hidden
+            tabButton.isHidden = hidden
         }
     }
 
@@ -178,6 +186,8 @@ final class TerminalView: NSView, NSMenuItemValidation {
         addSubview(closeButton)
         zoomButton.onClick = { [weak self] in self?.onToggleMaximized?() }
         addSubview(zoomButton)
+        tabButton.onClick = { [weak self] in self?.onMoveToNewTab?() }
+        addSubview(tabButton)
 
         focusBar.wantsLayer = true
         focusBar.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor
@@ -362,6 +372,7 @@ final class TerminalView: NSView, NSMenuItemValidation {
             height: PaneCornerButton.size
         )
         zoomButton.frame = closeButton.frame.offsetBy(dx: -(PaneCornerButton.size + 4), dy: 0)
+        tabButton.frame = zoomButton.frame.offsetBy(dx: -(PaneCornerButton.size + 4), dy: 0)
         scrollIndicator.update(snapshot.scroll)
         guard showsCommandBlocks else { return }
         blockGutter.frame = bounds
@@ -687,13 +698,15 @@ final class TerminalView: NSView, NSMenuItemValidation {
 
     override func mouseEntered(with event: NSEvent) {
         closeButton.isHidden = false
-        zoomButton.isHidden = !canMaximize
+        zoomButton.isHidden = !canRearrange
+        tabButton.isHidden = !canRearrange
     }
 
     override func mouseExited(with event: NSEvent) {
         NSCursor.arrow.set()
         closeButton.isHidden = true
         zoomButton.isHidden = true
+        tabButton.isHidden = true
     }
 
     /// What the viewport is doing right now, for a measured run to print.

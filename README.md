@@ -181,9 +181,10 @@ vãos irregulares entre projetos.
 
 `Opt-Cmd-C`, ou o segundo botão da barra de título, abre a mesma barra lateral
 nas **sessões do Claude Code desta máquina** — o mesmo repositório que a CLI e o
-app desktop compartilham, `~/.claude/projects/`. Clicar numa delas digita
-`cd <projeto> && claude --resume <id>` no painel que está com o teclado, então a
-conversa reabre onde estava, no terminal que você já está olhando. O campo de
+app desktop compartilham, `~/.claude/projects/`. Clicar numa delas abre um painel novo ao lado e digita nele
+`cd <projeto> && claude --resume <id>`, então a conversa reabre onde estava sem
+tomar o painel em que você já estava — a de antes continua rodando, e você fecha
+quando quiser. O campo de
 filtro busca títulos e nomes de projeto.
 
 ### opencode
@@ -280,8 +281,9 @@ esquerda faz: `cd` num painel livre, aba nova num ocupado.
 
 ## Um painel sozinho
 
-Com o ponteiro sobre um painel, dois botões aparecem no canto: o × fecha, e o de
-setas dá a janela inteira àquele terminal. `Esc` traz os outros de volta, no
+Com o ponteiro sobre um painel, três botões aparecem no canto: o × fecha, o de
+setas dá a janela inteira àquele terminal, e o da caixa com a seta o leva para
+uma aba nova — o mesmo shell, o mesmo scrollback, outra aba. `Esc` traz os outros de volta, no
 mesmo divisor de antes. Os painéis escondidos não são espremidos — são
 escondidos —, então nada reflui as linhas que segura por uma visão que ninguém
 está lendo.

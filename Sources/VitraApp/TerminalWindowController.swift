@@ -89,7 +89,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         command: [String]? = nil,
         attachments: AttachmentStore = AttachmentStore(),
         config: Config = Config(),
-        bookmark: Bookmark? = nil
+        bookmark: Bookmark? = nil,
+        /// A pane handed over by another window, instead of a new one.
+        adopting: TerminalView? = nil
     ) throws {
         self.device = device
         self.bookmark = bookmark
@@ -126,7 +128,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
         super.init(window: window)
 
-        let pane = try makePane()
+        let pane = try adopting ?? makePane()
+        if adopting != nil { adopt(pane) }
         rootView.frame = window.contentLayoutRect
         rootView.autoresizingMask = [.width, .height]
         window.contentView = rootView
@@ -355,11 +358,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         sidebar.setCurrentSession(session)
     }
 
+    /// Opens a session in a pane of its own, beside whatever is already here.
+    ///
+    /// Never in the pane that has the keyboard: that pane is usually in a
+    /// session of its own, and taking it over to open a second one loses the
+    /// first. The new pane starts in the session's project, and the old one is
+    /// left running for as long as the user wants it.
     private func openSession(_ session: AgentSession) {
-        // A pane with a program in the foreground reads what it is handed as
-        // input: clicking a session while Claude Code was running typed
-        // `claude --resume ...` into its chat box. That one opens in a tab.
-        guard let pane = focusedPane, !pane.session.isRunningProgram else {
+        guard let pane = splitFocusedPane(vertical: true, in: session.projectPath) else {
             (NSApp.delegate as? AppDelegate)?.openTab(
                 for: Bookmark(
                     name: URL(fileURLWithPath: session.projectPath).lastPathComponent,
@@ -371,9 +377,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             return
         }
         pane.agentSession = session.id
-        pane.session.send(text: session.resumeCommand)
-        window?.makeFirstResponder(pane)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+        // The shell has to be up to read what it is handed, the same hop a new
+        // tab makes.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self, weak pane] in
+            pane?.session.send(text: session.resumeCommand)
             self?.refreshDirectory()
         }
     }
@@ -684,6 +691,20 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         )
         try? pane.apply(config)
 
+        wire(pane)
+
+        // Only now, with every callback installed, is it safe to let output in.
+        session.start()
+        return pane
+    }
+
+    /// Points a pane and its session at this window.
+    ///
+    /// Every callback is set here rather than where the pane is built, because
+    /// a pane can change windows — moved to a tab of its own — and what it
+    /// talks to has to change with it.
+    private func wire(_ pane: TerminalView) {
+        let session = pane.session
         session.onTitleChanged = { [weak self, weak pane] title in
             pane?.recordTitle(title)
             guard let self, let pane, self.focusedPane === pane else { return }
@@ -703,6 +724,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         pane.onToggleMaximized = { [weak self, weak pane] in
             guard let pane else { return }
             self?.toggleMaximized(pane)
+        }
+        pane.onMoveToNewTab = { [weak self, weak pane] in
+            guard let pane else { return }
+            self?.moveToNewTab(pane)
         }
         session.onCommandStarted = { [weak pane] in
             pane?.commandStarted()
@@ -725,10 +750,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         }
 
         panes.append(pane)
-        // Only now, with every callback installed, is it safe to let output in.
-        session.start()
         refreshFocusIndicators()
-        return pane
+    }
+
+    /// Takes over a pane another window built, keeping its shell running.
+    func adopt(_ pane: TerminalView) {
+        wire(pane)
+        try? pane.apply(config)
+        syncMaximizeButtons()
     }
 
     /// Turns the focus border on once a window holds more than one pane.
@@ -892,9 +921,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     }
 
     /// Splits the focused pane, side by side or stacked.
-    func splitFocusedPane(vertical: Bool) {
+    @discardableResult
+    func splitFocusedPane(vertical: Bool, in directory: String? = nil) -> TerminalView? {
         restorePanes()
-        guard let window, let pane = focusedPane else { return }
+        guard let window, let pane = focusedPane else { return nil }
 
         // Where the pane sits has to be recorded before it is detached:
         // removing it from the container clears the relationship, so asking
@@ -902,14 +932,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         let wasRoot = pane.superview === paneContainer
         let parentSplit = pane.superview as? NSSplitView
         let indexInParent = parentSplit?.arrangedSubviews.firstIndex(of: pane)
-        guard wasRoot || (parentSplit != nil && indexInParent != nil) else { return }
+        guard wasRoot || (parentSplit != nil && indexInParent != nil) else { return nil }
 
         let newPane: TerminalView
         do {
-            newPane = try makePane()
+            newPane = try makePane(in: directory)
         } catch {
             NSSound.beep()
-            return
+            return nil
         }
 
         let split = PaneSplitView()
@@ -945,6 +975,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         window.makeFirstResponder(newPane)
         refreshFocusIndicators()
         syncMaximizeButtons()
+        return newPane
     }
 
     /// Gives one pane the whole window, or gives the others their space back.
@@ -1018,22 +1049,45 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     /// Only a window with something to hide offers the button.
     private func syncMaximizeButtons() {
-        panes.forEach { $0.canMaximize = panes.count > 1 }
+        panes.forEach { $0.canRearrange = panes.count > 1 }
     }
 
-    /// Removes a pane and collapses any split that is left with a single child.
+    /// Closes a pane, taking its shell with it.
     func close(_ pane: TerminalView) {
         // A window rearranged while one pane holds it would leave hidden views
         // nobody is tracking any more.
         restorePanes()
-        panes.removeAll { $0 === pane }
         pane.prepareForRemoval()
-        refreshFocusIndicators()
-
-        guard let window, let split = pane.superview as? NSSplitView else {
+        guard remove(pane) else {
             // Last pane in the window: the window goes with it.
             window?.close()
             return
+        }
+        window?.makeFirstResponder(panes.first { $0.window != nil })
+        syncMaximizeButtons()
+    }
+
+    /// Moves a pane into a tab of its own, shell and scrollback intact.
+    func moveToNewTab(_ pane: TerminalView) {
+        // A pane that is the whole tab already is what this would make.
+        guard panes.count > 1 else { return }
+        restorePanes()
+        remove(pane)
+        (NSApp.delegate as? AppDelegate)?.openTab(adopting: pane, from: self)
+        window?.makeFirstResponder(panes.first { $0.window != nil })
+        syncMaximizeButtons()
+    }
+
+    /// Detaches a pane from the split tree, collapsing whatever it leaves
+    /// behind, and leaves it alive. False when it was the window's last one.
+    @discardableResult
+    private func remove(_ pane: TerminalView) -> Bool {
+        panes.removeAll { $0 === pane }
+        refreshFocusIndicators()
+
+        guard let split = pane.superview as? NSSplitView else {
+            pane.removeFromSuperview()
+            return false
         }
 
         // Same ordering care as splitting: read the position first, detach after.
@@ -1043,7 +1097,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         let frame = split.frame
 
         pane.removeFromSuperview()
-        guard let survivor = split.arrangedSubviews.first else { return }
+        guard let survivor = split.arrangedSubviews.first else { return true }
 
         // A split with one child left is just that child.
         survivor.removeFromSuperview()
@@ -1058,9 +1112,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             survivor.frame = paneContainer.bounds
             paneContainer.addSubview(survivor)
         }
-
-        window.makeFirstResponder(panes.first { $0.window != nil })
-        syncMaximizeButtons()
+        return true
     }
 
     // MARK: - Preview panel
