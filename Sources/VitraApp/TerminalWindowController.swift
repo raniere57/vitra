@@ -227,14 +227,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             toggles: true
         )
         makeIconButton(
-            symbol: Harness.claudeCode.symbolName,
+            image: Harness.claudeCode.icon,
             tooltip: "Claude Code sessions (⌥⌘C)",
             action: #selector(toggleSessionsFromButton),
             button: sessionsButton,
             toggles: true
         )
         makeIconButton(
-            symbol: Harness.openCode.symbolName,
+            image: Harness.openCode.icon,
             tooltip: "opencode sessions (⌥⌘O)",
             action: #selector(toggleOpenCodeFromButton),
             button: openCodeButton,
@@ -598,8 +598,28 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         button: NSButton = NSButton(),
         toggles: Bool = false
     ) -> NSButton {
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)?
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .regular))
+        return makeIconButton(
+            image: image,
+            tooltip: tooltip,
+            action: action,
+            button: button,
+            toggles: toggles
+        )
+    }
+
+    /// The same button, for a mark this app draws itself.
+    @discardableResult
+    private func makeIconButton(
+        image: NSImage?,
+        tooltip: String,
+        action: Selector,
+        button: NSButton = NSButton(),
+        toggles: Bool = false
+    ) -> NSButton {
+        button.image = image
+        button.image?.accessibilityDescription = tooltip
         button.bezelStyle = .texturedRounded
         button.isBordered = false
         if toggles { button.setButtonType(.pushOnPushOff) }

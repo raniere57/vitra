@@ -36,13 +36,6 @@ public enum Harness: String, Codable, Sendable, CaseIterable, Identifiable {
         }
     }
 
-    public var symbolName: String {
-        switch self {
-        case .claudeCode: return "clock.arrow.circlepath"
-        case .openCode: return "chevron.left.forwardslash.chevron.right"
-        }
-    }
-
     /// Where this agent keeps its conversations, for the line a sidebar shows
     /// when it has none to list.
     public var storeDescription: String {

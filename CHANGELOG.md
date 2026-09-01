@@ -5,6 +5,13 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Marcas próprias para as duas sidebars
+
+- Os botões do Claude Code e do opencode agora usam **as mesmas duas marcas que
+  as sessões carregam na lista**: a estrela e o losango, desenhados no mesmo
+  peso dos ícones do sistema. O relógio e os sinais de menor/maior que estavam
+  ali não diziam nada sobre o que abriam, nem tinham relação um com o outro.
+
 ### Digitar por cima da palavra selecionada
 
 - **Duplo clique numa palavra da linha que você está digitando e digite**: a
