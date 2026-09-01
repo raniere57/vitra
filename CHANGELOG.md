@@ -5,6 +5,16 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### O MCP para de cair no meio do trabalho
+
+- O helper `vitra mcp` atendia **uma requisição por vez, travando**. Uma chamada
+  demorada — uma página carregando, ou os segundos esperando o app subir —
+  segurava a fila, e o `ping` que o cliente manda de tempos em tempos ficava sem
+  resposta atrás dela: o Claude Code marcava o servidor como morto e você
+  reconectava. Agora cada requisição é atendida por conta própria, a leitura
+  nunca para, e só a escrita na saída é serializada. As respostas carregam o id,
+  então o cliente casa cada uma na ordem que chegar.
+
 ### Uma GUI só, e sempre à vista
 
 - O Vitra passou a ser **instância única**. Um helper `vitra mcp` que não

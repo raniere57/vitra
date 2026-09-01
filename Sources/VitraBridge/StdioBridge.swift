@@ -9,43 +9,47 @@ import Foundation
 public enum StdioBridge {
     public static func run() {
         let server = MCPServer(executor: RemoteExecutor())
+        let out = OutputQueue()
+        let group = DispatchGroup()
 
+        // Requests are handled concurrently, not one at a time. A `tools/call`
+        // can take seconds — a page loading, or the app being launched and
+        // waited on — and while the old loop blocked on it the client's own
+        // `ping` sat unanswered behind it and the connection was dropped as
+        // dead. Reading never stops now; each request answers on its own, and
+        // only the writes are serialised. Replies carry their id, so the client
+        // matches them however they interleave.
         while let line = readLine(strippingNewline: true) {
             guard !line.isEmpty, let data = line.data(using: .utf8) else { continue }
 
             guard let request = try? JSONDecoder().decode(JSONRPC.Request.self, from: data) else {
-                write(JSONRPC.Response(id: nil, code: .parse, message: "malformed request"))
+                out.write(JSONRPC.Response(id: nil, code: .parse, message: "malformed request"))
                 continue
             }
 
-            guard let response = blocking({ await server.handle(request) }) else { continue }
-            write(response)
+            group.enter()
+            Task {
+                defer { group.leave() }
+                if let response = await server.handle(request) { out.write(response) }
+            }
         }
-    }
 
-    /// Runs an async call to completion on this thread.
-    ///
-    /// The loop is deliberately synchronous: one request at a time is exactly
-    /// the concurrency an MCP stdio server needs.
-    private static func blocking<T: Sendable>(_ body: @escaping @Sendable () async -> T) -> T {
-        let box = Box<T>()
-        let semaphore = DispatchSemaphore(value: 0)
-        Task {
-            box.value = await body()
-            semaphore.signal()
+        // stdin closed: let the calls already in flight finish writing before
+        // the process goes, so a reply is never cut off mid-line.
+        group.wait()
+    }
+}
+
+/// Serialises writes to stdout, the one resource the concurrent handlers share.
+private final class OutputQueue: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "dev.vitra.mcp.stdout")
+
+    func write(_ response: JSONRPC.Response) {
+        queue.sync {
+            guard var data = try? JSONRPC.encode(response) else { return }
+            data.append(0x0A)
+            FileHandle.standardOutput.write(data)
         }
-        semaphore.wait()
-        return box.value!
-    }
-
-    private final class Box<T>: @unchecked Sendable {
-        var value: T?
-    }
-
-    private static func write(_ response: JSONRPC.Response) {
-        guard var data = try? JSONRPC.encode(response) else { return }
-        data.append(0x0A)
-        FileHandle.standardOutput.write(data)
     }
 }
 
@@ -84,7 +88,13 @@ struct RemoteExecutor: ToolExecutor {
             params: ["name": .string(tool), "arguments": arguments]
         )
 
-        let response = try Self.send(request)
+        // The socket call is blocking; off the cooperative pool so it never
+        // parks one of its threads for a page that takes its time.
+        let response = try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(with: Result { try Self.send(request) })
+            }
+        }
 
         if let error = response.error { throw ToolError(error.message) }
 
