@@ -295,6 +295,46 @@ enum SelfCapture {
             }
         }
 
+        // "x1,y1,lines,x2,y2": click, scroll, shift-click — the selection made
+        // across a scroll, which no single gesture can exercise.
+        if let select = ProcessInfo.processInfo.environment["VITRA_SELF_SHOT_SELECT"] {
+            let parts = select.split(separator: ",").compactMap { Double($0) }
+            if parts.count >= 5 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.6) {
+                    guard let window = NSApp.keyWindow ?? NSApp.orderedWindows.first(where: { $0.isVisible }),
+                          let pane = window.contentView?.hitTest(NSPoint(x: parts[0], y: parts[1])) as? TerminalView
+                    else {
+                        FileHandle.standardError.write(Data("[self-shot] no pane to select in\n".utf8))
+                        return
+                    }
+                    func click(_ point: NSPoint, shift: Bool) {
+                        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                            guard let event = NSEvent.mouseEvent(
+                                with: type,
+                                location: point,
+                                modifierFlags: shift ? [.shift] : [],
+                                timestamp: ProcessInfo.processInfo.systemUptime,
+                                windowNumber: window.windowNumber,
+                                context: nil,
+                                eventNumber: 0,
+                                clickCount: 1,
+                                pressure: type == .leftMouseDown ? 1 : 0
+                            ) else { continue }
+                            if type == .leftMouseDown { pane.mouseDown(with: event) } else { pane.mouseUp(with: event) }
+                        }
+                    }
+                    click(NSPoint(x: parts[0], y: parts[1]), shift: false)
+                    pane.session.scroll(lines: Int(parts[2]))
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        click(NSPoint(x: parts[3], y: parts[4]), shift: true)
+                        FileHandle.standardError.write(Data(
+                            "[self-shot] selected across \(Int(parts[2])) lines\n".utf8
+                        ))
+                    }
+                }
+            }
+        }
+
         // Scrollback moved before the shot: a wheel gesture cannot be faked from
         // a headless run, and scrolling is the one behaviour a screenshot of the
         // live screen can never show.

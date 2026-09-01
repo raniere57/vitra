@@ -706,7 +706,19 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// held selection extends it rather than moving it.
     private func updateAutoScroll(for event: NSEvent, rectangle: Bool) {
         let point = convert(event.locationInWindow, from: nil)
-        let beyond = point.y < 0 ? point.y : (point.y > bounds.height ? point.y - bounds.height : 0)
+        // A margin inside the pane as well as outside it: on a window that
+        // fills the screen the pointer is stopped at the edge, so a drag that
+        // wants more scrollback can never actually leave the pane, and waiting
+        // for it to leave means waiting forever.
+        let margin = TerminalView.autoScrollMargin
+        let beyond: CGFloat
+        if point.y < margin {
+            beyond = point.y - margin
+        } else if point.y > bounds.height - margin {
+            beyond = point.y - (bounds.height - margin)
+        } else {
+            beyond = 0
+        }
         guard beyond != 0 else {
             stopAutoScroll()
             return
@@ -815,7 +827,11 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
                 "[wheel] lines=\(lines) mouse=\(snapshot.mouseTracking) alt=\(snapshot.isAlternateScreen)\n".utf8
             ))
         }
-        if snapshot.mouseTracking {
+        // Shift takes the wheel back from the program. Claude Code and every
+        // other full-screen tool ask for the mouse and scroll their own view
+        // with it, which leaves no way to reach the terminal's own scrollback —
+        // and no way to select what has already scrolled off.
+        if snapshot.mouseTracking, !event.modifierFlags.contains(.shift) {
             report(wheel: lines, at: cell(for: event))
         } else if snapshot.isAlternateScreen {
             // Up is 126 and Down is 125; the encoder is what knows whether the
@@ -863,6 +879,8 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     private var autoScrollTimer: Timer?
     /// Fast enough to cross a long transcript, slow enough to stop on a line.
     private static let autoScrollMaxLines = 6
+    /// How far inside the edge a held drag starts pulling the viewport.
+    private static let autoScrollMargin: CGFloat = 12
     private var linkTracking: NSTrackingArea?
 
     // MARK: - Clipboard

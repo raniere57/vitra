@@ -311,13 +311,21 @@ tela rola sozinha enquanto a seleção cresce — mais rápido quanto mais longe
 borda. Sem arrastar: clique onde a seleção começa, role até onde ela termina
 (roda, trackpad ou `Shift-PageUp`) e **shift-clique** ali. `Cmd-C` copia.
 
+Dentro de um programa que pediu o mouse — Claude Code, vim, less — a roda é
+dele. `Shift` + roda a devolve ao terminal, e é assim que se alcança (e se
+seleciona) o que já rolou para fora da tela dentro do Claude Code.
+
 ## Seleção
 
-Arrastar seleciona; segurar o arraste além da borda de cima ou de baixo rola a
+Arrastar seleciona; segurar o arraste junto da borda de cima ou de baixo rola a
 tela e a seleção continua junto, mais rápido quanto mais longe do painel. Para
 um trecho bem maior que a tela há o caminho sem segurar nada: clique no começo,
 role com a roda, e **shift-clique** no fim — a seleção se estende de onde
 começou. `Cmd-C` copia.
+
+Dentro de um programa que pediu o mouse — Claude Code, vim, less — a roda é
+dele. `Shift` + roda a devolve ao terminal, e é assim que se alcança (e se
+seleciona) o que já rolou para fora da tela dentro do Claude Code.
 
 ## Sair
 

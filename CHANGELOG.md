@@ -15,9 +15,21 @@ As datas são o dia em que a imagem de disco foi construída.
 - Clicar numa sessão na barra lateral abre um **painel novo** ao lado, com
   aquela sessão, em vez de tomar o painel que está com o teclado. A conversa em
   que você já estava continua lá, e você fecha quando quiser.
+- Corrigido: a rolagem durante o arraste só começava quando o ponteiro saía do
+  painel — e numa janela que ocupa a tela inteira o ponteiro para na borda e
+  nunca sai. Agora ela começa a doze pontos da borda, por dentro.
+- **`Shift` + roda rola o scrollback do terminal** mesmo com um programa que
+  pediu o mouse. Dentro do Claude Code a roda é dele, o que deixava o histórico
+  do terminal inalcançável — e com ele a seleção do que já rolou para fora.
 - **Shift-clique estende a seleção**: clique onde começa, role à vontade (roda,
   trackpad, `Shift-PageUp`), shift-clique onde termina. É o caminho sem arrastar
   para copiar algo mais longo que a tela.
+- Corrigido: a rolagem durante o arraste só começava quando o ponteiro saía do
+  painel — e numa janela que ocupa a tela inteira o ponteiro para na borda e
+  nunca sai. Agora ela começa a doze pontos da borda, por dentro.
+- **`Shift` + roda rola o scrollback do terminal** mesmo com um programa que
+  pediu o mouse. Dentro do Claude Code a roda é dele, o que deixava o histórico
+  do terminal inalcançável — e com ele a seleção do que já rolou para fora.
 - **Shift-clique estende a seleção** a partir de onde ela começou, mesmo depois
   de rolar a tela: clique no começo, role com a roda, shift-clique no fim. É o
   caminho para copiar um trecho maior que o painel sem segurar o botão.
