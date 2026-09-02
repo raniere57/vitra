@@ -21,8 +21,25 @@ public final class PreviewPanel: NSView {
     private let backButton = NSButton()
     private var titleLeading: NSLayoutConstraint?
     private var titleAfterBack: NSLayoutConstraint?
-    /// The directory the file list is on, kept so `Back` has somewhere to go.
+    /// The directory the file list is on, kept so `Back` has somewhere to go
+    /// when nothing was browsed to yet — a file the agent opened first thing.
     private var listedDirectory: URL?
+
+    /// Where the panel has been: folders browsed and files opened, in order.
+    /// `Back` walks this, so it returns to the folder you were actually in,
+    /// not to wherever the shell happens to be.
+    private enum Stop: Equatable {
+        case files(URL)
+        case file(PreviewTarget)
+    }
+    private var history: [Stop] = []
+    /// What is on screen, when it is one of the stops. Nil for the browser.
+    private var current: Stop?
+    private static let historyLimit = 50
+
+    private let revealButton = NSButton()
+    private let openButton = NSButton()
+    private let copyPathButton = NSButton()
     private let contentContainer = NSView()
     private var content: (any PreviewContentView)?
     private var emptyState: NSView?
@@ -43,10 +60,16 @@ public final class PreviewPanel: NSView {
 
     /// Shows `target`, replacing whatever was there.
     public func show(_ target: PreviewTarget) {
+        record(.file(target))
+        present(target)
+    }
+
+    private func present(_ target: PreviewTarget) {
         // Keeping the directory is what leaves a way back: opening a file from
         // the list must not throw the list away.
         clearContent(keepingDirectory: true)
         self.target = target
+        current = .file(target)
 
         titleLabel.stringValue = target.displayName
         detailLabel.stringValue = Self.detail(for: target)
@@ -74,7 +97,13 @@ public final class PreviewPanel: NSView {
     /// This is the panel's resting state once a terminal is open: the files of
     /// the folder that terminal is in, one click from being previewed.
     public func showFiles(in directory: URL) {
+        record(.files(directory))
+        present(directory)
+    }
+
+    private func present(_ directory: URL) {
         listedDirectory = directory
+        current = .files(directory)
 
         if let list = content as? FileListView {
             list.show(directory)
@@ -117,8 +146,28 @@ public final class PreviewPanel: NSView {
     /// list, and it should still leave the panel one click from the folder the
     /// terminal is in.
     public func rememberDirectory(_ directory: URL) {
+        // Only when nothing has been browsed to: the shell moving on is no
+        // reason to forget the folder the user dug down to.
+        guard listedDirectory == nil else { return }
         listedDirectory = directory
         syncBackButton()
+    }
+
+    private func record(_ stop: Stop) {
+        guard history.last != stop else { return }
+        history.append(stop)
+        if history.count > Self.historyLimit { history.removeFirst() }
+    }
+
+    /// The stop `Back` would go to, or nil when there is none.
+    private var previousStop: Stop? {
+        var stops = history
+        if let current, stops.last == current { stops.removeLast() }
+        if let last = stops.last { return last }
+        // Nothing browsed, but a folder to fall back on — unless it is what is
+        // already on screen.
+        if let listedDirectory, !(content is FileListView) { return .files(listedDirectory) }
+        return nil
     }
 
     /// Re-reads the listed directory, for after a command that touched it.
@@ -141,15 +190,52 @@ public final class PreviewPanel: NSView {
 
     /// The arrow back to the file list, shown only when there is one to go to.
     private func syncBackButton() {
-        let showsBack = listedDirectory != nil && !(content is FileListView)
+        let showsBack = previousStop != nil
         backButton.isHidden = !showsBack
         titleLeading?.isActive = !showsBack
         titleAfterBack?.isActive = showsBack
+        syncActionButtons()
     }
 
     @objc private func backClicked() {
-        guard let listedDirectory else { return }
-        showFiles(in: listedDirectory)
+        guard let previous = previousStop else { return }
+        if let current, history.last == current { history.removeLast() }
+        switch previous {
+        case .files(let directory): present(directory)
+        case .file(let target): present(target)
+        }
+    }
+
+    // MARK: - Header actions
+
+    /// The path the header's actions are about: the file shown, or the folder
+    /// listed.
+    private var actionURL: URL? {
+        target?.url ?? (content is FileListView ? listedDirectory : nil)
+    }
+
+    private func syncActionButtons() {
+        let hidden = actionURL == nil
+        revealButton.isHidden = hidden
+        copyPathButton.isHidden = hidden
+        // Opening a folder in its default app is Finder again.
+        openButton.isHidden = target == nil
+    }
+
+    @objc private func revealClicked() {
+        guard let url = actionURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    @objc private func openClicked() {
+        guard let url = target?.url else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func copyPathClicked() {
+        guard let url = actionURL else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.path, forType: .string)
     }
 
     /// The browser, already on screen or created now.
@@ -159,7 +245,9 @@ public final class PreviewPanel: NSView {
     public func browser() -> BrowserView {
         if let existing = content as? BrowserView { return existing }
 
-        clearContent()
+        // Keeping the history: the browser is a detour, and the back arrow
+        // should still lead to the file or folder it interrupted.
+        clearContent(keepingDirectory: true)
         emptyState?.removeFromSuperview()
         emptyState = nil
 
@@ -193,7 +281,11 @@ public final class PreviewPanel: NSView {
         content?.removeFromSuperview()
         content = nil
         target = nil
-        if !keepingDirectory { listedDirectory = nil }
+        current = nil
+        if !keepingDirectory {
+            listedDirectory = nil
+            history.removeAll()
+        }
         titleLabel.stringValue = ""
         detailLabel.stringValue = ""
         toolTip = nil
@@ -260,9 +352,20 @@ public final class PreviewPanel: NSView {
         close.bezelStyle = .inline
         close.translatesAutoresizingMaskIntoConstraints = false
 
+        // Three small actions on whatever is shown: where it is, open it
+        // properly, take its path. Hidden until there is a file or folder.
+        configureAction(revealButton, "folder", "Reveal in Finder", #selector(revealClicked))
+        configureAction(openButton, "arrow.up.forward.app", "Open in the default app", #selector(openClicked))
+        configureAction(copyPathButton, "doc.on.doc", "Copy path", #selector(copyPathClicked))
+        let actions = NSStackView(views: [revealButton, openButton, copyPathButton])
+        actions.orientation = .horizontal
+        actions.spacing = 8
+        actions.translatesAutoresizingMaskIntoConstraints = false
+
         header.addSubview(backButton)
         header.addSubview(titleLabel)
         header.addSubview(detailLabel)
+        header.addSubview(actions)
         header.addSubview(close)
 
         titleLeading = titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 12)
@@ -287,13 +390,29 @@ public final class PreviewPanel: NSView {
             titleLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: detailLabel.leadingAnchor, constant: -8),
 
-            detailLabel.trailingAnchor.constraint(equalTo: close.leadingAnchor, constant: -10),
+            detailLabel.trailingAnchor.constraint(equalTo: actions.leadingAnchor, constant: -10),
             detailLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+
+            actions.trailingAnchor.constraint(equalTo: close.leadingAnchor, constant: -10),
+            actions.centerYAnchor.constraint(equalTo: header.centerYAnchor),
 
             close.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -8),
             close.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             close.widthAnchor.constraint(equalToConstant: 18),
         ])
+    }
+
+    private func configureAction(_ button: NSButton, _ symbol: String, _ tip: String, _ action: Selector) {
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
+        button.target = self
+        button.action = action
+        button.contentTintColor = PanelStyle.secondaryText
+        button.isBordered = false
+        button.bezelStyle = .inline
+        button.toolTip = tip
+        button.isHidden = true
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.widthAnchor.constraint(equalToConstant: 16).isActive = true
     }
 
     private func buildContentContainer() {

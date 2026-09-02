@@ -50,3 +50,41 @@ private func row(_ text: String, width: Int = 80) -> [Character] {
     let match = try #require(TerminalLink.match(in: row("file:///Users/me/notes.md"), at: 3))
     #expect(match.url.isFileURL)
 }
+
+// MARK: - Paths
+
+private let home = URL(fileURLWithPath: NSHomeDirectory())
+private let project = URL(fileURLWithPath: "/tmp/project", isDirectory: true)
+
+@Test func anAbsolutePathIsALink() throws {
+    let match = try #require(TerminalLink.match(in: row("wrote /tmp/out/shot.png ok"), at: 12))
+    #expect(match.url.path == "/tmp/out/shot.png")
+    #expect(match.columns == 6 ... 22)
+}
+
+@Test func aTildePathExpandsToHome() throws {
+    let match = try #require(TerminalLink.match(in: row("see ~/notes.md"), at: 6))
+    #expect(match.url.path == home.appendingPathComponent("notes.md").path)
+}
+
+@Test func aRelativePathNeedsABase() throws {
+    #expect(TerminalLink.match(in: row("edit src/App.swift"), at: 8) == nil)
+    let match = try #require(TerminalLink.match(in: row("edit src/App.swift"), at: 8, base: project))
+    #expect(match.url.path == "/tmp/project/src/App.swift")
+}
+
+@Test func aLineReferenceIsDropped() throws {
+    let match = try #require(TerminalLink.match(in: row("src/App.swift:12:3: error"), at: 3, base: project))
+    #expect(match.url.path == "/tmp/project/src/App.swift")
+}
+
+@Test func aBareNameWithAnExtensionCountsRelativeToTheBase() throws {
+    let match = try #require(TerminalLink.match(in: row("open report.html now"), at: 7, base: project))
+    #expect(match.url.path == "/tmp/project/report.html")
+}
+
+@Test func numbersAndFlagsAreNotPaths() {
+    #expect(TerminalLink.match(in: row("pi is 3.14 here"), at: 7, base: project) == nil)
+    #expect(TerminalLink.match(in: row("use --force/now"), at: 6, base: project) == nil)
+    #expect(TerminalLink.match(in: row("a lone / slash"), at: 7, base: project) == nil)
+}

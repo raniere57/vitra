@@ -301,7 +301,11 @@ está lendo.
 
 O botão de globo na barra de título, `Cmd-Shift-B` ou **View → Browser** abrem
 o navegador no painel com o cursor já
-na barra de endereço: digite `google.com` e Enter. Antes disso o navegador só
+na barra de endereço: digite `google.com` e Enter. No painel, a seta de voltar
+percorre o **histórico do que você abriu** — a pasta em que você estava, não a
+raiz do shell — e o cabeçalho traz três ações sobre o que está aberto: revelar
+no Finder, abrir no app padrão e copiar o caminho. Num texto, `Cmd-F` abre a
+busca do sistema. Antes disso o navegador só
 aparecia por um link clicado ou por um agente pedindo — o que não é ter um
 navegador. As sessões e cookies ficam salvos em disco, então um login sobrevive
 ao painel fechar e ao app reiniciar.
@@ -312,7 +316,10 @@ para um login pesado ou um download que não cabem num painel.
 
 Uma URL na saída é um link: um clique abre no painel de visualização — uma
 página que você olha de relance sem sair da janela — e `Cmd`-clique entrega ao
-seu navegador. O ponteiro vira uma mão sobre um deles. Hosts `www.` sem esquema
+seu navegador. O ponteiro vira uma mão sobre um deles. **Um caminho de arquivo
+também é um link**: `/Users/me/shot.png`, `~/notes.md`, `src/App.swift:12:3`
+(relativo à pasta do shell, com a citação de linha descartada) — um clique abre
+no painel, e o ponteiro só vira mão quando o arquivo existe de verdade. Hosts `www.` sem esquema
 contam, um ponto final no fim da frase não, e um colchete que o link nunca abriu
 fica para trás.
 

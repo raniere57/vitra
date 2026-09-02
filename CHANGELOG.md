@@ -5,6 +5,21 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### O painel lembra o caminho, e um caminho é um link
+
+- **Voltar volta para onde você estava.** A seta do painel percorre o histórico
+  de pastas e arquivos abertos; antes ela caía na raiz do shell, porque cada
+  comando terminado sobrescrevia a pasta navegada com o `cwd` do terminal. O
+  browser é um desvio: voltar dele leva ao arquivo ou pasta que ele interrompeu.
+- **Caminhos de arquivo na saída são links.** `/abs/olu/to.png`, `~/x.md`,
+  `src/App.swift:12:3` — absolutos, `~`, e relativos à pasta do shell, com a
+  citação `:linha:coluna` descartada. Um clique abre no painel. O ponteiro só
+  vira mão quando o arquivo existe: um `stat` no token sob o ponteiro, não em
+  cada palavra da tela.
+- **Três ações no cabeçalho** do painel: revelar no Finder, abrir no app padrão,
+  copiar o caminho — para o arquivo aberto ou a pasta listada.
+- **`Cmd-F` num texto** abre a barra de busca do próprio sistema. Custo zero.
+
 ### O agente não te arrasta mais de volta
 
 - Uma chamada de ferramenta trazia a janela pra frente **ativando o app inteiro**

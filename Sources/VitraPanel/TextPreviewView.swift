@@ -46,6 +46,10 @@ final class TextPreviewView: NSScrollView, PreviewContentView {
         textView.isHorizontallyResizable = false
         textView.textContainer?.widthTracksTextView = true
 
+        // The system's own find bar, which costs nothing: Cmd-F below opens it.
+        textView.usesFindBar = true
+        textView.isIncrementalSearchingEnabled = true
+
         documentView = textView
         hasVerticalScroller = true
         drawsBackground = true
@@ -55,4 +59,16 @@ final class TextPreviewView: NSScrollView, PreviewContentView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
+
+    /// Cmd-F opens the find bar. The panel is not what the menu drives, so the
+    /// key is read here and handed to the text view's own find machinery.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.command),
+              event.charactersIgnoringModifiers == "f"
+        else { return super.performKeyEquivalent(with: event) }
+        let show = NSMenuItem()
+        show.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
+        textView.performFindPanelAction(show)
+        return true
+    }
 }

@@ -669,7 +669,16 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
             let cell = snapshot[column, row]
             characters.append(snapshot.text(of: cell)?.first ?? " ")
         }
-        return TerminalLink.match(in: characters, at: Int(position.column))?.url
+        let base = session.currentDirectory
+        guard let url = TerminalLink.match(in: characters, at: Int(position.column), base: base)?.url
+        else { return nil }
+        // A token shaped like a path is a link only when the file is there:
+        // the pointer turns into a hand for one stat, not for every word that
+        // happens to carry a dot.
+        if url.isFileURL {
+            return PreviewTarget.resolve(path: url.path) == nil ? nil : url
+        }
+        return url
     }
 
     override func mouseDown(with event: NSEvent) {
