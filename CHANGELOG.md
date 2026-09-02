@@ -5,6 +5,13 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Botão de maximizar o painel
+
+- Ao lado dos botões do cabeçalho do painel, um de **maximizar/restaurar**: o
+  mesmo que o duplo clique no divisor e o `Esc` fazem, para quem está com a mão
+  no mouse. As setas apontam para fora quando o painel cabe na metade, e para
+  dentro quando ele tem a janela inteira.
+
 ### O painel lembra o caminho, e um caminho é um link
 
 - **Voltar volta para onde você estava.** A seta do painel percorre o histórico

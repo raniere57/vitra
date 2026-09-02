@@ -9,6 +9,31 @@ public final class PreviewPanel: NSView {
     /// Called when the panel's own close control is used.
     public var onClose: (() -> Void)?
 
+    /// The zoom button: the same thing double-clicking the divider and Escape
+    /// do, for the hands that are on the mouse.
+    public var onToggleMaximize: (() -> Void)?
+
+    /// Whether the panel has the whole window, which turns the button's
+    /// brackets inward and its tooltip into the way back.
+    public var isMaximized = false {
+        didSet {
+            guard isMaximized != oldValue else { return }
+            zoomButton.image = NSImage(
+                systemSymbolName: isMaximized
+                    ? "arrow.down.right.and.arrow.up.left"
+                    : "arrow.up.left.and.arrow.down.right",
+                accessibilityDescription: zoomTip
+            )
+            zoomButton.toolTip = zoomTip
+        }
+    }
+
+    private var zoomTip: String {
+        isMaximized ? "Give the terminal its space back (esc)" : "Give the panel the whole window"
+    }
+
+    private let zoomButton = NSButton()
+
     /// A folder was clicked in the file list. The panel does not follow it
     /// itself: the terminal decides where it is, and the list follows that.
     public var onDirectorySelected: ((URL) -> Void)?
@@ -357,7 +382,12 @@ public final class PreviewPanel: NSView {
         configureAction(revealButton, "folder", "Reveal in Finder", #selector(revealClicked))
         configureAction(openButton, "arrow.up.forward.app", "Open in the default app", #selector(openClicked))
         configureAction(copyPathButton, "doc.on.doc", "Copy path", #selector(copyPathClicked))
-        let actions = NSStackView(views: [revealButton, openButton, copyPathButton])
+        configureAction(
+            zoomButton, "arrow.up.left.and.arrow.down.right", "Give the panel the whole window",
+            #selector(zoomClicked)
+        )
+        zoomButton.isHidden = false
+        let actions = NSStackView(views: [revealButton, openButton, copyPathButton, zoomButton])
         actions.orientation = .horizontal
         actions.spacing = 8
         actions.translatesAutoresizingMaskIntoConstraints = false
@@ -450,4 +480,5 @@ public final class PreviewPanel: NSView {
     }
 
     @objc private func closeClicked() { onClose?() }
+    @objc private func zoomClicked() { onToggleMaximize?() }
 }

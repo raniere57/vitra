@@ -1335,6 +1335,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
         let panel = PreviewPanel(frame: .zero)
         panel.onClose = { [weak self] in self?.closePanel() }
+        panel.onToggleMaximize = { [weak self] in self?.togglePanelMaximized() }
         panel.onDirectorySelected = { [weak self] url in self?.followDirectory(url) }
         panelBrowsedAway = false
         if let directory = focusedPane?.session.currentDirectory {
@@ -1385,6 +1386,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         panelRestoreWidth = paneContainer.frame.width
         paneContainer.isHidden = true
         panelSplit?.adjustSubviews()
+        panel?.isMaximized = true
         // Escape reaches this before the web view, which would otherwise stop
         // a page load with it and never tell us.
         panelEscapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -1402,6 +1404,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         }
         panelRestoreWidth = nil
         paneContainer.isHidden = false
+        panel?.isMaximized = false
         panelSplit?.adjustSubviews()
         panelSplit?.setPosition(width, ofDividerAt: 0)
         panes.forEach { $0.becameVisible() }
