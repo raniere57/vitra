@@ -780,6 +780,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         let size = TerminalSize(columns: 80, rows: 24)
         let core = try GhosttyTerminalCore(size: size)
         let executable = command?.first ?? config.shell ?? ShellEnvironment.loginShell()
+        // Named before the shell starts, because the name goes in with it: an
+        // agent's `vitra mcp` helper inherits it and sends it back on every
+        // call, which is what gives each pane a browser of its own.
+        let paneID = UUID().uuidString
         let session = try TerminalSession(
             core: core,
             executable: executable,
@@ -789,7 +793,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
                 shellIntegration: config.shellIntegration,
                 blockSpacing: config.blockSpacing,
                 colorPrompt: config.colorPrompt,
-                colorDefaults: config.colorDefaults
+                colorDefaults: config.colorDefaults,
+                extra: ["VITRA_PANE": paneID]
             ),
             size: size,
             workingDirectory: directory ?? (bookmark?.exists == true ? bookmark?.url.path : nil)
@@ -801,6 +806,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             fontSize: fontSize,
             attachments: attachments
         )
+        pane.paneID = paneID
         try? pane.apply(config)
 
         wire(pane)
@@ -874,6 +880,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     /// Whether this window holds that pane.
     func holds(_ pane: TerminalView) -> Bool { panes.contains { $0 === pane } }
+
+    /// The pane an MCP call named, if it is one of this window's.
+    func pane(withID id: String) -> TerminalView? { panes.first { $0.paneID == id } }
 
     /// Takes over a pane another window built, keeping its shell running.
     func adopt(_ pane: TerminalView) {
@@ -1272,6 +1281,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     @discardableResult
     private func remove(_ pane: TerminalView) -> Bool {
         panes.removeAll { $0 === pane }
+        // Its browser goes with it: a page nobody can reach is a WebKit
+        // process for nothing.
+        panel?.dropBrowser(for: pane.paneID)
         refreshFocusIndicators()
 
         guard let split = pane.superview as? NSSplitView else {
@@ -1312,8 +1324,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     }
 
     /// The browser in the side panel, opening the panel if it is closed.
-    func browser() -> BrowserView {
-        openPanel().browser()
+    ///
+    /// One per pane: the sidebar is per session, so an agent in one pane and
+    /// an agent in the next each drive a browser of their own and never see
+    /// the other's page. With no pane named, the focused one's.
+    func browser(for pane: TerminalView? = nil) -> BrowserView {
+        let key = (pane ?? focusedPane)?.paneID ?? ""
+        return openPanel().browser(for: key.isEmpty ? "window" : key)
     }
 
     /// `Cmd-Shift-P`: opens the panel, or closes it and releases its contents.

@@ -81,12 +81,14 @@ struct RemoteExecutor: ToolExecutor {
         }
     }
 
-    func run(tool: String, arguments: JSONValue) async throws -> String {
-        let request = JSONRPC.Request(
-            id: .number(1),
-            method: "tools/call",
-            params: ["name": .string(tool), "arguments": arguments]
-        )
+    func run(tool: String, arguments: JSONValue, pane: String?) async throws -> String {
+        // The agent spawned this helper from inside a pane, and the pane put
+        // its name in the environment on the way: that is the whole routing.
+        var params: [String: JSONValue] = ["name": .string(tool), "arguments": arguments]
+        if let id = ProcessInfo.processInfo.environment["VITRA_PANE"], !id.isEmpty {
+            params["pane"] = .string(id)
+        }
+        let request = JSONRPC.Request(id: .number(1), method: "tools/call", params: .object(params))
 
         // The socket call is blocking; off the cooperative pool so it never
         // parks one of its threads for a page that takes its time.

@@ -301,7 +301,11 @@ está lendo.
 
 O botão de globo na barra de título, `Cmd-Shift-B` ou **View → Browser** abrem
 o navegador no painel com o cursor já
-na barra de endereço: digite `google.com` e Enter. No painel, a seta de voltar
+na barra de endereço: digite `google.com` e Enter. O navegador é **por
+terminal**: cada painel tem o seu, e um agente rodando num painel só enxerga o
+daquele painel — dois agentes lado a lado nunca disputam a mesma página. O
+shell de cada painel carrega `VITRA_PANE`, que é como a chamada do agente acha o
+caminho de volta. No painel, a seta de voltar
 percorre o **histórico do que você abriu** — a pasta em que você estava, não a
 raiz do shell — e o cabeçalho traz três ações sobre o que está aberto: revelar
 no Finder, abrir no app padrão e copiar o caminho. Num texto, `Cmd-F` abre a

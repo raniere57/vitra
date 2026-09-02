@@ -504,6 +504,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windows.first { $0.holds(pane) }
     }
 
+    /// The window holding the pane an MCP call named.
+    func controller(owningPaneID id: String) -> TerminalWindowController? {
+        windows.first { $0.pane(withID: id) != nil }
+    }
+
     /// Brings the tab under a point to the front, while a pane is dragged.
     ///
     /// The tab bar is AppKit's and says nothing about where its tabs are, so

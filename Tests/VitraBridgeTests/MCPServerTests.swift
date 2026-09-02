@@ -12,10 +12,26 @@ private struct StubExecutor: ToolExecutor {
         self.failure = failure
     }
 
-    func run(tool: String, arguments: JSONValue) async throws -> String {
+    func run(tool: String, arguments: JSONValue, pane: String?) async throws -> String {
         if let failure { throw ToolError(failure) }
-        return "\(tool):\(answer):\(arguments["path"]?.stringValue ?? "-")"
+        return "\(tool):\(answer):\(arguments["path"]?.stringValue ?? "-"):\(pane ?? "nopane")"
     }
+}
+
+@Test func theCallingPaneReachesTheExecutor() async {
+    let server = MCPServer(executor: StubExecutor())
+    let response = await server.handle(request("tools/call", [
+        "name": "browser_snapshot", "arguments": [:], "pane": "ABC-123",
+    ]))
+    let text = response?.result?["content"]?.arrayValue?.first?["text"]?.stringValue
+    #expect(text == "browser_snapshot:ok:-:ABC-123")
+}
+
+@Test func aCallWithoutAPaneStillRuns() async {
+    let server = MCPServer(executor: StubExecutor())
+    let response = await server.handle(request("tools/call", ["name": "browser_snapshot", "arguments": [:]]))
+    let text = response?.result?["content"]?.arrayValue?.first?["text"]?.stringValue
+    #expect(text == "browser_snapshot:ok:-:nopane")
 }
 
 private func request(_ method: String, _ params: JSONValue? = nil, id: JSONValue? = .number(1)) -> JSONRPC.Request {
@@ -59,7 +75,7 @@ private func request(_ method: String, _ params: JSONValue? = nil, id: JSONValue
 
     #expect(response?.result?["isError"]?.boolValue == false)
     #expect(response?.result?["content"]?.arrayValue?.first?["type"]?.stringValue == "text")
-    #expect(response?.result?["content"]?.arrayValue?.first?["text"]?.stringValue == "preview_file:ok:/tmp/a.png")
+    #expect(response?.result?["content"]?.arrayValue?.first?["text"]?.stringValue == "preview_file:ok:/tmp/a.png:nopane")
 }
 
 /// A tool that fails answers through the result, not through a protocol error:

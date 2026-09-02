@@ -22,7 +22,13 @@ final class ToolRunner {
         self.app = app
     }
 
-    func run(tool: String, arguments: JSONValue) async throws -> String {
+    /// The pane the call in flight came from, for the window and browser it
+    /// should land in. One call at a time on the main actor, so a property.
+    private var callingPane: String?
+
+    func run(tool: String, arguments: JSONValue, pane: String?) async throws -> String {
+        callingPane = pane
+        defer { callingPane = nil }
         do {
             return try await dispatch(tool: tool, arguments: arguments)
         } catch let failure as ToolFailure {
@@ -108,7 +114,10 @@ final class ToolRunner {
     // MARK: - Context
 
     private func window() throws -> TerminalWindowController {
-        guard let controller = app.frontController else {
+        // The agent's own window first; the front one only for a call that
+        // arrived without a pane, which is a helper started outside Vitra.
+        let owner = callingPane.flatMap { app.controller(owningPaneID: $0) }
+        guard let controller = owner ?? app.frontController else {
             throw ToolError("Vitra has no window open")
         }
         // A tool call arrives with the app in the back, often on another Space.
@@ -121,7 +130,9 @@ final class ToolRunner {
     }
 
     private func browser() throws -> BrowserView {
-        try window().browser()
+        let controller = try window()
+        let pane = callingPane.flatMap { controller.pane(withID: $0) }
+        return controller.browser(for: pane)
     }
 
     /// Renders a JavaScript result the way an agent can read it.
@@ -141,7 +152,7 @@ final class ToolRunner {
 struct GUIToolExecutor: ToolExecutor {
     let runner: ToolRunner
 
-    func run(tool: String, arguments: JSONValue) async throws -> String {
-        try await runner.run(tool: tool, arguments: arguments)
+    func run(tool: String, arguments: JSONValue, pane: String?) async throws -> String {
+        try await runner.run(tool: tool, arguments: arguments, pane: pane)
     }
 }

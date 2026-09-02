@@ -595,6 +595,10 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// means their browser rather than the panel.
     var onOpenLink: ((URL, Bool) -> Void)?
 
+    /// What this pane is called in the shell's environment (`VITRA_PANE`), so
+    /// a tool call from an agent running in it finds its way back here.
+    var paneID = ""
+
     /// Whether this pane should show which one has the keyboard.
     ///
     /// Off for a lone pane: a border around the only thing on screen says

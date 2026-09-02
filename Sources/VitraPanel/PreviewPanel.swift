@@ -267,8 +267,8 @@ public final class PreviewPanel: NSView {
     ///
     /// Opening a file preview replaces it, which is what makes WebKit leave
     /// memory when the agent is finished with a page.
-    public func browser() -> BrowserView {
-        if let existing = content as? BrowserView { return existing }
+    public func browser(for key: String) -> BrowserView {
+        if let existing = content as? BrowserView, browsers[key] === existing { return existing }
 
         // Keeping the history: the browser is a detour, and the back arrow
         // should still lead to the file or folder it interrupted.
@@ -276,19 +276,44 @@ public final class PreviewPanel: NSView {
         emptyState?.removeFromSuperview()
         emptyState = nil
 
-        let browser = BrowserView(frame: contentContainer.bounds)
-        browser.autoresizingMask = [.width, .height]
-        browser.onPageChanged = { [weak self] title, host in
-            self?.titleLabel.stringValue = title.isEmpty ? "Browser" : title
-            self?.detailLabel.stringValue = host
+        let browser: BrowserView
+        if let kept = browsers[key] {
+            browser = kept
+        } else {
+            browser = BrowserView(frame: contentContainer.bounds)
+            browser.onPageChanged = { [weak self, weak browser] title, host in
+                // Only the one on screen writes the header: the others keep
+                // loading in the background and say nothing.
+                guard let self, let browser, self.content === browser else { return }
+                self.titleLabel.stringValue = title.isEmpty ? "Browser" : title
+                self.detailLabel.stringValue = host
+            }
+            browsers[key] = browser
         }
+        browser.frame = contentContainer.bounds
+        browser.autoresizingMask = [.width, .height]
         contentContainer.addSubview(browser)
         content = browser
 
-        titleLabel.stringValue = "Browser"
-        detailLabel.stringValue = ""
+        titleLabel.stringValue = browser.currentTitle.isEmpty ? "Browser" : browser.currentTitle
+        detailLabel.stringValue = browser.currentURL?.host ?? ""
         return browser
     }
+
+    /// Lets a pane's browser go, when the pane does.
+    public func dropBrowser(for key: String) {
+        guard let browser = browsers.removeValue(forKey: key) else { return }
+        if content === browser {
+            clearContent(keepingDirectory: true)
+        } else {
+            browser.prepareForRemoval()
+        }
+    }
+
+    /// The browsers alive, one per pane that asked for one. Held here rather
+    /// than in the content slot, so switching panes switches pages instead of
+    /// throwing one away.
+    private var browsers: [String: BrowserView] = [:]
 
     /// The browser if it is what the panel is showing, otherwise nil.
     public var currentBrowser: BrowserView? { content as? BrowserView }
@@ -302,9 +327,16 @@ public final class PreviewPanel: NSView {
     }
 
     private func clearContent(keepingDirectory: Bool) {
-        content?.prepareForRemoval()
+        // A browser some pane still owns is only taken off screen; it is torn
+        // down when its pane goes, or when the panel itself is dropped.
+        let keptBrowser = (content as? BrowserView).map { browser in browsers.values.contains { $0 === browser } } ?? false
+        if !keptBrowser || !keepingDirectory { content?.prepareForRemoval() }
         content?.removeFromSuperview()
         content = nil
+        if !keepingDirectory {
+            browsers.values.forEach { $0.prepareForRemoval() }
+            browsers.removeAll()
+        }
         target = nil
         current = nil
         if !keepingDirectory {

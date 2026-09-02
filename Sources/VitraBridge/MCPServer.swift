@@ -4,7 +4,11 @@ import Foundation
 /// forwards to it over the socket.
 public protocol ToolExecutor: Sendable {
     /// Runs `tool` and returns the text the agent should see.
-    func run(tool: String, arguments: JSONValue) async throws -> String
+    ///
+    /// `pane` names the terminal the agent is running in, when the helper
+    /// could tell: it is how two agents in two panes each get a browser of
+    /// their own instead of fighting over one.
+    func run(tool: String, arguments: JSONValue, pane: String?) async throws -> String
 }
 
 /// A tool failure the agent is meant to read and act on.
@@ -67,8 +71,9 @@ public struct MCPServer: Sendable {
         }
 
         let arguments = request.params?["arguments"] ?? .object([:])
+        let pane = request.params?["pane"]?.stringValue
         do {
-            let text = try await executor.run(tool: name, arguments: arguments)
+            let text = try await executor.run(tool: name, arguments: arguments, pane: pane)
             return JSONRPC.Response(id: request.id, result: Self.content(text, isError: false))
         } catch let error as ToolError {
             // A tool that fails reports through the result, not through a

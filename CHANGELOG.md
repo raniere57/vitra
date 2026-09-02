@@ -5,6 +5,18 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Um navegador por painel
+
+- **Cada terminal tem o seu navegador.** Dois agentes em dois painéis usavam o
+  mesmo browser e um atropelava a página do outro. Agora cada painel recebe um
+  nome no ambiente do shell (`VITRA_PANE`); o helper `vitra mcp` que o agente
+  inicia herda esse nome e o manda em cada chamada, e a GUI entrega a chamada à
+  janela daquele painel e a um browser só dele. O painel lateral mostra o
+  browser do painel em foco — ou do agente que acabou de pedir — e os outros
+  seguem carregando atrás, sem escrever no cabeçalho.
+- O globo, o menu e um link clicado abrem o browser do painel em foco. Fechar
+  um painel derruba o browser dele; fechar a sidebar derruba todos.
+
 ### Botão de maximizar o painel
 
 - Ao lado dos botões do cabeçalho do painel, um de **maximizar/restaurar**: o
