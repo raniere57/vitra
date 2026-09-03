@@ -32,7 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // second copy would run windowless and quietly take the tools over,
         // which is exactly the browser opening where nobody can see it. A live
         // socket owner means this process is the spare — step aside for it.
-        if SocketProbe.anotherInstanceIsServing() {
+        // A self-shot run is a measurement, not a rival: it never gets the
+        // socket (its bridge fails with alreadyServing) and it quits itself.
+        if ProcessInfo.processInfo.environment["VITRA_SELF_SHOT"] == nil,
+           SocketProbe.anotherInstanceIsServing() {
             NSApp.terminate(nil)
             return
         }
@@ -110,6 +113,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let edge = edges[name]
         else { return }
         currentController?.moveFocusedPane(to: edge)
+    }
+
+    /// The corner button's job from the keyboard: the focused pane takes the
+    /// window, or gives it back.
+    @objc func togglePaneMaximized(_ sender: Any?) {
+        guard let controller = currentController, let pane = controller.focusedPane else { return }
+        controller.toggleMaximized(pane)
     }
 
     @objc func splitVertically(_ sender: Any?) {

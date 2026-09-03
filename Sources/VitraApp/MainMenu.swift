@@ -122,6 +122,13 @@ enum MainMenu {
         )
         togglePanel.keyEquivalentModifierMask = [.command, .shift]
 
+        let maximize = viewMenu.addItem(
+            withTitle: "Maximize Pane",
+            action: #selector(AppDelegate.togglePaneMaximized(_:)),
+            keyEquivalent: "\r"
+        )
+        maximize.keyEquivalentModifierMask = [.command, .shift]
+
         let browser = viewMenu.addItem(
             withTitle: "Browser",
             action: #selector(AppDelegate.openBrowser(_:)),

@@ -5,6 +5,18 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Maximizar volta a funcionar em divisões aninhadas
+
+- Maximizar um painel dentro de uma divisão aninhada deixava uma **faixa preta**
+  onde ficava o irmão escondido: o redimensionador dos splits repartia o espaço
+  entre todos os painéis pelo frame atual, escondidos inclusive. Agora um
+  painel escondido tem frame zero e a proporção é calculada só entre os
+  visíveis; um painel sozinho é o split inteiro.
+- **View → Maximize Pane (`⇧⌘↩`)** faz do teclado o que o botão do canto faz,
+  e é o que permite testar o gesto sem mouse.
+- Uma corrida de self-shot não é mais barrada pela instância única: ela nunca
+  pega o socket e se fecha sozinha.
+
 ### `Cmd-A` dentro do Claude Code seleciona o prompt
 
 - Com um programa rodando, **`Cmd-A` seleciona só a linha que você está

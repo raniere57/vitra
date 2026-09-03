@@ -1660,15 +1660,24 @@ private final class PaneSplitView: NSSplitView, NSSplitViewDelegate {
     }
 
     func splitView(_ splitView: NSSplitView, resizeSubviewsWithOldSize oldSize: NSSize) {
-        let views = splitView.arrangedSubviews
+        // A hidden pane — a sibling of the maximised one — takes no room and
+        // is laid out nowhere: scaling it along with the rest is what left a
+        // black band where it used to be, because its frame still counted.
+        let vertical = splitView.isVertical
+        for view in splitView.arrangedSubviews where view.isHidden { view.frame = .zero }
+        let views = splitView.arrangedSubviews.filter { !$0.isHidden }
         guard views.count > 1 else {
-            splitView.adjustSubviews()
+            // One pane left showing: it is the whole split, however the old
+            // frames were divided.
+            views.first?.frame = splitView.bounds
             return
         }
 
-        let vertical = splitView.isVertical
         let dividers = splitView.dividerThickness * CGFloat(views.count - 1)
-        let oldAvailable = (vertical ? oldSize.width : oldSize.height) - dividers
+        // Proportions come from what the visible panes have now, not from the
+        // old size of the whole split, which may have included a pane that
+        // has since been hidden.
+        let oldAvailable = views.reduce(CGFloat(0)) { $0 + (vertical ? $1.frame.width : $1.frame.height) }
         let newAvailable = (vertical ? splitView.bounds.width : splitView.bounds.height) - dividers
         guard oldAvailable > 0, newAvailable > 0 else {
             splitView.adjustSubviews()
