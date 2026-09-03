@@ -5,6 +5,15 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Clicar na linha põe o cursor ali
+
+- **Um clique na linha que você está digitando leva o cursor do programa até o
+  ponto clicado** — para trocar uma letra ou corrigir uma palavra sem voltar
+  com as setas. O terminal aperta as setas por você: uma por célula entre o
+  cursor e o clique, que é o que todo editor de linha (Claude Code, zsh)
+  entende. Vale na linha do cursor, na tela viva; um clique no histórico
+  continua sendo só um clique.
+
 ### Um navegador por painel
 
 - **Cada terminal tem o seu navegador.** Dois agentes em dois painéis usavam o

@@ -723,9 +723,35 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         let position = cell(for: event)
         let moved = pressedCell.map { $0 != position } ?? true
         pressedCell = nil
-        guard !moved, event.clickCount == 1, let url = link(for: event) else { return }
-        session.clearSelection()
-        onOpenLink?(url, event.modifierFlags.contains(.command))
+        guard !moved, event.clickCount == 1 else { return }
+        if let url = link(for: event) {
+            session.clearSelection()
+            onOpenLink?(url, event.modifierFlags.contains(.command))
+            return
+        }
+        placeCursor(at: position, event: event)
+    }
+
+    /// A click on the line being typed puts the program's cursor there.
+    ///
+    /// The terminal cannot move that cursor itself, but it can press the keys
+    /// that do: one arrow per cell between where the cursor is and where the
+    /// click landed, which every line editor understands. Only the cursor's
+    /// own row on the live screen counts, for the same reason the selection
+    /// edit stops there — a click in the transcript above is a click, not an
+    /// instruction to walk the cursor up into someone else's history.
+    private func placeCursor(at position: (column: UInt16, row: UInt16), event: NSEvent) {
+        guard event.modifierFlags.isDisjoint(with: [.shift, .option, .command, .control]),
+              snapshot.scroll.isAtBottom,
+              let cursor = snapshot.cursor,
+              cursor.row == position.row
+        else { return }
+        let delta = Int(position.column) - Int(cursor.column)
+        guard delta != 0 else { return }
+        let arrow = delta < 0 ? Self.leftArrowKeyCode : Self.rightArrowKeyCode
+        for _ in 0 ..< abs(delta) {
+            session.send(KeyEvent(keyCode: arrow))
+        }
     }
 
     /// Keeps the viewport moving while a selection drag sits past an edge.
