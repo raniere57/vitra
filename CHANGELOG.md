@@ -5,6 +5,13 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### `Cmd-A` dentro do Claude Code seleciona o prompt
+
+- Com um programa rodando, **`Cmd-A` seleciona só a linha que você está
+  digitando** — pulando o `❯` da frente — em vez da tela inteira. Daí é digitar
+  por cima ou apagar, como já funciona com uma palavra selecionada. Num shell
+  puro, `Cmd-A` continua selecionando tudo.
+
 ### Clicar na linha põe o cursor ali
 
 - **Um clique na linha que você está digitando leva o cursor do programa até o

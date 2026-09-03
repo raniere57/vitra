@@ -988,7 +988,36 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     }
 
     override func selectAll(_ sender: Any?) {
+        // Inside a program — Claude Code, above all — "all" is the line being
+        // typed, not the transcript around it: that is what you select to
+        // replace or clear it. In a plain shell the whole screen still wins.
+        if session.isRunningProgram, let line = inputLineSpan() {
+            session.beginSelection(column: line.start, row: line.row, clickCount: 1)
+            session.extendSelection(column: line.end, row: line.row)
+            return
+        }
         session.selectAll()
+    }
+
+    /// The typed text on the cursor's row: first to last non-blank cell, less
+    /// a prompt marker in front (`❯`, `>`, `$` — one glyph and a space).
+    private func inputLineSpan() -> (row: UInt16, start: UInt16, end: UInt16)? {
+        guard snapshot.scroll.isAtBottom, let cursor = snapshot.cursor else { return nil }
+        let row = Int(cursor.row)
+        let columns = Int(snapshot.columns)
+        guard row < Int(snapshot.rows), columns > 0 else { return nil }
+        let text = (0 ..< columns).map { snapshot.text(of: snapshot[$0, row]) ?? " " }
+        guard var start = text.firstIndex(where: { $0 != " " }),
+              let end = text.lastIndex(where: { $0 != " " })
+        else { return nil }
+        let marker = text[start]
+        if marker.count == 1, !(marker.first!.isLetter || marker.first!.isNumber),
+           start + 1 < columns, text[start + 1] == " " {
+            start += 2
+        }
+        // The marker was the whole line: nothing typed yet.
+        guard start <= end else { return nil }
+        return (UInt16(row), UInt16(start), UInt16(end))
     }
 
     /// Clears the screen and the scrollback, the way Cmd-K does everywhere else
