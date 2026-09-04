@@ -746,12 +746,85 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
               let cursor = snapshot.cursor,
               cursor.row == position.row
         else { return }
-        let delta = Int(position.column) - Int(cursor.column)
-        guard delta != 0 else { return }
+        let delta: Int
+        if cursor.row == position.row {
+            delta = Int(position.column) - Int(cursor.column)
+        } else if position.row < cursor.row, let back = stepsBack(to: position, from: cursor) {
+            delta = -back
+        } else {
+            return
+        }
+        guard delta != 0, abs(delta) <= Self.cursorWalkLimit else { return }
         let arrow = delta < 0 ? Self.leftArrowKeyCode : Self.rightArrowKeyCode
         for _ in 0 ..< abs(delta) {
             session.send(KeyEvent(keyCode: arrow))
         }
+    }
+
+    /// More arrows than a prompt could need is a click somewhere else.
+    private static let cursorWalkLimit = 4000
+
+    /// Left presses from the cursor to a click on an earlier row of the same
+    /// prompt, or nil when the row is not part of it.
+    ///
+    /// Up would be the obvious key and is the wrong one: at the first line of
+    /// its prompt Claude Code turns Up into history. Left never does — at the
+    /// start of a continuation line it steps to the end of the line above —
+    /// so the walk is one Left per character, counted across the rows. The
+    /// prompt is the row carrying the marker (`❯`) and every row from it down
+    /// to the cursor; a wrap is taken as soft, which is what a long sentence
+    /// is. A hard line break (Shift-Enter) costs one press more per break than
+    /// this counts, and lands a character early.
+    private func stepsBack(
+        to position: (column: UInt16, row: UInt16),
+        from cursor: CursorSnapshot
+    ) -> Int? {
+        let cursorRow = Int(cursor.row)
+        let clickRow = Int(position.row)
+        // The prompt's first row: the nearest row above (or the cursor's own)
+        // that starts with a one-glyph marker and a space.
+        var markerRow: Int?
+        for row in stride(from: cursorRow, through: max(0, cursorRow - 60), by: -1) {
+            if markerColumn(of: row) != nil { markerRow = row; break }
+        }
+        guard let markerRow, clickRow >= markerRow else { return nil }
+
+        func textStart(_ row: Int) -> Int {
+            if row == markerRow, let marker = markerColumn(of: row) { return marker + 2 }
+            return rowCells(row).firstIndex { $0 != " " } ?? 0
+        }
+        func textEnd(_ row: Int) -> Int {
+            rowCells(row).lastIndex { $0 != " " } ?? (textStart(row) - 1)
+        }
+
+        // Where on the clicked row the cursor should land: clamped to the
+        // text, past-the-end allowed — it is the same place as the start of
+        // the next row.
+        let target = min(max(Int(position.column), textStart(clickRow)), textEnd(clickRow) + 1)
+        var steps = textEnd(clickRow) + 1 - target
+        for row in (clickRow + 1) ..< cursorRow {
+            steps += max(0, textEnd(row) - textStart(row) + 1)
+        }
+        steps += max(0, Int(cursor.column) - textStart(cursorRow))
+        return steps
+    }
+
+    /// The column of a prompt marker at the start of `row` — one glyph that is
+    /// not a letter or digit, followed by a space — or nil.
+    private func markerColumn(of row: Int) -> Int? {
+        let cells = rowCells(row)
+        guard let start = cells.firstIndex(where: { $0 != " " }),
+              start + 1 < cells.count, cells[start + 1] == " ",
+              cells[start].count == 1,
+              let glyph = cells[start].first, !(glyph.isLetter || glyph.isNumber)
+        else { return nil }
+        return start
+    }
+
+    /// One string per column of `row`, a space for a blank cell.
+    private func rowCells(_ row: Int) -> [String] {
+        guard row >= 0, row < Int(snapshot.rows) else { return [] }
+        return (0 ..< Int(snapshot.columns)).map { snapshot.text(of: snapshot[$0, row]) ?? " " }
     }
 
     /// Keeps the viewport moving while a selection drag sits past an edge.
@@ -1006,15 +1079,11 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         let row = Int(cursor.row)
         let columns = Int(snapshot.columns)
         guard row < Int(snapshot.rows), columns > 0 else { return nil }
-        let text = (0 ..< columns).map { snapshot.text(of: snapshot[$0, row]) ?? " " }
+        let text = rowCells(row)
         guard var start = text.firstIndex(where: { $0 != " " }),
               let end = text.lastIndex(where: { $0 != " " })
         else { return nil }
-        let marker = text[start]
-        if marker.count == 1, !(marker.first!.isLetter || marker.first!.isNumber),
-           start + 1 < columns, text[start + 1] == " " {
-            start += 2
-        }
+        if let marker = markerColumn(of: row) { start = marker + 2 }
         // The marker was the whole line: nothing typed yet.
         guard start <= end else { return nil }
         return (UInt16(row), UInt16(start), UInt16(end))

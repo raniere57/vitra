@@ -5,6 +5,15 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Clicar numa linha acima do prompt também põe o cursor lá
+
+- O clique que leva o cursor do programa até o ponto clicado agora **atravessa
+  as linhas de continuação** de um prompt longo. Sem seta ↑ — no Claude Code
+  ela vira histórico na primeira linha — só ←, uma por caractere, contadas do
+  clique até o cursor pelas linhas do bloco (da linha do `❯` até a do cursor).
+  Quebra é tratada como suave; uma quebra dura (Shift-Enter) cai um caractere
+  antes por linha.
+
 ### Maximizar volta a funcionar em divisões aninhadas
 
 - Maximizar um painel dentro de uma divisão aninhada deixava uma **faixa preta**
