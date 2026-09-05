@@ -5,6 +5,17 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### A sessão do Codex reabre sozinha
+
+- Uma sessão do Codex agora **volta ao reabrir o Vitra**, como as do Claude já
+  faziam. O Codex é distribuído como um script `#!/usr/bin/env node`, então ao
+  rodar ele aparece para o sistema como `node`, não como `codex` — e por isso o
+  painel nunca era reconhecido como uma sessão do Codex e era salvo como um
+  terminal vazio. Agora, quando o kernel nomeia um host de script (`node`,
+  `bun`, `deno`, `python`), o Vitra olha os argumentos e vê o script que está
+  de fato rodando (`node …/codex.js` → `codex`). Isso conserta de uma vez a
+  reabertura, a cor da borda e o marcador da sidebar para o Codex.
+
 ### A borda do terminal diz qual agente é
 
 - O anel em volta de um painel toma **a cor do agente que roda nele**: Claude

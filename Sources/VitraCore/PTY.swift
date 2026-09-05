@@ -266,7 +266,59 @@ public final class PTY: @unchecked Sendable {
         var buffer = [CChar](repeating: 0, count: 2 * Int(MAXCOMLEN) + 1)
         guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
         let name = String(cString: buffer)
-        return name.isEmpty ? nil : name
+        if name.isEmpty { return nil }
+        // A CLI shipped as a `#!/usr/bin/env node` script runs as "node", not
+        // its own name — codex is one such. When the kernel names a script
+        // host, look past it to the script the arguments actually point at, so
+        // the pane is recognised as the agent it is running.
+        if Self.scriptHosts.contains(name), let script = Self.scriptName(of: pid) {
+            return script
+        }
+        return name
+    }
+
+    private static let scriptHosts: Set<String> = ["node", "bun", "deno", "python", "python3"]
+
+    /// The agent behind a script host: the basename of the first script-looking
+    /// argument, stripped of its extension. `node …/codex.js resume x` → "codex".
+    private static func scriptName(of pid: pid_t) -> String? {
+        var mib = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return nil }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return nil }
+
+        // Layout: [Int32 argc][exec_path\0][\0 padding][argv0\0][argv1\0]…
+        return buffer.withUnsafeBytes { raw -> String? in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            guard bytes.count > 4 else { return nil }
+            var i = 4  // past argc
+            // Skip exec_path and the null padding that follows it.
+            while i < bytes.count, bytes[i] != 0 { i += 1 }
+            while i < bytes.count, bytes[i] == 0 { i += 1 }
+            // Walk the argv strings, first one that looks like a script wins.
+            var arg = [UInt8]()
+            while i < bytes.count {
+                let b = bytes[i]
+                if b == 0 {
+                    if let name = Self.agentName(fromArg: arg) { return name }
+                    arg.removeAll(keepingCapacity: true)
+                } else {
+                    arg.append(b)
+                }
+                i += 1
+            }
+            return nil
+        }
+    }
+
+    private static let scriptExtensions = [".js", ".mjs", ".cjs", ".ts", ".py"]
+
+    private static func agentName(fromArg bytes: [UInt8]) -> String? {
+        let arg = String(decoding: bytes, as: UTF8.self)
+        guard let ext = scriptExtensions.first(where: { arg.hasSuffix($0) }) else { return nil }
+        let base = (arg as NSString).lastPathComponent
+        return String(base.dropLast(ext.count))
     }
 
     /// Whether something other than the shell holds the terminal.
