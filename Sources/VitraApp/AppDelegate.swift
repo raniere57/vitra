@@ -134,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func loadConfiguration() {
         let (loaded, problems) = Config.load()
         config = loaded
+        Harness.launchFlags[.claudeCode] = loaded.claudeFlags
         report(problems)
 
         if !FileManager.default.fileExists(atPath: Config.path.path) {
@@ -158,6 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func configurationChanged(_ config: Config, _ problems: [String]) {
         self.config = config
+        Harness.launchFlags[.claudeCode] = config.claudeFlags
         report(problems)
         rebuildMenu()
         windows.forEach { $0.apply(config) }

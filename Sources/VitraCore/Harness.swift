@@ -85,15 +85,31 @@ public enum Harness: String, Codable, Sendable, CaseIterable, Identifiable {
         return allCases.first { $0.command == processName }
     }
 
+    /// Flags the user asked to have on every launch of an agent, from the
+    /// configuration. Set by the app when the config is read; a process-wide
+    /// setting because the config is one.
+    nonisolated(unsafe) public static var launchFlags: [Harness: String] = [:]
+
+    /// The executable with the user's flags, ready to be followed by arguments.
+    public var launchLine: String {
+        let flags = Self.launchFlags[self]?.trimmingCharacters(in: .whitespaces) ?? ""
+        return flags.isEmpty ? command : command + " " + flags
+    }
+
+    /// The line that reopens the session `id`, in whatever directory the
+    /// shell is already in.
+    public func resumeLine(id: String) -> String {
+        switch self {
+        case .claudeCode: return launchLine + " --resume " + id + "\n"
+        case .openCode: return launchLine + " --session " + id + "\n"
+        }
+    }
+
     /// The line that reopens `session` in a shell.
     ///
     /// The directory comes first because both agents list and resume the
     /// sessions of the directory they are run in.
     public func resumeCommand(for session: AgentSession) -> String {
-        let cd = "cd " + ShellQuote.quote(session.projectPath) + " && "
-        switch self {
-        case .claudeCode: return cd + "claude --resume " + session.id + "\n"
-        case .openCode: return cd + "opencode --session " + session.id + "\n"
-        }
+        "cd " + ShellQuote.quote(session.projectPath) + " && " + resumeLine(id: session.id)
     }
 }

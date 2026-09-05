@@ -143,3 +143,18 @@ struct ConfigTests {
         #expect(TerminalColor(hex: "nope") == nil)
     }
 }
+
+@Test func claudeFlagsSurviveTheRoundTrip() {
+    var config = Config()
+    config.claudeFlags = "--dangerously-skip-permissions"
+    let (reloaded, problems) = Config.parse(config.toml())
+    #expect(problems.isEmpty)
+    #expect(reloaded.claudeFlags == "--dangerously-skip-permissions")
+}
+
+@Test func launchFlagsLandOnTheResumeLine() {
+    Harness.launchFlags[.claudeCode] = "--dangerously-skip-permissions"
+    defer { Harness.launchFlags[.claudeCode] = nil }
+    #expect(Harness.claudeCode.resumeLine(id: "abc") == "claude --dangerously-skip-permissions --resume abc\n")
+    #expect(Harness.openCode.resumeLine(id: "abc") == "opencode --session abc\n")
+}

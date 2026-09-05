@@ -37,6 +37,11 @@ public struct Config: Equatable, Sendable {
     public var cursorStyle: CursorStyleSetting = .bar
     /// nil means the user's login shell.
     public var shell: String?
+    /// Flags added to every `claude` line the app writes into a shell — a
+    /// session resumed from the sidebar, a pane restored with its session.
+    /// Empty by default: `--dangerously-skip-permissions` is a choice, not a
+    /// default a terminal makes for you.
+    public var claudeFlags: String = ""
     /// Menu action name to key equivalent, as in `split_right = "d"`.
     ///
     /// Always complete: the file overrides entries one at a time, so the app
@@ -110,6 +115,9 @@ public struct Config: Equatable, Sendable {
                 config.shell = shell
             }
             if let value = terminal["shell_integration"]?.boolValue { config.shellIntegration = value }
+            if let value = terminal["claude_flags"]?.stringValue {
+                config.claudeFlags = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
             if let value = terminal["command_blocks"]?.boolValue { config.commandBlocks = value }
             if let value = terminal["block_spacing"]?.boolValue { config.blockSpacing = value }
             if let value = terminal["color_prompt"]?.boolValue { config.colorPrompt = value }
@@ -243,6 +251,8 @@ public struct Config: Equatable, Sendable {
         # auto follows the program; bar, block, underline and hollow overrule it
         cursor_style = "\(cursorStyle.rawValue)"
         \(shellLine)
+        # added to every claude line Vitra starts, e.g. "--dangerously-skip-permissions"
+        claude_flags = "\(claudeFlags)"
 
         [theme]
         name = "\(theme.name)"

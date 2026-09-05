@@ -5,6 +5,14 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Flags para o Claude Code
+
+- Nova chave `claude_flags` em `[terminal]` do `config.toml`: o que estiver ali
+  entra em **toda linha `claude` que o Vitra escreve num shell** — sessão
+  retomada pela sidebar, painel restaurado com a sessão dele. Ex.:
+  `claude_flags = "--dangerously-skip-permissions"`. Vazio por padrão: é uma
+  escolha sua, não um padrão que um terminal faz por você.
+
 ### Clicar numa linha acima do prompt também põe o cursor lá
 
 - O clique que leva o cursor do programa até o ponto clicado agora **atravessa

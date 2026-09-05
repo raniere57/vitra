@@ -1043,7 +1043,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     private func resume(_ saved: Layout.Pane, in pane: TerminalView?) {
         guard let pane, let id = saved.session else { return }
         pane.agentSession = id
-        let command = "claude --resume " + id + "\n"
+        let command = Harness.claudeCode.resumeLine(id: id)
         // The shell has to be up to read what it is handed; the same hop a new
         // tab opening on a command already makes.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
