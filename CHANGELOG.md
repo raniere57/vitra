@@ -5,6 +5,12 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Split abre na pasta do painel de origem
+
+- **Split Right / Split Down** abrem o novo terminal **na pasta em que o painel
+  em foco está**, não na raiz do favorito. Um segundo terminal ao lado do
+  primeiro existe para trabalhar no mesmo lugar.
+
 ### Arquivos ocultos no painel
 
 - A lista de arquivos do painel lateral **mostra dotfiles** (`.env`,

@@ -1068,7 +1068,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         guard let pane = focusedPane else { return nil }
         let newPane: TerminalView
         do {
-            newPane = try makePane(in: directory)
+            // A split starts where the pane it came from is: the point of a
+            // second terminal beside the first is to work in the same place.
+            newPane = try makePane(in: directory ?? pane.session.currentDirectory?.path)
         } catch {
             NSSound.beep()
             return nil
