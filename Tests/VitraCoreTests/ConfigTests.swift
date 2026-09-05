@@ -157,4 +157,5 @@ struct ConfigTests {
     defer { Harness.launchFlags[.claudeCode] = nil }
     #expect(Harness.claudeCode.resumeLine(id: "abc") == "claude --dangerously-skip-permissions --resume abc\n")
     #expect(Harness.openCode.resumeLine(id: "abc") == "opencode --session abc\n")
+    #expect(Harness.codex.resumeLine(id: "abc") == "codex resume abc\n")
 }

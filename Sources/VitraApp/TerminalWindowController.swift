@@ -78,6 +78,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     private let sidebarButton = TitleBarButton()
     private let sessionsButton = TitleBarButton()
     private let openCodeButton = TitleBarButton()
+    private let codexButton = TitleBarButton()
 
     /// Everything right of the rail: the panes, and the panel when it is open.
     private let bodyView = NSView()
@@ -240,16 +241,23 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             button: openCodeButton,
             toggles: true
         )
+        makeIconButton(
+            image: Harness.codex.icon,
+            tooltip: "Codex sessions (⌥⌘X)",
+            action: #selector(toggleCodexFromButton),
+            button: codexButton,
+            toggles: true
+        )
 
         // Bare buttons on this side: no well around them, only the open one
         // lit. The well made the pair read as a single control with a smudge
         // in the middle.
-        let row = NSStackView(views: [sidebarButton, sessionsButton, openCodeButton, pathLabel, sessionLabel])
+        let row = NSStackView(views: [sidebarButton, sessionsButton, openCodeButton, codexButton, pathLabel, sessionLabel])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 4
         row.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 8)
-        row.setCustomSpacing(10, after: openCodeButton)
+        row.setCustomSpacing(10, after: codexButton)
         row.frame = NSRect(x: 0, y: 0, width: 520, height: 28)
 
         let accessory = NSTitlebarAccessoryViewController()
@@ -422,6 +430,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             (sidebarButton, open == .folders),
             (sessionsButton, open == .sessions(.claudeCode)),
             (openCodeButton, open == .sessions(.openCode)),
+            (codexButton, open == .sessions(.codex)),
         ]
         for (button, isOn) in states {
             button.state = isOn ? .on : .off
@@ -651,6 +660,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     @objc private func toggleSessionsFromButton(_ sender: Any?) { toggleSessions() }
     @objc private func toggleOpenCodeFromButton(_ sender: Any?) { toggleSessions(.openCode) }
+    @objc private func toggleCodexFromButton(_ sender: Any?) { toggleSessions(.codex) }
 
     /// The list of tabs these terminals can be moved into.
     ///

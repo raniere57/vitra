@@ -15,6 +15,7 @@ extension Harness {
             switch self {
             case .claudeCode: Harness.drawSpark(in: rect)
             case .openCode: Harness.drawDiamond(in: rect)
+            case .codex: Harness.drawHexagon(in: rect)
             }
             return true
         }
@@ -40,6 +41,26 @@ extension Harness {
         path.lineCapStyle = .round
         NSColor.black.setStroke()
         path.stroke()
+    }
+
+    /// A hexagon with a dot at heart: Codex's mark in the sidebar, in the same
+    /// geometric family as the two beside it.
+    private static func drawHexagon(in rect: NSRect) {
+        let centre = NSPoint(x: rect.midX, y: rect.midY)
+        let radius: CGFloat = 6.4
+        let path = NSBezierPath()
+        for corner in 0 ..< 6 {
+            let angle = CGFloat(corner) * .pi / 3 + .pi / 6
+            let point = NSPoint(x: centre.x + cos(angle) * radius, y: centre.y + sin(angle) * radius)
+            corner == 0 ? path.move(to: point) : path.line(to: point)
+        }
+        path.close()
+        path.lineWidth = 1.7
+        path.lineJoinStyle = .round
+        NSColor.black.setStroke()
+        path.stroke()
+        NSColor.black.setFill()
+        NSBezierPath(ovalIn: NSRect(x: centre.x - 1.6, y: centre.y - 1.6, width: 3.2, height: 3.2)).fill()
     }
 
     /// A diamond around a diamond: the mark opencode's sessions carry, opened

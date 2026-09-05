@@ -56,6 +56,7 @@ public struct Config: Equatable, Sendable {
         "folder_sidebar": "s",
         "sessions_sidebar": "c",
         "opencode_sidebar": "o",
+        "codex_sidebar": "x",
         "clear": "k",
     ]
 

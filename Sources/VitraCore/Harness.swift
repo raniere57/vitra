@@ -9,6 +9,7 @@ import Foundation
 public enum Harness: String, Codable, Sendable, CaseIterable, Identifiable {
     case claudeCode
     case openCode
+    case codex
 
     public var id: String { rawValue }
 
@@ -17,6 +18,7 @@ public enum Harness: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .claudeCode: return "Claude Code"
         case .openCode: return "opencode"
+        case .codex: return "Codex"
         }
     }
 
@@ -25,6 +27,7 @@ public enum Harness: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .claudeCode: return "claude"
         case .openCode: return "opencode"
+        case .codex: return "codex"
         }
     }
 
@@ -33,6 +36,7 @@ public enum Harness: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .claudeCode: return "✳"
         case .openCode: return "◆"
+        case .codex: return "⬡"
         }
     }
 
@@ -42,6 +46,7 @@ public enum Harness: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .claudeCode: return "~/.claude/projects"
         case .openCode: return "opencode's store"
+        case .codex: return "~/.codex"
         }
     }
 
@@ -52,6 +57,8 @@ public enum Harness: String, Codable, Sendable, CaseIterable, Identifiable {
             return ClaudeSessionStore.recent(limit: limit, includeArchived: includeArchived)
         case .openCode:
             return OpenCodeSessionStore.recent(limit: limit, includeArchived: includeArchived)
+        case .codex:
+            return CodexSessionStore.recent(limit: limit, includeArchived: includeArchived)
         }
     }
 
@@ -68,7 +75,7 @@ public enum Harness: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .claudeCode:
             return ClaudeSessionStore.matching(title: title, directory: directory, in: sessions)
-        case .openCode:
+        case .openCode, .codex:
             guard let directory else { return nil }
             return sessions
                 .filter { directory == $0.projectPath || directory.hasPrefix($0.projectPath + "/") }
@@ -102,6 +109,7 @@ public enum Harness: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .claudeCode: return launchLine + " --resume " + id + "\n"
         case .openCode: return launchLine + " --session " + id + "\n"
+        case .codex: return launchLine + " resume " + id + "\n"
         }
     }
 

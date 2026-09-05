@@ -101,6 +101,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         currentController?.toggleSessions(.openCode)
     }
 
+    @objc func toggleCodexSidebar(_ sender: Any?) {
+        currentController?.toggleSessions(.codex)
+    }
+
     @objc func splitHorizontally(_ sender: Any?) {
         currentController?.splitFocusedPane(vertical: true)
     }

@@ -189,6 +189,10 @@ filtro busca títulos e nomes de projeto.
 
 ### opencode
 
+`Opt-Cmd-X`, ou o quarto botão da barra de título (hexágono), faz o mesmo para o
+**Codex**: as sessões saem do índice `~/.codex/state_*.sqlite`, e o clique abre
+`codex resume <id>`.
+
 `Opt-Cmd-O`, ou o terceiro botão da barra de título, abre a mesma barra lateral
 nas **sessões do opencode** — a lista tem as mesmas linhas, o mesmo filtro e a
 mesma marca de "é esta que está rodando aqui", lida do banco SQLite do opencode

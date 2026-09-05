@@ -5,6 +5,15 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Codex na sidebar
+
+- **Terceiro harness: Codex** (OpenAI). Botão próprio na barra de título
+  (hexágono), **View → Codex Sessions (`⌥⌘X`)**, e a mesma sidebar dos outros:
+  as sessões vêm do índice do próprio Codex (`~/.codex/state_*.sqlite`, tabela
+  `threads` — a versão no nome sobe com o schema e a maior é a em uso), e um
+  clique abre um painel já em `codex resume <id>`. Título: o nome dado, senão o
+  título do Codex, senão a primeira linha da primeira mensagem, senão a pasta.
+
 ### Flags para o Claude Code
 
 - Nova chave `claude_flags` em `[terminal]` do `config.toml`: o que estiver ali
