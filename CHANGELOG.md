@@ -5,6 +5,11 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Arquivos ocultos no painel
+
+- A lista de arquivos do painel lateral **mostra dotfiles** (`.env`,
+  `.gitignore`, `.github/`…). Ver o que um projeto tem inclui o que ele esconde.
+
 ### Codex na sidebar
 
 - **Terceiro harness: Codex** (OpenAI). Botão próprio na barra de título

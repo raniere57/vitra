@@ -59,7 +59,9 @@ final class FileListView: NSView, PreviewContentView, NSTableViewDataSource, NST
     }
 
     func reload() {
-        entries = DirectoryListing.entries(of: directory)
+        // Dotfiles included: the panel is for looking at what a project has,
+        // and `.env`, `.gitignore` and a `.github/` are what it has.
+        entries = DirectoryListing.entries(of: directory, includeHidden: true)
         table.reloadData()
         table.scrollRowToVisible(0)
     }
