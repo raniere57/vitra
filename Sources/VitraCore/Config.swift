@@ -42,6 +42,10 @@ public struct Config: Equatable, Sendable {
     /// Empty by default: `--dangerously-skip-permissions` is a choice, not a
     /// default a terminal makes for you.
     public var claudeFlags: String = ""
+    /// Same, for opencode and Codex. Codex's full-access flag, for one:
+    /// `--dangerously-bypass-approvals-and-sandbox`.
+    public var opencodeFlags: String = ""
+    public var codexFlags: String = ""
     /// Menu action name to key equivalent, as in `split_right = "d"`.
     ///
     /// Always complete: the file overrides entries one at a time, so the app
@@ -118,6 +122,12 @@ public struct Config: Equatable, Sendable {
             if let value = terminal["shell_integration"]?.boolValue { config.shellIntegration = value }
             if let value = terminal["claude_flags"]?.stringValue {
                 config.claudeFlags = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if let value = terminal["opencode_flags"]?.stringValue {
+                config.opencodeFlags = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if let value = terminal["codex_flags"]?.stringValue {
+                config.codexFlags = value.trimmingCharacters(in: .whitespacesAndNewlines)
             }
             if let value = terminal["command_blocks"]?.boolValue { config.commandBlocks = value }
             if let value = terminal["block_spacing"]?.boolValue { config.blockSpacing = value }
@@ -254,6 +264,9 @@ public struct Config: Equatable, Sendable {
         \(shellLine)
         # added to every claude line Vitra starts, e.g. "--dangerously-skip-permissions"
         claude_flags = "\(claudeFlags)"
+        opencode_flags = "\(opencodeFlags)"
+        # Codex full access: "--dangerously-bypass-approvals-and-sandbox"
+        codex_flags = "\(codexFlags)"
 
         [theme]
         name = "\(theme.name)"

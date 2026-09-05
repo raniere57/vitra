@@ -5,6 +5,17 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Layout salvo ao vivo, e flags para todos os agentes
+
+- **O layout é gravado a cada mudança, com os painéis vivos** — não só na saída,
+  quando o sistema já começou a matar os shells e um shell morto não tem pasta
+  nem sessão para dar. Era por isso que nada reabria: tudo salvava vazio. Agora
+  a gravação acontece 1,5 s depois da última mudança, lendo os painéis vivos, e
+  só quando algo muda (janela ociosa não escreve nada).
+- **`codex_flags` e `opencode_flags`** em `[terminal]`, iguais ao `claude_flags`:
+  entram em toda linha que o Vitra escreve para aquele agente. Para o Codex abrir
+  já em acesso total: `codex_flags = "--dangerously-bypass-approvals-and-sandbox"`.
+
 ### O layout não perde mais a pasta dos painéis
 
 - Ao salvar o layout na saída, o diretório de cada painel vinha vazio: o `cwd`

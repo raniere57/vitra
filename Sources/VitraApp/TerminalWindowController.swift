@@ -510,6 +510,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     /// Points both sidebars at the folder the focused terminal is in.
     func refreshDirectory() {
+        (NSApp.delegate as? AppDelegate)?.scheduleLayoutSave()
         let directory = focusedPane?.session.currentDirectory
         updateBreadcrumb()
         sidebar.reveal(directory)
@@ -906,6 +907,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     /// Turns the focus border on once a window holds more than one pane.
     private func refreshFocusIndicators() {
+        (NSApp.delegate as? AppDelegate)?.scheduleLayoutSave()
         let many = panes.count > 1
         let tint = bookmark?.colorHex.flatMap { NSColor(hex: $0) } ?? .controlAccentColor
         panes.forEach {

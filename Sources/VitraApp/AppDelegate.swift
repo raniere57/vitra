@@ -139,6 +139,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let (loaded, problems) = Config.load()
         config = loaded
         Harness.launchFlags[.claudeCode] = loaded.claudeFlags
+        Harness.launchFlags[.openCode] = loaded.opencodeFlags
+        Harness.launchFlags[.codex] = loaded.codexFlags
         report(problems)
 
         if !FileManager.default.fileExists(atPath: Config.path.path) {
@@ -164,6 +166,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func configurationChanged(_ config: Config, _ problems: [String]) {
         self.config = config
         Harness.launchFlags[.claudeCode] = config.claudeFlags
+        Harness.launchFlags[.openCode] = config.opencodeFlags
+        Harness.launchFlags[.codex] = config.codexFlags
         report(problems)
         rebuildMenu()
         windows.forEach { $0.apply(config) }
@@ -317,6 +321,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bridge?.stop()
     }
 
+    /// A pending debounced layout write, replaced each time something changes.
+    private var layoutSaveWork: DispatchWorkItem?
+    /// True while the layout is being rebuilt from disk, so the half-built
+    /// windows are not written back over the file being read.
+    private var isRestoring = false
+
+    /// Writes the layout a moment after the last change, while the panes are
+    /// alive to be read.
+    ///
+    /// The teardown save reads shells the OS has already begun killing, and a
+    /// dead shell has no working directory to give — every pane then saves with
+    /// no folder and no session, and nothing reopens. Saving on change, off the
+    /// live panes, is the layout that actually round-trips. Debounced, and only
+    /// on change, so an idle window writes nothing.
+    func scheduleLayoutSave() {
+        guard !isRestoring else { return }
+        layoutSaveWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.saveLayout() }
+        layoutSaveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+    }
+
     // MARK: - Layout
 
     /// Writes down how the windows were arranged, so the next launch can open
@@ -361,6 +387,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func restoreLayout() -> Bool {
         guard Self.commandFromArguments() == nil, Self.savesLayout, let layout = Layout.load()
         else { return false }
+        isRestoring = true
+        defer { DispatchQueue.main.async { self.isRestoring = false } }
 
         var leaders: [Int: NSWindow] = [:]
         for saved in layout.windows {
