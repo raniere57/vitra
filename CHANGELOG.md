@@ -5,6 +5,13 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### A borda do terminal diz qual agente é
+
+- O anel em volta de um painel toma **a cor do agente que roda nele**: Claude
+  laranja, opencode ciano, Codex verde. Um painel sozinho rodando um agente
+  também ganha o anel, então dá para saber de longe em qual sessão cada terminal
+  está trabalhando. Sem agente, o anel volta a ser a cor da pasta.
+
 ### Clicar numa sessão usa o terminal vazio, se houver
 
 - Clicar numa sessão da sidebar **abre no terminal em foco quando ele está

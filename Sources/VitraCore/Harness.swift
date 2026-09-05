@@ -31,6 +31,17 @@ public enum Harness: String, Codable, Sendable, CaseIterable, Identifiable {
         }
     }
 
+    /// The colour of this agent, for the ring around a pane running it: the
+    /// terminal wears the session's colour so which agent it holds is read at a
+    /// glance. Claude orange, opencode cyan, Codex green.
+    public var tintHex: String {
+        switch self {
+        case .claudeCode: return "#d97757"
+        case .openCode: return "#3aa3ff"
+        case .codex: return "#4bbf73"
+        }
+    }
+
     /// The glyph in front of a session in the sidebar and the title bar.
     public var marker: String {
         switch self {

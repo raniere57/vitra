@@ -521,6 +521,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     /// Points both sidebars at the folder the focused terminal is in.
     func refreshDirectory() {
         (NSApp.delegate as? AppDelegate)?.scheduleLayoutSave()
+        refreshFocusIndicators()
         let directory = focusedPane?.session.currentDirectory
         updateBreadcrumb()
         sidebar.reveal(directory)
@@ -919,10 +920,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     private func refreshFocusIndicators() {
         (NSApp.delegate as? AppDelegate)?.scheduleLayoutSave()
         let many = panes.count > 1
-        let tint = bookmark?.colorHex.flatMap { NSColor(hex: $0) } ?? .controlAccentColor
+        let folderTint = bookmark?.colorHex.flatMap { NSColor(hex: $0) } ?? .controlAccentColor
         panes.forEach {
+            // The agent's colour when the pane runs one, the folder's otherwise.
+            // A lone pane running an agent still gets its ring, so which session
+            // a terminal holds is legible even before it is split.
+            let harness = $0.agentHarness ?? runningHarness(in: $0)
+            let tint = harness.flatMap { NSColor(hex: $0.tintHex) } ?? folderTint
             $0.focusTint = tint
-            $0.showsFocusIndicator = many
+            $0.showsFocusIndicator = many || harness != nil
         }
         updateBreadcrumb()
     }
