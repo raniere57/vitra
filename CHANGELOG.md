@@ -5,6 +5,13 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Clicar numa sessão usa o terminal vazio, se houver
+
+- Clicar numa sessão da sidebar **abre no terminal em foco quando ele está
+  vazio** (um prompt ocioso, sem Claude, opencode nem Codex rodando), em vez de
+  sempre dividir um terminal novo à direita. Um painel que já roda algo continua
+  intocado: a sessão abre ao lado, para não perder o que está nele.
+
 ### Layout salvo ao vivo, e flags para todos os agentes
 
 - **O layout é gravado a cada mudança, com os painéis vivos** — não só na saída,

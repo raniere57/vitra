@@ -383,13 +383,23 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         sidebar.setCurrentSession(session)
     }
 
-    /// Opens a session in a pane of its own, beside whatever is already here.
+    /// Opens a session, in the focused pane when it is an idle shell, otherwise
+    /// in a pane of its own beside it.
     ///
-    /// Never in the pane that has the keyboard: that pane is usually in a
-    /// session of its own, and taking it over to open a second one loses the
-    /// first. The new pane starts in the session's project, and the old one is
-    /// left running for as long as the user wants it.
+    /// A pane already running something — an agent, or any job — is not taken
+    /// over: opening a second session in it would lose the first. But an empty
+    /// prompt is exactly where the user meant the session to open, so it opens
+    /// there rather than splitting a fresh terminal off an unused one.
     private func openSession(_ session: AgentSession) {
+        if let current = focusedPane, !current.session.isRunningProgram {
+            current.agentSession = session.id
+            current.agentHarness = session.harness
+            // cd into the project first: the focused shell may be anywhere.
+            current.session.send(text: session.resumeCommand)
+            window?.makeFirstResponder(current)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refreshDirectory() }
+            return
+        }
         guard let pane = splitFocusedPane(vertical: true, in: session.projectPath) else {
             (NSApp.delegate as? AppDelegate)?.openTab(
                 for: Bookmark(
