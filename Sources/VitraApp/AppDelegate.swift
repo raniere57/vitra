@@ -249,12 +249,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Opens a folder as a tab of the front window, which is what a folder
     /// switcher is for: the windows stay together and the tab bar becomes the
     /// list of what is open.
-    func openTab(for bookmark: Bookmark, running command: String? = nil, session: String? = nil) {
+    func openTab(for bookmark: Bookmark, running command: String? = nil, session: String? = nil, harness: Harness? = nil) {
         // A remote favourite opens a local shell that immediately becomes an
         // ssh session; the working directory stays home, because the path in
         // the favourite belongs to the other machine.
         let command = command ?? bookmark.launchCommand
-        makeWindow(asTabOf: currentController?.window, bookmark: bookmark, running: command, session: session)
+        makeWindow(asTabOf: currentController?.window, bookmark: bookmark, running: command, session: session, harness: harness)
     }
 
     private func report(_ problems: [String]) {
@@ -472,6 +472,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bookmark: Bookmark? = nil,
         running: String? = nil,
         session: String? = nil,
+        harness: Harness? = nil,
         restoring: Layout.Window? = nil,
         adopting: TerminalView? = nil
     ) {
@@ -507,7 +508,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // the window exists, rather than a timer waiting for a prompt.
             if let running {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    controller.run(running, session: session)
+                    controller.run(running, session: session, harness: harness)
                 }
             }
         } catch {

@@ -19,12 +19,17 @@ public struct Layout: Codable, Equatable, Sendable {
     /// One terminal, and what it was showing.
     public struct Pane: Codable, Equatable, Sendable {
         public var directory: String?
-        /// The Claude Code session this pane was running, to be resumed.
+        /// The agent session this pane was running, to be resumed.
         public var session: String?
+        /// Which agent that session belongs to, so it is resumed with the
+        /// right line. Absent for an older layout or a plain shell — Claude
+        /// Code is the fallback, which is what it always was.
+        public var harness: String?
 
-        public init(directory: String? = nil, session: String? = nil) {
+        public init(directory: String? = nil, session: String? = nil, harness: String? = nil) {
             self.directory = directory
             self.session = session
+            self.harness = harness
         }
     }
 

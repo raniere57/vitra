@@ -14,7 +14,7 @@ struct LayoutTests {
             vertical: true,
             fractions: [0.6, 0.4],
             children: [
-                .pane(Layout.Pane(directory: "/Users/x/vitra", session: "abc")),
+                .pane(Layout.Pane(directory: "/Users/x/vitra", session: "abc", harness: "codex")),
                 .split(
                     vertical: false,
                     fractions: [0.5, 0.5],
@@ -69,4 +69,26 @@ struct LayoutTests {
         try Data("{ not json".utf8).write(to: url)
         #expect(Layout.load(from: url) == nil)
     }
+
+    @Test func aPaneRemembersWhichAgentItsSessionBelongsTo() throws {
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let layout = Layout(windows: [
+            Layout.Window(
+                directory: "/Users/x/vitra",
+                frame: Layout.Frame(x: 0, y: 0, width: 800, height: 600),
+                sidebar: Layout.Sidebar(expanded: false, mode: "folders", width: 40),
+                tabGroup: 0,
+                root: .pane(Layout.Pane(directory: "/Users/x/vitra", session: "t-b", harness: "codex"))
+            ),
+        ])
+        try layout.save(to: url)
+        let loaded = try #require(Layout.load(from: url))
+        guard case let .pane(pane) = loaded.windows[0].root else {
+            Issue.record("expected a pane"); return
+        }
+        #expect(pane.session == "t-b")
+        #expect(pane.harness == "codex")
+    }
+
 }

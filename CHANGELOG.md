@@ -5,6 +5,14 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### Sessões de qualquer agente reabrem sozinhas
+
+- Ao fechar e reabrir o Vitra, uma sessão **Codex ou opencode** era retomada com
+  `claude --resume`, que não é o comando delas, e não abria. O layout agora
+  guarda a qual agente cada sessão pertence e a retoma com a linha certa
+  (`codex resume`, `opencode --session`, `claude --resume`). Layouts antigos, sem
+  essa marca, continuam assumindo Claude Code.
+
 ### Split abre na pasta do painel de origem
 
 - **Split Right / Split Down** abrem o novo terminal **na pasta em que o painel

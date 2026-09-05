@@ -36,6 +36,10 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// this is what the sessions sidebar marks as "you are here".
     var agentSession: String?
 
+    /// Which agent `agentSession` belongs to, so a saved layout resumes it with
+    /// the right command. Set beside `agentSession`; cleared with it.
+    var agentHarness: Harness?
+
     /// The last title the program in this pane set, kept per pane rather than
     /// per window: an unfocused split has a title too, and it is how a session
     /// nobody launched from the sidebar is recognised.
@@ -424,6 +428,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         // a shell takes a moment to start what it was handed, and a mark that
         // clears itself in that gap never appears at all.
         agentSession = nil
+        agentHarness = nil
         commandStatuses.insert(status, at: 0)
         if commandStatuses.count > 200 { commandStatuses.removeLast() }
         commandStartedAt = nil

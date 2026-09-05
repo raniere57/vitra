@@ -374,9 +374,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     ///
     /// `session` is the Claude Code session the command resumes, when it is
     /// one: the sidebar marks the pane that is in it.
-    func run(_ command: String, session: String? = nil) {
+    func run(_ command: String, session: String? = nil, harness: Harness? = nil) {
         guard let pane = focusedPane else { return }
         pane.agentSession = session
+        pane.agentHarness = harness
         pane.session.send(text: command)
         window?.makeFirstResponder(pane)
         sidebar.setCurrentSession(session)
@@ -396,11 +397,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
                     path: session.projectPath
                 ),
                 running: session.resumeCommand,
-                session: session.id
+                session: session.id,
+                harness: session.harness
             )
             return
         }
         pane.agentSession = session.id
+        pane.agentHarness = session.harness
         // The shell has to be up to read what it is handed, the same hop a new
         // tab makes.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self, weak pane] in
@@ -954,12 +957,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             // The same recognition the sidebar's mark uses: most sessions were
             // never launched from the sidebar, and those are exactly the ones
             // worth reopening.
-            let session = pane.agentSession ?? runningHarness(in: pane)?.matching(
-                title: pane.programTitle,
-                directory: directory,
-                in: sessions
-            )?.id
-            return .pane(Layout.Pane(directory: directory, session: session))
+            let running = runningHarness(in: pane)
+            let match = pane.agentSession == nil
+                ? running?.matching(title: pane.programTitle, directory: directory, in: sessions)
+                : nil
+            let session = pane.agentSession ?? match?.id
+            let harness = session == nil ? nil : (pane.agentHarness ?? running ?? match?.harness ?? .claudeCode)
+            return .pane(Layout.Pane(directory: directory, session: session, harness: harness?.rawValue))
         }
 
         let children = split.arrangedSubviews
@@ -1049,11 +1053,22 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
         }
     }
 
-    /// Puts a pane back in the Claude Code session it was in.
+    /// Puts a pane back in the agent session it was in.
     private func resume(_ saved: Layout.Pane, in pane: TerminalView?) {
         guard let pane, let id = saved.session else { return }
+        let harness = saved.harness.flatMap(Harness.init(rawValue:)) ?? .claudeCode
         pane.agentSession = id
-        let command = Harness.claudeCode.resumeLine(id: id)
+        pane.agentHarness = harness
+        let command = harness.resumeCommand(
+            for: AgentSession(
+                id: id,
+                title: "",
+                projectPath: saved.directory ?? pane.session.currentDirectory?.path ?? "",
+                modified: .init(),
+                isArchived: false,
+                harness: harness
+            )
+        )
         // The shell has to be up to read what it is handed; the same hop a new
         // tab opening on a command already makes.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
