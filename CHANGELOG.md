@@ -5,6 +5,15 @@ As datas são o dia em que a imagem de disco foi construída.
 
 ## Não publicado
 
+### O layout não perde mais a pasta dos painéis
+
+- Ao salvar o layout na saída, o diretório de cada painel vinha vazio: o `cwd`
+  é lido do kernel ao vivo, e na saída os shells já estão sendo encerrados, sem
+  `cwd` para dar. Sem a pasta, o reconhecimento por diretório (Codex, opencode)
+  também falhava e a sessão não voltava. A sessão passa a **guardar a última
+  pasta e o último programa em foco** enquanto vivos, e é isso que o layout
+  grava.
+
 ### Sessões de qualquer agente reabrem sozinhas
 
 - Ao fechar e reabrir o Vitra, uma sessão **Codex ou opencode** era retomada com

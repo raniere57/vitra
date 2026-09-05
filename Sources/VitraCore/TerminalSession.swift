@@ -77,13 +77,26 @@ public final class TerminalSession: @unchecked Sendable {
     ///
     /// Read from the kernel rather than tracked: a shell that `cd`s tells nobody,
     /// and asking the process is the only answer that is never stale.
-    public var currentDirectory: URL? { pty.workingDirectory }
+    /// The last directory the kernel gave for this shell, kept because the
+    /// kernel gives nothing once the process is gone: a layout saved while the
+    /// app is tearing its shells down would otherwise lose every pane's folder.
+    private var lastKnownDirectory: URL?
+    private var lastKnownForeground: String?
+
+    public var currentDirectory: URL? {
+        if let live = pty.workingDirectory { lastKnownDirectory = live; return live }
+        return lastKnownDirectory
+    }
+
+    public var foregroundName: String? {
+        if let live = pty.foregroundName { lastKnownForeground = live; return live }
+        return lastKnownForeground
+    }
 
     /// Whether a program - not the shell - is holding the terminal.
     public var isRunningProgram: Bool { pty.hasForegroundJob }
 
     /// The program holding the terminal, by name.
-    public var foregroundName: String? { pty.foregroundName }
 
     /// Starts reading the child's output.
     ///

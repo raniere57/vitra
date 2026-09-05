@@ -957,9 +957,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             // The same recognition the sidebar's mark uses: most sessions were
             // never launched from the sidebar, and those are exactly the ones
             // worth reopening.
+            // A pane launched from the sidebar carries its session and agent
+            // outright. One launched by hand is recognised: by directory for the
+            // agents that name nothing, by title for Claude Code.
             let running = runningHarness(in: pane)
             let match = pane.agentSession == nil
-                ? running?.matching(title: pane.programTitle, directory: directory, in: sessions)
+                ? (running ?? .claudeCode).matching(title: pane.programTitle, directory: directory, in: sessions)
                 : nil
             let session = pane.agentSession ?? match?.id
             let harness = session == nil ? nil : (pane.agentHarness ?? running ?? match?.harness ?? .claudeCode)
