@@ -218,7 +218,7 @@ private func run(
     #expect(Scoreboard.untriedLine(offers, history: history, kind: .review)
         == "  not tried yet: cursor cursor-grok-4.5-low-fast, claude haiku (high)")
     #expect(Scoreboard.untriedLine(offers, history: history, kind: .explore)
-        == "  not tried yet: cursor cursor-grok-4.5-low-fast, cursor cursor-grok-4.6-medium-fast, claude haiku (high)")
+        == "  not tried yet: cursor cursor-grok-4.5-low-fast, cursor cursor-grok-4.6-medium-fast")
     #expect(Scoreboard.untriedLine([], history: history, kind: .review) == nil)
 }
 
@@ -226,7 +226,7 @@ private func run(
     let offers = (1...17).map { ModelCatalog.Offer(cli: .cursor, model: "grok-\($0)", effort: nil) }
     let line = Scoreboard.untriedLine(offers, history: [], kind: .review)
 
-    #expect(line?.hasSuffix(", grok-15, and 2 more") == true)
+    #expect(line?.hasSuffix(", cursor grok-15, and 2 more") == true)
     #expect(line?.contains("grok-16") == false)
 }
 

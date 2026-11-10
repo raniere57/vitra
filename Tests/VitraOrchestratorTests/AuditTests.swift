@@ -110,10 +110,12 @@ private func reviews(
 @Test func onceEveryCheapAuditorHasTwoReviewsTheRankingDecides() {
     // Each cheap auditor has two delivered reviews, so the order goes back to
     // the scoreboard: the top rated grok-4.7 audits, not the cheap list's first.
+    // A gemini rating makes the trial over: three providers have one.
     let history = reviews(.cursor, "grok-4.7-low-fast", score: 5)
         + reviews(.opencode, "opencode/glm-5.3-flash-free", score: 4, step: 10)
         + reviews(.cursor, "cursor-grok-4.6-low-fast", score: 3, step: 20)
         + reviews(.cursor, "cursor-grok-4.5-low-fast", score: 3, step: 30)
+        + reviews(.gemini, "gemini-3.8-flash-low", score: 3, step: 40)
     let chosen = Audit.chooseAuditor(
         implementer: implementer(.claude),
         history: history,

@@ -1712,3 +1712,134 @@ AppKit.NSTableView.rowView:3:24: note: calls to instance method 'rowView(atRow:m
 [62/64] Write Objects.LinkFileList
 [63/64] Linking VitraPackageTests
 Build complete! (37.59s)
+Test Suite 'Selected tests' started at 2026-11-10 16:24:10.620.
+Test Suite 'VitraPackageTests.xctest' started at 2026-11-10 16:24:10.627.
+Test Suite 'VitraPackageTests.xctest' passed at 2026-11-10 16:24:10.627.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-11-10 16:24:10.627.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.007) seconds
+◇ Test run started.
+↳ Testing Library Version: 1743
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test aSpawnedAgentIsWaitedForAndItsAnswerComesBack() started.
+✔ Test aSpawnedAgentIsWaitedForAndItsAnswerComesBack() passed after 0.788 seconds.
+◇ Test theOrchestratorRatesADeliveryAndTheScoreboardShowsIt() started.
+✔ Test theOrchestratorRatesADeliveryAndTheScoreboardShowsIt() passed after 0.760 seconds.
+◇ Test aSpawnedAgentRemembersWhichProjectsMaestroAskedForIt() started.
+✔ Test aSpawnedAgentRemembersWhichProjectsMaestroAskedForIt() passed after 0.015 seconds.
+◇ Test aFailedAgentIsReportedInTheResultNotAsAToolError() started.
+✔ Test aFailedAgentIsReportedInTheResultNotAsAToolError() passed after 1.069 seconds.
+◇ Test anAgentStillGoingAtTheTimeoutIsReportedAsRunning() started.
+✔ Test anAgentStillGoingAtTheTimeoutIsReportedAsRunning() passed after 2.020 seconds.
+◇ Test aWorktreeSetupLineThatWasSkippedIsInTheReportAndNothingElseIs() started.
+✔ Test aWorktreeSetupLineThatWasSkippedIsInTheReportAndNothingElseIs() passed after 0.001 seconds.
+◇ Test badArgumentsAreToolErrorsTheOrchestratorCanRead() started.
+✔ Test badArgumentsAreToolErrorsTheOrchestratorCanRead() passed after 0.002 seconds.
+◇ Test aLongAnswerIsCutSoOneWorkerCannotFloodTheOrchestrator() started.
+✔ Test aLongAnswerIsCutSoOneWorkerCannotFloodTheOrchestrator() passed after 0.001 seconds.
+◇ Test theReportOfAWorkedBranchSaysWhereItsWorkIsAndHowToMergeIt() started.
+✔ Test theReportOfAWorkedBranchSaysWhereItsWorkIsAndHowToMergeIt() passed after 0.355 seconds.
+◇ Test aCommitARefusingHookRejectsIsReportedAsFailedWithTheEditsLeftInTheWorktree() started.
+✔ Test aCommitARefusingHookRejectsIsReportedAsFailedWithTheEditsLeftInTheWorktree() passed after 2.562 seconds.
+◇ Test aFinishedEditingDeliveryStartsExactlyOneAudit() started.
+✔ Test aFinishedEditingDeliveryStartsExactlyOneAudit() passed after 1.178 seconds.
+◇ Test twoWaitsAtOnceStartExactlyOneAudit() started.
+✔ Test twoWaitsAtOnceStartExactlyOneAudit() passed after 1.175 seconds.
+◇ Test theReportDoesNotOfferToRemoveTheWorktreeWhileTheAuditReadsIt() started.
+✔ Test theReportDoesNotOfferToRemoveTheWorktreeWhileTheAuditReadsIt() passed after 3.170 seconds.
+◇ Test aDiffThatCannotBeReadStartsNoAuditor() started.
+✔ Test aDiffThatCannotBeReadStartsNoAuditor() passed after 1.233 seconds.
+◇ Test aDeliveryWithNoCommitsStartsNoAudit() started.
+✔ Test aDeliveryWithNoCommitsStartsNoAudit() passed after 1.266 seconds.
+◇ Test aRunSpawnedWithAuditFalseIsNotAudited() started.
+✔ Test aRunSpawnedWithAuditFalseIsNotAudited() passed after 1.468 seconds.
+◇ Test aDeliveryWithNoAuditorAvailableIsSaidInTheReportNotAsAFailure() started.
+✔ Test aDeliveryWithNoAuditorAvailableIsSaidInTheReportNotAsAFailure() passed after 0.989 seconds.
+◇ Test agentMergePutsTheBranchOnTheCheckoutAndCleansUp() started.
+✔ Test agentMergePutsTheBranchOnTheCheckoutAndCleansUp() passed after 1.219 seconds.
+◇ Test aConflictingMergeIsAbortedAndLeavesTheWorkInPlace() started.
+✔ Test aConflictingMergeIsAbortedAndLeavesTheWorkInPlace() passed after 1.364 seconds.
+◇ Test agentMergeDiscardDropsTheBranchWithoutMergingIt() started.
+✔ Test agentMergeDiscardDropsTheBranchWithoutMergingIt() passed after 1.728 seconds.
+◇ Test agentMergeRefusesAnAgentThatIsStillRunning() started.
+✔ Test agentMergeRefusesAnAgentThatIsStillRunning() passed after 2.407 seconds.
+◇ Test agentMergeRefusesWhileItsAuditIsStillReadingTheWorktree() started.
+✔ Test agentMergeRefusesWhileItsAuditIsStillReadingTheWorktree() passed after 3.110 seconds.
+◇ Test agentMergeRefusesACheckoutWithUncommittedTrackedChanges() started.
+✔ Test agentMergeRefusesACheckoutWithUncommittedTrackedChanges() passed after 1.297 seconds.
+◇ Test agentMergeRefusesADeliveryWhoseCommitFailed() started.
+✔ Test agentMergeRefusesADeliveryWhoseCommitFailed() passed after 3.930 seconds.
+◇ Test agentMergeRefusesAWorktreeWithUncommittedEdits() started.
+✔ Test agentMergeRefusesAWorktreeWithUncommittedEdits() passed after 1.051 seconds.
+◇ Test agentMergeRefusesACheckoutThatIsAlreadyMerging() started.
+✔ Test agentMergeRefusesACheckoutThatIsAlreadyMerging() passed after 1.606 seconds.
+◇ Test agentToolsRunLocallyAndPanelToolsGoToTheWindow() started.
+✔ Test agentToolsRunLocallyAndPanelToolsGoToTheWindow() passed after 0.001 seconds.
+◇ Test theModelCatalogueSaysWhatEachCLICanRunAndWhatIsMissing() started.
+✔ Test theModelCatalogueSaysWhatEachCLICanRunAndWhatIsMissing() passed after 0.001 seconds.
+◇ Test aCLIThatAnswersWithAnErrorHasNoModels() started.
+✔ Test aCLIThatAnswersWithAnErrorHasNoModels() passed after 0.002 seconds.
+◇ Test aRealCursorListingKeepsEveryGrokBeyondTheFirstLines() started.
+✔ Test aRealCursorListingKeepsEveryGrokBeyondTheFirstLines() passed after 0.001 seconds.
+◇ Test anExplorationTurnGoesToAnUntriedCheapAuditor() started.
+✔ Test anExplorationTurnGoesToAnUntriedCheapAuditor() passed after 0.001 seconds.
+◇ Test anExplorationTurnFallsBackWhenNoUntriedCandidateIsInstalled() started.
+✔ Test anExplorationTurnFallsBackWhenNoUntriedCandidateIsInstalled() passed after 0.001 seconds.
+◇ Test aCheapAuditorWithFewerThanTwoReviewsIsTriedBeforeTheRanking() started.
+✔ Test aCheapAuditorWithFewerThanTwoReviewsIsTriedBeforeTheRanking() passed after 0.001 seconds.
+◇ Test onceEveryCheapAuditorHasTwoReviewsTheRankingDecides() started.
+✘ Test onceEveryCheapAuditorHasTwoReviewsTheRankingDecides() recorded an issue at AuditTests.swift:122:5: Expectation failed: (chosen?.model → nil) == "grok-4.7-low-fast"
+✘ Test onceEveryCheapAuditorHasTwoReviewsTheRankingDecides() failed after 0.008 seconds with 1 issue.
+◇ Test theBestRatedReviewerFromAnotherProviderAudits() started.
+✔ Test theBestRatedReviewerFromAnotherProviderAudits() passed after 0.001 seconds.
+◇ Test aGeminiWorkerIsNeverTheAuditor() started.
+✔ Test aGeminiWorkerIsNeverTheAuditor() passed after 0.001 seconds.
+◇ Test theImplementersOwnProviderIsNeverTheAuditor() started.
+✔ Test theImplementersOwnProviderIsNeverTheAuditor() passed after 0.001 seconds.
+◇ Test withNoReviewRecordTheCheapListIsUsedInOrder() started.
+✔ Test withNoReviewRecordTheCheapListIsUsedInOrder() passed after 0.001 seconds.
+◇ Test anUninstalledCLIIsNotAnAuditor() started.
+✔ Test anUninstalledCLIIsNotAnAuditor() passed after 0.001 seconds.
+◇ Test aReviewerTheTrialRulesRefuseIsPassedOver() started.
+✔ Test aReviewerTheTrialRulesRefuseIsPassedOver() passed after 0.001 seconds.
+◇ Test noAuditorWhenEveryCandidateIsGone() started.
+✔ Test noAuditorWhenEveryCandidateIsGone() passed after 0.001 seconds.
+◇ Test theAuditorIsToldTheTaskTheDiffAndHowToAnswer() started.
+✔ Test theAuditorIsToldTheTaskTheDiffAndHowToAnswer() passed after 0.001 seconds.
+◇ Test aHugeDiffIsCutAndTheAuditorIsSentToTheFiles() started.
+✔ Test aHugeDiffIsCutAndTheAuditorIsSentToTheFiles() passed after 0.542 seconds.
+◇ Test theVerdictRuleAndTheTaskComeBeforeTheFencedDiff() started.
+✔ Test theVerdictRuleAndTheTaskComeBeforeTheFencedDiff() passed after 0.001 seconds.
+◇ Test aCutDiffEndsAtAFileBoundaryAndSaysHowManyFilesWereLeftOut() started.
+✔ Test aCutDiffEndsAtAFileBoundaryAndSaysHowManyFilesWereLeftOut() passed after 0.013 seconds.
+◇ Test modelsAreRankedByTheQualityOfWhatTheyDelivered() started.
+✔ Test modelsAreRankedByTheQualityOfWhatTheyDelivered() passed after 0.001 seconds.
+◇ Test deliveryTimeIsTheMedianOfTheRunsThatDelivered() started.
+✔ Test deliveryTimeIsTheMedianOfTheRunsThatDelivered() passed after 0.001 seconds.
+◇ Test runsThatNeverGotToDeliverAreNotHeldAgainstTheModel() started.
+✔ Test runsThatNeverGotToDeliverAreNotHeldAgainstTheModel() passed after 0.001 seconds.
+◇ Test amongWorkersThatDeliverWellTheFastestComesFirstNotTheBestRated() started.
+✔ Test amongWorkersThatDeliverWellTheFastestComesFirstNotTheBestRated() passed after 0.001 seconds.
+◇ Test aFastWorkerThatOftenHasToBeRedoneIsNotFast() started.
+✔ Test aFastWorkerThatOftenHasToBeRedoneIsNotFast() passed after 0.001 seconds.
+◇ Test theScoreboardReadsAsOneLinePerModel() started.
+✔ Test theScoreboardReadsAsOneLinePerModel() passed after 0.001 seconds.
+◇ Test aModelIsJudgedSeparatelyForEachKindOfTask() started.
+✔ Test aModelIsJudgedSeparatelyForEachKindOfTask() passed after 0.001 seconds.
+◇ Test aRunRecordedBeforeKindsExistedStillLoads() started.
+✔ Test aRunRecordedBeforeKindsExistedStillLoads() passed after 0.001 seconds.
+◇ Test theSameModelAtTwoEffortsIsTwoWorkersWithTheirOwnRecords() started.
+✔ Test theSameModelAtTwoEffortsIsTwoWorkersWithTheirOwnRecords() passed after 0.001 seconds.
+◇ Test aDeliveryThatDidNotDoWhatWasAskedIsAFailureEvenThoughItRan() started.
+✔ Test aDeliveryThatDidNotDoWhatWasAskedIsAFailureEvenThoughItRan() passed after 0.001 seconds.
+◇ Test aCheapFastWorkerThatDoesWellComesBeforeADearOneThatDoesALittleBetter() started.
+✔ Test aCheapFastWorkerThatDoesWellComesBeforeADearOneThatDoesALittleBetter() passed after 0.001 seconds.
+◇ Test theUntriedLineNamesTheOfferedWorkersWithNoRunOnThatKind() started.
+✘ Test theUntriedLineNamesTheOfferedWorkersWithNoRunOnThatKind() recorded an issue at ScoreboardTests.swift:220:5: Expectation failed: (Scoreboard.untriedLine(offers, history: history, kind: .explore) → "  not tried yet: cursor cursor-grok-4.5-low-fast, cursor cursor-grok-4.6-medium-fast") == "  not tried yet: cursor cursor-grok-4.5-low-fast, cursor cursor-grok-4.6-medium-fast, claude haiku (high)"
+✘ Test theUntriedLineNamesTheOfferedWorkersWithNoRunOnThatKind() failed after 0.001 seconds with 1 issue.
+◇ Test theUntriedLineCapsItsNamesAndCountsTheRest() started.
+✘ Test theUntriedLineCapsItsNamesAndCountsTheRest() recorded an issue at ScoreboardTests.swift:229:5: Expectation failed: (line?.hasSuffix(", grok-15, and 2 more") → false) == true
+✘ Test theUntriedLineCapsItsNamesAndCountsTheRest() failed after 0.004 seconds with 1 issue.
+◇ Test theSummaryPlacesTheUntriedLineUnderItsKind() started.
+✔ Test theSummaryPlacesTheUntriedLineUnderItsKind() passed after 0.001 seconds.
+✘ Test run with 59 tests in 0 suites failed after 36.361 seconds with 3 issues.

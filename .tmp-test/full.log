@@ -1,0 +1,172 @@
+[1/1] Compiling plugin MetalShaderCompiler
+Building for debugging...
+[1/8] Write sources
+[2/8] Write swift-version--58304C5D6DBC2206.txt
+[4/7] Compiling VitraOrchestratorTests ScoreboardTests.swift
+[5/7] Compiling VitraOrchestratorTests AuditTests.swift
+[6/7] Emitting module VitraOrchestratorTests
+[6/8] Write Objects.LinkFileList
+[7/8] Linking VitraPackageTests
+Build complete! (4.03s)
+Test Suite 'All tests' started at 2026-11-10 16:25:08.033.
+Test Suite 'All tests' passed at 2026-11-10 16:25:08.037.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.005) seconds
+◇ Test run started.
+↳ Testing Library Version: 1743
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test everyAgentHasATabOfItsOwnAndTheMaestroIsWhoeverGivesNoName() started.
+✔ Test everyAgentHasATabOfItsOwnAndTheMaestroIsWhoeverGivesNoName() passed after 0.001 seconds.
+◇ Test aNewTabComesToTheFrontButATabAlreadyOpenLeavesTheUsersViewAlone() started.
+✔ Test aNewTabComesToTheFrontButATabAlreadyOpenLeavesTheUsersViewAlone() passed after 0.001 seconds.
+◇ Test aTabNobodyTouchedForHalfAnHourIsDueToClose() started.
+✔ Test aTabNobodyTouchedForHalfAnHourIsDueToClose() passed after 0.001 seconds.
+◇ Test aWorkersTabGoesWhenTheWorkerIsDoneAndNobodyElsesDoes() started.
+✔ Test aWorkersTabGoesWhenTheWorkerIsDoneAndNobodyElsesDoes() passed after 0.001 seconds.
+◇ Test closingTheTabInFrontShowsItsNeighbourAndClosingTheLastShowsNone() started.
+✔ Test closingTheTabInFrontShowsItsNeighbourAndClosingTheLastShowsNone() passed after 0.001 seconds.
+◇ Test aTabIsNamedForWhoOwnsIt() started.
+✔ Test aTabIsNamedForWhoOwnsIt() passed after 0.001 seconds.
+◇ Test vitrasServerIsAddedToACLIsSettingsWithoutDisturbingWhatIsThere() started.
+✔ Test vitrasServerIsAddedToACLIsSettingsWithoutDisturbingWhatIsThere() passed after 0.003 seconds.
+◇ Test agyIsLetCallVitrasToolsAndNothingElseItHadIsTouched() started.
+✔ Test agyIsLetCallVitrasToolsAndNothingElseItHadIsTouched() passed after 0.001 seconds.
+◇ Test aProjectShowsTheRunsInItsDirectoryAndBelowIt() started.
+✔ Test aProjectShowsTheRunsInItsDirectoryAndBelowIt() passed after 0.001 seconds.
+◇ Test aWorkerBelongsToTheProjectWhoseMaestroSpawnedItWhereverItRuns() started.
+✔ Test aWorkerBelongsToTheProjectWhoseMaestroSpawnedItWhereverItRuns() passed after 0.001 seconds.
+◇ Test aProjectIsNamedAfterItsFolder() started.
+✔ Test aProjectIsNamedAfterItsFolder() passed after 0.001 seconds.
+◇ Test aRunningWorkerSaysWhatItMayDoInsteadOfWhatItCost() started.
+✔ Test aRunningWorkerSaysWhatItMayDoInsteadOfWhatItCost() passed after 0.002 seconds.
+◇ Test aWorkersEffortIsPartOfItsNameOnTheRow() started.
+✔ Test aWorkersEffortIsPartOfItsNameOnTheRow() passed after 0.001 seconds.
+◇ Test aWorkersStartShowsTheClockWhenItStartedToday() started.
+✔ Test aWorkersStartShowsTheClockWhenItStartedToday() passed after 0.001 seconds.
+◇ Test aWorkersStartShowsDayAndMonthWhenItStartedAnotherDayOfTheYear() started.
+✔ Test aWorkersStartShowsDayAndMonthWhenItStartedAnotherDayOfTheYear() passed after 0.001 seconds.
+◇ Test aWorkersStartShowsTheYearWhenItStartedInAnotherYear() started.
+✔ Test aWorkersStartShowsTheYearWhenItStartedInAnotherYear() passed after 0.001 seconds.
+◇ Test aWorkerWithNoLabelIsTitledByTheFirstLineOfItsPrompt() started.
+✔ Test aWorkerWithNoLabelIsTitledByTheFirstLineOfItsPrompt() passed after 0.001 seconds.
+◇ Test aFinishedWorkerShowsTimeCostAndTokens() started.
+✔ Test aFinishedWorkerShowsTimeCostAndTokens() passed after 0.001 seconds.
+◇ Test aRatedDeliveryShowsItsScoreBesideItsState() started.
+✔ Test aRatedDeliveryShowsItsScoreBesideItsState() passed after 0.001 seconds.
+◇ Test theRankingSaysForEachModelItsScoreItsTimeAndHowOftenItFails() started.
+✔ Test theRankingSaysForEachModelItsScoreItsTimeAndHowOftenItFails() passed after 0.001 seconds.
+◇ Test aFailedWorkerShowsWhyOnItsMetaLine() started.
+✔ Test aFailedWorkerShowsWhyOnItsMetaLine() passed after 0.001 seconds.
+◇ Test cancelledAndLostWorkersAreNamedAsSuch() started.
+✔ Test cancelledAndLostWorkersAreNamedAsSuch() passed after 0.001 seconds.
+◇ Test durationsAndTokenCountsAreShortEnoughToScan() started.
+✔ Test durationsAndTokenCountsAreShortEnoughToScan() passed after 0.001 seconds.
+◇ Test theHeaderCountsWorkersByState() started.
+✔ Test theHeaderCountsWorkersByState() passed after 0.001 seconds.
+◇ Test costIsSummedOnlyFromTheGivenMoment() started.
+✔ Test costIsSummedOnlyFromTheGivenMoment() passed after 0.001 seconds.
+◇ Test theCockpitReopensWithTheSameTabsTheSameOneInFrontAndEachMaestrosConversation() started.
+✔ Test theCockpitReopensWithTheSameTabsTheSameOneInFrontAndEachMaestrosConversation() passed after 0.001 seconds.
+◇ Test aListSavedByAnEarlierVersionStillOpens() started.
+✔ Test aListSavedByAnEarlierVersionStillOpens() passed after 0.001 seconds.
+◇ Test aDamagedStateCostsTheTabsNeverTheLaunch() started.
+✔ Test aDamagedStateCostsTheTabsNeverTheLaunch() passed after 0.001 seconds.
+◇ Test aMaestroWithAConversationOnDiskResumesItAndOneWithoutStartsItUnderThatId() started.
+✔ Test aMaestroWithAConversationOnDiskResumesItAndOneWithoutStartsItUnderThatId() passed after 0.001 seconds.
+◇ Test theMaestrosMCPConfigCarriesItsRole() started.
+✔ Test theMaestrosMCPConfigCarriesItsRole() passed after 0.001 seconds.
+◇ Test theMaestroIsBriefedOnTheSharedNotes() started.
+✔ Test theMaestroIsBriefedOnTheSharedNotes() passed after 0.001 seconds.
+◇ Test theMaestroIsLaunchedWithVitrasToolsItsBriefAndItsConversation() started.
+✔ Test theMaestroIsLaunchedWithVitrasToolsItsBriefAndItsConversation() passed after 0.003 seconds.
+◇ Test theCockpitFollowsTheConversationTheMaestroIsActuallyIn() started.
+✔ Test theCockpitFollowsTheConversationTheMaestroIsActuallyIn() passed after 0.002 seconds.
+◇ Test theRankingLaysOutASectionPerKindAndSaysSoWhenThereIsNothingYet() started.
+✔ Test theRankingLaysOutASectionPerKindAndSaysSoWhenThereIsNothingYet() passed after 0.151 seconds.
+◇ Test theTabsOfTheSideAreNamedAndOnlyAPageOrAFileTakesHalfTheWindow() started.
+✔ Test theTabsOfTheSideAreNamedAndOnlyAPageOrAFileTakesHalfTheWindow() passed after 0.051 seconds.
+◇ Test theWeeklyUsageIsReadFromWhatClaudeHandsItsStatusLine() started.
+✔ Test theWeeklyUsageIsReadFromWhatClaudeHandsItsStatusLine() passed after 0.001 seconds.
+◇ Test theUsageSurvivesBetweenTheStatusLineAndTheApp() started.
+✔ Test theUsageSurvivesBetweenTheStatusLineAndTheApp() passed after 0.001 seconds.
+◇ Test theBarShowsTheWeekRoundedAndWarnsAsItFills() started.
+✔ Test theBarShowsTheWeekRoundedAndWarnsAsItFills() passed after 0.001 seconds.
+◇ Test theUsersOwnStatusLineStillRunsAndTheMaestrosNeverCallsItself() started.
+✔ Test theUsersOwnStatusLineStillRunsAndTheMaestrosNeverCallsItself() passed after 0.001 seconds.
+◇ Test quittingTakesAHeldKeyNotATap() started.
+✔ Test quittingTakesAHeldKeyNotATap() passed after 0.001 seconds.
+◇ Test theMaestrosModelAndEffortAreReadFromItsStatusLineAndKeptPerProject() started.
+✔ Test theMaestrosModelAndEffortAreReadFromItsStatusLineAndKeptPerProject() passed after 0.001 seconds.
+◇ Test aSessionsNameIsTheLastCustomTitleElseTheGeneratedOne() started.
+✔ Test aSessionsNameIsTheLastCustomTitleElseTheGeneratedOne() passed after 0.001 seconds.
+◇ Test aPartialFirstLineOfTheTailIsSkipped() started.
+✔ Test aPartialFirstLineOfTheTailIsSkipped() passed after 0.001 seconds.
+◇ Test aSessionsNameIsReadFromTheTranscriptFile() started.
+✔ Test aSessionsNameIsReadFromTheTranscriptFile() passed after 0.019 seconds.
+◇ Test aModelNotedBeforeSessionsExistedStillDecodes() started.
+✔ Test aModelNotedBeforeSessionsExistedStillDecodes() passed after 0.001 seconds.
+◇ Test aCommitLineBecomesACommitWithItsAuthorAndTime() started.
+✔ Test aCommitLineBecomesACommitWithItsAuthorAndTime() passed after 0.001 seconds.
+◇ Test aPushIsReadFromTheRemoteBranchItMoved() started.
+✔ Test aPushIsReadFromTheRemoteBranchItMoved() passed after 0.001 seconds.
+◇ Test aPullRequestCarriesItsStateAndItsLink() started.
+✔ Test aPullRequestCarriesItsStateAndItsLink() passed after 0.001 seconds.
+◇ Test linesThatAreNotWhatGitPrintsAreLeftOut() started.
+✔ Test linesThatAreNotWhatGitPrintsAreLeftOut() passed after 0.001 seconds.
+◇ Test everythingIsShownAsOneTimelineNewestFirst() started.
+✔ Test everythingIsShownAsOneTimelineNewestFirst() passed after 0.001 seconds.
+◇ Test everyEventSaysItsDateAndHourAndHowLongAgoThatWas() started.
+✔ Test everyEventSaysItsDateAndHourAndHowLongAgoThatWas() passed after 0.001 seconds.
+◇ Suite "Pane drop edges" started.
+◇ Test "each wedge answers its own side" started.
+✔ Test "each wedge answers its own side" passed after 0.001 seconds.
+◇ Test "a wide pane still has a top and a bottom" started.
+✔ Test "a wide pane still has a top and a bottom" passed after 0.001 seconds.
+◇ Test "the highlight covers the half it would take" started.
+✔ Test "the highlight covers the half it would take" passed after 0.001 seconds.
+◇ Test "orientation and order follow the edge" started.
+✔ Test "orientation and order follow the edge" passed after 0.001 seconds.
+✔ Suite "Pane drop edges" passed after 0.001 seconds.
+◇ Test sidebarFocusKeepsTheSelectedTerminal() started.
+✔ Test sidebarFocusKeepsTheSelectedTerminal() passed after 0.309 seconds.
+◇ Test closedPaneRestoresDirectoryAndSession() started.
+✔ Test closedPaneRestoresDirectoryAndSession() passed after 1.041 seconds.
+◇ Suite "Pasteboard attachments" started.
+◇ Test "anything the terminal can paste makes Paste available, an image alone included" started.
+2026-11-10 16:25:09.733 swiftpm-testing-helper[26400:2908090] Unrecognized colorspace number -1
+2026-11-10 16:25:09.733 swiftpm-testing-helper[26400:2908090] Unknown number of components for colorspace model -1
+✔ Test "anything the terminal can paste makes Paste available, an image alone included" passed after 0.009 seconds.
+◇ Test "plain text is not an attachment" started.
+✔ Test "plain text is not an attachment" passed after 0.001 seconds.
+◇ Test "a pasted image is written to disk as png" started.
+2026-11-10 16:25:09.742 swiftpm-testing-helper[26400:2908090] Unrecognized colorspace number -1
+2026-11-10 16:25:09.742 swiftpm-testing-helper[26400:2908090] Unknown number of components for colorspace model -1
+✔ Test "a pasted image is written to disk as png" passed after 0.001 seconds.
+◇ Test "tiff-only image data is normalised to png" started.
+2026-11-10 16:25:09.744 swiftpm-testing-helper[26400:2908087] Unrecognized colorspace number -1
+2026-11-10 16:25:09.744 swiftpm-testing-helper[26400:2908087] Unknown number of components for colorspace model -1
+✔ Test "tiff-only image data is normalised to png" passed after 0.006 seconds.
+◇ Test "a copied file is referenced in place, not duplicated" started.
+2026-11-10 16:25:09.751 swiftpm-testing-helper[26400:2908091] Unrecognized colorspace number -1
+2026-11-10 16:25:09.751 swiftpm-testing-helper[26400:2908091] Unknown number of components for colorspace model -1
+2026-11-10 16:25:09.751 swiftpm-testing-helper[26400:2908091] Unrecognized colorspace number -1
+2026-11-10 16:25:09.751 swiftpm-testing-helper[26400:2908091] Unknown number of components for colorspace model -1
+✔ Test "a copied file is referenced in place, not duplicated" passed after 0.001 seconds.
+◇ Test "a path with spaces reaches the prompt quoted" started.
+2026-11-10 16:25:09.752 swiftpm-testing-helper[26400:2908090] Unrecognized colorspace number -1
+2026-11-10 16:25:09.752 swiftpm-testing-helper[26400:2908090] Unknown number of components for colorspace model -1
+✔ Test "a path with spaces reaches the prompt quoted" passed after 0.001 seconds.
+✔ Suite "Pasteboard attachments" passed after 0.021 seconds.
+◇ Test theFrontmostWindowOfTheAppIsTheOneToShoot() started.
+✔ Test theFrontmostWindowOfTheAppIsTheOneToShoot() passed after 0.001 seconds.
+◇ Test aBiggerWindowOfAnotherAppInFrontDoesNotWin() started.
+✔ Test aBiggerWindowOfAnotherAppInFrontDoesNotWin() passed after 0.001 seconds.
+◇ Test aPanelOfTheAppIsPassedBy() started.
+✔ Test aPanelOfTheAppIsPassedBy() passed after 0.001 seconds.
+◇ Test aWindowThatIsNotOnScreenIsPassedBy() started.
+✔ Test aWindowThatIsNotOnScreenIsPassedBy() passed after 0.001 seconds.
+◇ Test aWindowTooSmallToLookAtIsPassedBy() started.
+✔ Test aWindowTooSmallToLookAtIsPassedBy() passed after 0.001 seconds.
+◇ Test theAppIsMatchedWithoutRegardToCaseOrSpaces() started.
+✔ Test theAppIsMatchedWithoutRegardToCaseOrSpaces() passed after 0.001 seconds.
+◇ Test anAppWithNoWindowIsGivenNone() started.
+✔ Test anAppWithNoWindowI
