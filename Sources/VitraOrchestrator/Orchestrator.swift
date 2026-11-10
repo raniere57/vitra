@@ -106,15 +106,18 @@ public struct Orchestrator: Sendable {
         if [ -n "$VITRA_WORKTREE" ]; then
             vitra_commit_error="$VITRA_RUN/commit-error"
             rm -f "$vitra_commit_error"
-            # Everything in the tree except what the setup linked or copied
-            # in: those are the project's, not the worker's work. Literal
-            # pathspecs, so a name is never read as a glob.
-            set -- .
+            # What the setup linked or copied in is the project's, not the
+            # worker's work. `git add` refuses an exclude pathspec that reaches
+            # into an ignored folder such as vendor/, so everything is added
+            # and those paths are unstaged again by literal pathspec.
+            set --
             while IFS= read -r vitra_path; do
-                set -- "$@" ":(exclude,literal)$vitra_path"
+                set -- "$@" ":(literal)$vitra_path"
             done <"$VITRA_RUN/worktree-excludes"
-            if ! git -C "$VITRA_WORKTREE" add -A -- "$@" >/dev/null 2>"$vitra_commit_error"; then
+            if ! git -C "$VITRA_WORKTREE" add -A >/dev/null 2>"$vitra_commit_error"; then
                 : # git's reason is in the file; the worker's edits stay where they are
+            elif [ $# -gt 0 ] && ! git -C "$VITRA_WORKTREE" reset -q -- "$@" >/dev/null 2>"$vitra_commit_error"; then
+                : # git's reason is in the file, as above
             elif git -C "$VITRA_WORKTREE" diff --cached --quiet >/dev/null 2>&1; then
                 rm -f "$vitra_commit_error"
             elif ! GIT_AUTHOR_NAME='Vitra worker' GIT_AUTHOR_EMAIL='worker@vitra.local' \\

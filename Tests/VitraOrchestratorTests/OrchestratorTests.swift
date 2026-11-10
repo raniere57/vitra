@@ -766,6 +766,8 @@ echo '{"result":"done","is_error":false}'
     let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)
 
     #expect(run.state == .finished(exitCode: 0))
+    let commitError = (try? String(contentsOf: sandbox.root.appendingPathComponent("runs/\(id)/commit-error"), encoding: .utf8)) ?? "none"
+    #expect(commitError == "none")
     let committed = try sandbox.git(["ls-tree", "-r", "--name-only", "vitra/\(id)"])
         .split(separator: "\n").map(String.init)
     #expect(committed.contains("from-worker.txt"))
