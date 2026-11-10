@@ -12,7 +12,7 @@ public enum StdioBridge {
         // A worker the orchestrator started is told so in its environment. It
         // gets the browser and the preview, and nothing to delegate with: the
         // maestro hands work out, a worker does it.
-        let isWorker = !(ProcessInfo.processInfo.environment["VITRA_AGENT"] ?? "").isEmpty
+        let isWorker = AgentIdentity.current.agent != nil
         // The notes are served here for both, so a worker reads what the
         // maestro and earlier workers left, and adds to it the same way.
         let memory = MemoryToolExecutor()
@@ -115,9 +115,9 @@ struct RemoteExecutor: ToolExecutor {
     func run(tool: String, arguments: JSONValue, pane: String?) async throws -> String {
         // The agent spawned this helper from inside a pane, and the pane put
         // its name in the environment on the way: that is the whole routing.
-        let agent = ProcessInfo.processInfo.environment["VITRA_AGENT"]
-        var params: [String: JSONValue] = ["name": .string(tool), "arguments": Self.arguments(arguments, agent: agent)]
-        if let id = ProcessInfo.processInfo.environment["VITRA_PANE"], !id.isEmpty {
+        let identity = AgentIdentity.current
+        var params: [String: JSONValue] = ["name": .string(tool), "arguments": Self.arguments(arguments, agent: identity.agent)]
+        if let id = identity.pane {
             params["pane"] = .string(id)
         }
         let request = JSONRPC.Request(id: .number(1), method: "tools/call", params: .object(params))

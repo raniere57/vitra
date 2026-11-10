@@ -44,8 +44,7 @@ public struct MemoryToolExecutor: ToolExecutor {
 
     /// The run id of a worker, or "maestro" when no worker id is set.
     public static var inheritedAuthor: String {
-        let agent = ProcessInfo.processInfo.environment["VITRA_AGENT"] ?? ""
-        return agent.isEmpty ? "maestro" : agent
+        AgentIdentity.current.agent ?? "maestro"
     }
 
     public func run(tool: String, arguments: JSONValue, pane: String?) async throws -> String {
