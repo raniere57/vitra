@@ -42,6 +42,12 @@ public struct Run: Equatable, Sendable {
     /// The lines of the project's `.vitra/worktree` that could not be applied
     /// to the worktree, each with why. Empty when all applied or there was none.
     public var worktreeSkipped: [String] = []
+    /// While running: how long stdout and stderr have both gone unwritten.
+    public var silentFor: TimeInterval? = nil
+    /// Set when the run was cancelled for outlasting its deadline: the minutes
+    /// it was given. Such a run is `finished(exitCode: Orchestrator.timeoutExitCode)`
+    /// and an error, so it counts as failed everywhere a failure does.
+    public var timedOutAfter: Int? = nil
 
     /// Public so the UI snapshot tool can build runs without reading any on disk.
     public init(
@@ -59,7 +65,9 @@ public struct Run: Equatable, Sendable {
         baseCommit: String? = nil,
         commitError: String? = nil,
         rating: Rating? = nil,
-        worktreeSkipped: [String] = []
+        worktreeSkipped: [String] = [],
+        silentFor: TimeInterval? = nil,
+        timedOutAfter: Int? = nil
     ) {
         self.id = id
         self.spec = spec
@@ -76,6 +84,8 @@ public struct Run: Equatable, Sendable {
         self.commitError = commitError
         self.rating = rating
         self.worktreeSkipped = worktreeSkipped
+        self.silentFor = silentFor
+        self.timedOutAfter = timedOutAfter
     }
 
     /// How long the run took, or has taken so far.
@@ -102,4 +112,7 @@ struct RunRecord: Codable {
     let worktree: String?
     let branch: String?
     let baseCommit: String?
+    /// When the run is cancelled as hung. Absent in a record written before
+    /// deadlines existed: such a run has none.
+    var deadline: Date? = nil
 }
