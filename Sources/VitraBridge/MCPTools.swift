@@ -78,7 +78,7 @@ public enum MCPTools {
         ),
         tool(
             "screen_capture",
-            "Save a PNG of the frontmost window of an app to ~/.vitra/screenshots and return its path; read the file to look at it. Names the app to shoot — \"Safari\", \"Simulator\" — and with no app named, the whole main display. The first use asks the user for Screen Recording permission.",
+            "Save a PNG of the frontmost window of an app to ~/.vitra/screenshots and return its path; read the file to look at it. Names the app to shoot — \"Safari\", \"Simulator\", in any case — and with no app named, the whole main display. The window of that app that is on top is the one shot; panels and overlays are passed by. The first use asks the user for Screen Recording permission, which macOS only gives to a Vitra started after the permission was granted: ask the user to reopen it and try again.",
             properties: ["app": string("Application whose window to capture, such as \"Safari\" or \"Simulator\". Leave it out for the whole screen.")],
             required: []
         ),
