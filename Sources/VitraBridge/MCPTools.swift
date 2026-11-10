@@ -77,6 +77,12 @@ public enum MCPTools {
             required: []
         ),
         tool(
+            "screen_capture",
+            "Save a PNG of the frontmost window of an app to ~/.vitra/screenshots and return its path; read the file to look at it. Names the app to shoot — \"Safari\", \"Simulator\" — and with no app named, the whole main display. The first use asks the user for Screen Recording permission.",
+            properties: ["app": string("Application whose window to capture, such as \"Safari\" or \"Simulator\". Leave it out for the whole screen.")],
+            required: []
+        ),
+        tool(
             "terminal_read",
             "Read the project's shared terminal: a shell in Vitra's Terminal tab that the user types in too. Returns its last lines, prompts, commands and output as they appear on screen. Use it when the user refers to something they ran or saw there. It runs nothing.",
             properties: ["lines": ["type": "integer", "description": "How many trailing lines to return. Defaults to 80, at most 1000."]],

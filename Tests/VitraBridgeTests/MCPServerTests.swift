@@ -56,7 +56,7 @@ private func request(_ method: String, _ params: JSONValue? = nil, id: JSONValue
     let response = await server.handle(request("tools/list"))
     let tools = try? #require(response?.result?["tools"]?.arrayValue)
 
-    #expect(tools?.count == 20)
+    #expect(tools?.count == 21)
     for tool in tools ?? [] {
         #expect(tool["name"]?.stringValue?.isEmpty == false)
         // A description is what the agent picks the tool by; an empty one is a bug.
@@ -142,6 +142,9 @@ private func request(_ method: String, _ params: JSONValue? = nil, id: JSONValue
     // a way round the commands it was allowed.
     #expect(names.contains("terminal_read"))
     #expect(!names.contains("terminal_run"))
+    // It may look at the screen too: a picture of a window is something only
+    // the app can take, and a worker is working on one.
+    #expect(names.contains("screen_capture"))
     let refused = await server.handle(request("tools/call", ["name": "agent_spawn", "arguments": [:]]))
     #expect(refused?.error?.message == "unknown tool: agent_spawn")
 }

@@ -93,6 +93,7 @@ final class ToolRunner {
         case "browser_eval": return try await browserEval(arguments)
         case "browser_screenshot": return try await looking(arguments).screenshot(into: screenshots).path
         case "browser_console": return try browserConsole(arguments)
+        case "screen_capture": return try await screenCapture(arguments)
         default: throw ToolError("unknown tool: \(tool)")
         }
     }
@@ -148,6 +149,13 @@ final class ToolRunner {
         // Emptying the buffer changes the tab: only its owner does that.
         if arguments["clear"]?.boolValue == true, otherTab(arguments) == nil { browser.clearConsole() }
         return messages.isEmpty ? "(no console output)" : messages.joined(separator: "\n")
+    }
+
+    /// A picture of what is on the user's screen: the window of the app named,
+    /// or the whole display when no app is named.
+    private func screenCapture(_ arguments: JSONValue) async throws -> String {
+        let png = try await ScreenCapture.png(app: arguments["app"]?.stringValue)
+        return try screenshots.store(png, extension: "png", prefix: "screen").path
     }
 
     // MARK: - The shared terminal
