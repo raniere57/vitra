@@ -129,6 +129,20 @@ private let answers = #"cat >/dev/null; echo '{"result":"the answer","is_error":
     #expect(try await fixture.call("agent_cancel", ["id": .string(id)]).hasPrefix("[\(id)] cancelled · "))
 }
 
+@Test func aWorktreeSetupLineThatWasSkippedIsInTheReportAndNothingElseIs() {
+    let spec = WorkerSpec(cli: .claude, model: "haiku", prompt: "x", directory: "/tmp", access: .edit, label: nil, effort: "low")
+    var run = Run(
+        id: "aaaaaaaa", spec: spec, state: .finished(exitCode: 0), pid: nil,
+        started: Date(), ended: nil, output: nil, errorTail: nil
+    )
+    #expect(!AgentReport.full(run).contains("worktree setup"))
+
+    run.worktreeSkipped = ["link vendor/absent: missing in the checkout", "copy a: already in the worktree"]
+    #expect(AgentReport.full(run).contains(
+        "worktree setup skipped: link vendor/absent: missing in the checkout; copy a: already in the worktree"
+    ))
+}
+
 @Test func badArgumentsAreToolErrorsTheOrchestratorCanRead() async throws {
     let fixture = try Fixture(claude: answers)
     defer { fixture.cleanUp() }
