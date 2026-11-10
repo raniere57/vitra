@@ -413,13 +413,13 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     }
     let view = RankingView()
     view.show(rows)
-    // A heading per kind, and under it each worker with its place in that
-    // kind, its name and four captioned figures.
-    let captions = ["nota", "tempo", "entregas", "custo"]
-    func card(_ place: String, _ row: RankingRow) -> [String] {
-        [place, row.model, row.ratings] + zip([row.score, row.time, row.deliveries, row.cost], captions).flatMap { [$0, $1] }
+    // A table per kind: its title, one row of column heads, then each worker
+    // as its place in that kind, its name and four figures.
+    let heads = ["#", "MODELO", "NOTA", "TEMPO", "ENTREGAS", "CUSTO"]
+    func line(_ place: String, _ row: RankingRow) -> [String] {
+        [place, row.model, row.score, row.time, row.deliveries, row.cost]
     }
-    #expect(texts(view) == ["EXPLORAR"] + card("1", rows[0]) + card("2", rows[1]) + ["IMPLEMENTAR"] + card("1", rows[2]))
+    #expect(texts(view) == ["EXPLORAR"] + heads + line("1", rows[0]) + line("2", rows[1]) + ["IMPLEMENTAR"] + heads + line("1", rows[2]))
     // Shown again, it is replaced, not added to.
     view.show([])
     #expect(texts(view).first == "Ainda não há entregas para comparar")
