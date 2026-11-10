@@ -31,7 +31,7 @@ final class FileListView: NSView, PreviewContentView, NSTableViewDataSource, NST
         table.headerView = nil
         table.rowSizeStyle = .custom
         table.rowHeight = 20
-        table.backgroundColor = PanelStyle.surface
+        table.backgroundColor = Theme.panel
         table.gridStyleMask = []
         table.style = .plain
         table.dataSource = self
@@ -81,7 +81,7 @@ final class FileListView: NSView, PreviewContentView, NSTableViewDataSource, NST
 
     /// How many files are listed, for the panel's header.
     var summary: String {
-        "\(entries.count) items"
+        "\(entries.count) \(entries.count == 1 ? "item" : "itens")"
     }
 
     private func entry(atRow row: Int) -> DirectoryEntry? {
@@ -120,7 +120,7 @@ final class FileListView: NSView, PreviewContentView, NSTableViewDataSource, NST
 
         guard let entry = entry(atRow: row) else {
             cell.textField?.stringValue = "../"
-            cell.textField?.textColor = PanelStyle.secondaryText
+            cell.textField?.textColor = Theme.muted
             cell.imageView?.image = NSWorkspace.shared.icon(
                 forFile: directory.deletingLastPathComponent().path
             )
@@ -129,7 +129,7 @@ final class FileListView: NSView, PreviewContentView, NSTableViewDataSource, NST
         }
 
         cell.textField?.stringValue = entry.isDirectory ? entry.name + "/" : entry.name
-        cell.textField?.textColor = entry.isDirectory ? PanelStyle.primaryText : PanelStyle.secondaryText
+        cell.textField?.textColor = entry.isDirectory ? Theme.text : Theme.muted
         cell.imageView?.image = NSWorkspace.shared.icon(forFile: entry.url.path)
         cell.toolTip = entry.url.path
         return cell
@@ -146,20 +146,21 @@ final class FileListView: NSView, PreviewContentView, NSTableViewDataSource, NST
         cell.imageView = icon
 
         let label = NSTextField(labelWithString: "")
-        label.font = PanelStyle.monospaced(11)
+        label.font = Theme.meta
         label.lineBreakMode = .byTruncatingMiddle
         label.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(label)
         cell.textField = label
 
         NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 10),
+            // The table sets its cells 8 pt in from its edge by itself.
+            icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: Theme.inset - Theme.Space.md),
             icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 14),
-            icon.heightAnchor.constraint(equalToConstant: 14),
+            icon.widthAnchor.constraint(equalToConstant: Theme.iconSize),
+            icon.heightAnchor.constraint(equalToConstant: Theme.iconSize),
 
-            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 7),
-            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: Theme.Space.md),
+            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -Theme.inset),
             label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
         return cell

@@ -375,7 +375,7 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         // every browser gives it.
         addSubview(web)
         NSLayoutConstraint.activate([
-            web.topAnchor.constraint(equalTo: topAnchor, constant: 34),
+            web.topAnchor.constraint(equalTo: topAnchor, constant: Theme.headerHeight + 1),
             web.leadingAnchor.constraint(equalTo: leadingAnchor),
             web.trailingAnchor.constraint(equalTo: trailingAnchor),
             web.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -408,9 +408,9 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         let externalButton = navigationButton("arrow.up.forward.app", action: #selector(openExternally))
         externalButton.toolTip = "Open this page in the default browser"
 
-        address.font = PanelStyle.monospaced(10.5)
-        address.textColor = PanelStyle.primaryText
-        address.backgroundColor = PanelStyle.surface
+        address.font = Theme.meta
+        address.textColor = Theme.text
+        address.backgroundColor = Theme.ground
         address.drawsBackground = true
         address.isBordered = false
         address.focusRingType = .none
@@ -426,8 +426,8 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
 
         let row = NSStackView(views: [back, forward, reloadButton, address, externalButton])
         row.orientation = .horizontal
-        row.spacing = 6
-        row.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
+        row.spacing = Theme.Space.md
+        row.edgeInsets = NSEdgeInsets(top: 0, left: Theme.inset, bottom: 0, right: Theme.inset)
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
 
@@ -447,12 +447,12 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
             row.topAnchor.constraint(equalTo: topAnchor),
             row.leadingAnchor.constraint(equalTo: leadingAnchor),
             row.trailingAnchor.constraint(equalTo: trailingAnchor),
-            row.heightAnchor.constraint(equalToConstant: 33),
+            row.heightAnchor.constraint(equalToConstant: Theme.headerHeight),
 
-            progress.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            progress.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Theme.inset),
             progress.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            progress.widthAnchor.constraint(equalToConstant: 14),
-            progress.heightAnchor.constraint(equalToConstant: 14),
+            progress.widthAnchor.constraint(equalToConstant: Theme.iconSize),
+            progress.heightAnchor.constraint(equalToConstant: Theme.iconSize),
 
             hairline.topAnchor.constraint(equalTo: row.bottomAnchor),
             hairline.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -464,9 +464,10 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     private func navigationButton(_ symbol: String, action: Selector) -> NSButton {
         let button = NSButton(title: "", target: self, action: action)
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        button.contentTintColor = PanelStyle.secondaryText
+        button.contentTintColor = Theme.muted
         button.isBordered = false
         button.setContentHuggingPriority(.required, for: .horizontal)
+        button.widthAnchor.constraint(equalToConstant: Theme.iconSize).isActive = true
         return button
     }
 

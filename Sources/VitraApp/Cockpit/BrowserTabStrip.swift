@@ -12,8 +12,9 @@ final class BrowserTabStrip: NSView {
     var onSelect: ((String) -> Void)?
     var onNew: (() -> Void)?
 
-    static let height: CGFloat = 32
+    static let height = CockpitStyle.headerHeight
     private static let widestChip: CGFloat = 170
+    private static let chipHeight: CGFloat = 24
 
     private let stack = NSStackView()
     private var items: [Item] = []
@@ -25,9 +26,11 @@ final class BrowserTabStrip: NSView {
         self.showsNew = showsNew
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = CockpitStyle.panel.cgColor
-        stack.spacing = 4
-        stack.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
+        layer?.backgroundColor = CockpitStyle.ground.cgColor
+        stack.spacing = CockpitStyle.Space.xs
+        // A chip's text sits a space in from its plate: the plate overhangs the
+        // content inset so that the text lines up with everything below.
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: CockpitStyle.inset - CockpitStyle.Space.sm, bottom: 0, right: CockpitStyle.inset)
         addFilling(stack)
     }
 
@@ -44,18 +47,18 @@ final class BrowserTabStrip: NSView {
             chip.tag = index
             chip.isBordered = false
             chip.wantsLayer = true
-            chip.layer?.cornerRadius = 6
+            chip.layer?.cornerRadius = CockpitStyle.Radius.control
             chip.layer?.backgroundColor = (isCurrent ? CockpitStyle.tab : .clear).cgColor
             chip.lineBreakMode = .byTruncatingTail
             chip.attributedTitle = NSAttributedString(string: " \(item.label) ", attributes: [
-                .font: CockpitStyle.ui(11, isCurrent ? .semibold : .regular),
+                .font: isCurrent ? CockpitStyle.ui(11, .semibold) : CockpitStyle.caption,
                 .foregroundColor: isCurrent ? CockpitStyle.text : CockpitStyle.muted,
             ])
             chip.toolTip = item.tip
             chip.setAccessibilityLabel("Aba \(item.label)")
             chip.setAccessibilityValue(isCurrent ? "selecionada" : nil)
             chip.widthAnchor.constraint(lessThanOrEqualToConstant: Self.widestChip).isActive = true
-            chip.heightAnchor.constraint(equalToConstant: 22).isActive = true
+            chip.heightAnchor.constraint(equalToConstant: Self.chipHeight).isActive = true
             chip.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             stack.addArrangedSubview(chip)
         }

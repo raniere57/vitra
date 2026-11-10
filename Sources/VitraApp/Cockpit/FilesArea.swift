@@ -187,8 +187,10 @@ final class RecentFilesView: NSView {
         layer?.backgroundColor = CockpitStyle.panel.cgColor
         rows.orientation = .vertical
         rows.alignment = .leading
-        rows.spacing = 4
-        rows.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
+        rows.spacing = CockpitStyle.Space.xs
+        // The rows' plates start 8 pt inside the inset, so that the thumbnails
+        // line up with the content inset of everything else.
+        rows.edgeInsets = NSEdgeInsets(top: CockpitStyle.Space.md, left: CockpitStyle.inset - CockpitStyle.Space.md, bottom: CockpitStyle.Space.md, right: CockpitStyle.inset - CockpitStyle.Space.md)
         rows.translatesAutoresizingMaskIntoConstraints = false
         let document = TopDownView()
         document.translatesAutoresizingMaskIntoConstraints = false
@@ -249,7 +251,7 @@ final class RecentFilesView: NSView {
                 detail: [GitHistory.stamp(entry.modified, now: now), folder.isEmpty ? nil : String(folder)].compactMap { $0 }.joined(separator: " · ")
             ) { [weak self] in self?.onOpen?(entry.url) }
             rows.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -20).isActive = true
+            row.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -2 * (CockpitStyle.inset - CockpitStyle.Space.md)).isActive = true
         }
     }
 }
@@ -265,7 +267,7 @@ private final class RecentFileRow: NSButton {
         title = ""
         isBordered = false
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = CockpitStyle.Radius.card
         target = self
         action = #selector(pressed)
         translatesAutoresizingMaskIntoConstraints = false
@@ -275,11 +277,11 @@ private final class RecentFileRow: NSButton {
         let picture = NSImageView(image: NSWorkspace.shared.icon(forFile: url.path))
         picture.imageScaling = .scaleProportionallyUpOrDown
         picture.wantsLayer = true
-        picture.layer?.cornerRadius = 5
+        picture.layer?.cornerRadius = CockpitStyle.Radius.thumb
         picture.layer?.masksToBounds = true
         let name = NSTextField.label(url.lastPathComponent, font: CockpitStyle.ui(13, .medium), color: CockpitStyle.text)
         name.lineBreakMode = .byTruncatingMiddle
-        let when = NSTextField.label(detail, font: CockpitStyle.mono(11), color: CockpitStyle.muted)
+        let when = NSTextField.label(detail, font: CockpitStyle.meta, color: CockpitStyle.muted)
         when.lineBreakMode = .byTruncatingMiddle
         let text = NSStackView(views: [name, when])
         text.orientation = .vertical

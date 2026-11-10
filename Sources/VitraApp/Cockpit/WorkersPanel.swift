@@ -12,8 +12,7 @@ final class WorkersPanel: NSView {
     private let rows = NSStackView()
     private let scroll = NSScrollView()
     private let empty = NSStackView()
-    private let cost = NSTextField.label(font: CockpitStyle.mono(11), color: CockpitStyle.text)
-    private let tokens = NSTextField.label(font: CockpitStyle.mono(11), color: CockpitStyle.muted)
+    private let tokens = NSTextField.label(font: CockpitStyle.meta, color: CockpitStyle.muted)
     private let stopAll = NSButton(title: "Parar todos", target: nil, action: nil)
 
     private var rowViews: [String: WorkerRowView] = [:]
@@ -34,11 +33,12 @@ final class WorkersPanel: NSView {
     func show(_ runs: [Run], now: Date) {
         let shown = runs.map { WorkerBoard.row($0, now: now) }
         runningIDs = runs.filter { $0.state == .running }.map(\.id)
-        stopAll.isEnabled = !runningIDs.isEmpty
+        // Only worth a button while there is something to stop.
+        stopAll.isHidden = runningIDs.isEmpty
 
+        // What today cost is in the tab bar; the footer keeps the tokens.
         let today = WorkerBoard.totals(runs, since: Calendar.current.startOfDay(for: now))
-        cost.stringValue = WorkerBoard.money(today.cost)
-        tokens.stringValue = WorkerBoard.tokens(today.tokens)
+        tokens.stringValue = WorkerBoard.tokens(today.tokens) + " hoje"
 
         empty.isHidden = !shown.isEmpty
         scroll.isHidden = shown.isEmpty
@@ -66,8 +66,9 @@ final class WorkersPanel: NSView {
         view.onClick = { [weak self] in self?.toggle(id) }
         rowViews[id] = view
         rows.addArrangedSubview(view)
-        // Inside the list's own margins on both sides.
-        view.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -20).isActive = true
+        // Full width: a row's hover and its hairline run edge to edge, and it
+        // holds its own content on the shared inset.
+        view.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
         return view
     }
 
@@ -88,8 +89,7 @@ final class WorkersPanel: NSView {
     private func build() {
         rows.orientation = .vertical
         rows.alignment = .leading
-        rows.spacing = 2
-        rows.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
+        rows.spacing = 0
         rows.translatesAutoresizingMaskIntoConstraints = false
 
         let document = TopDownView()
@@ -101,24 +101,35 @@ final class WorkersPanel: NSView {
         scroll.scrollerStyle = .overlay
         scroll.automaticallyAdjustsContentInsets = false
 
-        let headline = NSTextField.label("Nenhum worker ainda", font: CockpitStyle.ui(14, .medium), color: CockpitStyle.text)
+        let headline = NSTextField.label("Nenhum worker ainda", font: CockpitStyle.title, color: CockpitStyle.text)
         let body = NSTextField(wrappingLabelWithString: "Peça algo ao maestro. O que ele delegar a outros modelos aparece aqui, com tempo e custo.")
-        body.font = CockpitStyle.ui(12)
+        body.font = CockpitStyle.body
         body.textColor = CockpitStyle.muted
         body.alignment = .center
         empty.orientation = .vertical
-        empty.spacing = 8
+        empty.spacing = CockpitStyle.Space.md
         empty.setViews([headline, body], in: .center)
 
         stopAll.target = self
         stopAll.action = #selector(stopAllWorkers(_:))
-        stopAll.bezelStyle = .rounded
-        stopAll.controlSize = .small
-        stopAll.isEnabled = false
-        let today = NSTextField.label("hoje", font: CockpitStyle.mono(11), color: CockpitStyle.muted)
-        let footer = NSStackView(views: [today, cost, tokens, NSView(), stopAll])
-        footer.spacing = 10
-        footer.edgeInsets = NSEdgeInsets(top: 0, left: 18, bottom: 0, right: 14)
+        stopAll.isBordered = false
+        stopAll.wantsLayer = true
+        stopAll.layer?.cornerRadius = CockpitStyle.Radius.control
+        stopAll.layer?.backgroundColor = CockpitStyle.raised.cgColor
+        stopAll.layer?.borderWidth = 1
+        stopAll.layer?.borderColor = CockpitStyle.raisedLine.cgColor
+        stopAll.attributedTitle = NSAttributedString(string: "Parar todos", attributes: [
+            .font: CockpitStyle.label, .foregroundColor: CockpitStyle.text,
+        ])
+        stopAll.isHidden = true
+        stopAll.setContentHuggingPriority(.required, for: .horizontal)
+        NSLayoutConstraint.activate([
+            stopAll.heightAnchor.constraint(equalToConstant: 24),
+            stopAll.widthAnchor.constraint(greaterThanOrEqualToConstant: 88),
+        ])
+        let footer = NSStackView(views: [tokens, NSView(), stopAll])
+        footer.spacing = CockpitStyle.Space.lg
+        footer.edgeInsets = NSEdgeInsets(top: 0, left: CockpitStyle.inset, bottom: 0, right: CockpitStyle.inset)
 
         let footerRule = NSView.rule(CockpitStyle.softLine)
         for view in [scroll, empty, footerRule, footer] as [NSView] {
@@ -162,12 +173,15 @@ final class WorkerRowView: NSView {
 
     private static let longestAnswerShown = 4000
 
-    private let dot = NSView.filled(CockpitStyle.muted, cornerRadius: 4)
+    private static let dotSize: CGFloat = 8
+
+    private let dot = NSView.filled(CockpitStyle.muted, cornerRadius: CockpitStyle.Radius.dot + 1)
     private let title = NSTextField.label(font: CockpitStyle.ui(13, .medium), color: CockpitStyle.text)
-    private let state = NSTextField.label(font: CockpitStyle.ui(12), color: CockpitStyle.muted)
-    private let meta = NSTextField.label(font: CockpitStyle.mono(11), color: CockpitStyle.muted)
+    private let state = NSTextField.label(font: CockpitStyle.body, color: CockpitStyle.muted)
+    private let meta = NSTextField.label(font: CockpitStyle.meta, color: CockpitStyle.muted)
     private let answer = NSTextField(wrappingLabelWithString: "")
-    private let answerBox = NSView.filled(CockpitStyle.bar, cornerRadius: 7)
+    private let answerBox = NSView.filled(CockpitStyle.bar, cornerRadius: CockpitStyle.Radius.card)
+    private let hairline = NSView.rule(CockpitStyle.softLine)
     private var isOpen = false
     private var hasAnswer = false
     private var isHovered = false
@@ -175,7 +189,6 @@ final class WorkerRowView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.cornerRadius = 9
         translatesAutoresizingMaskIntoConstraints = false
         build()
         setAccessibilityElement(true)
@@ -220,8 +233,6 @@ final class WorkerRowView: NSView {
     private func paint() {
         let lit = isOpen || isHovered
         layer?.backgroundColor = lit ? CockpitStyle.raised.cgColor : NSColor.clear.cgColor
-        layer?.borderWidth = isOpen ? 1 : 0
-        layer?.borderColor = CockpitStyle.raisedLine.cgColor
     }
 
     // MARK: - Pointer and keyboard
@@ -253,7 +264,7 @@ final class WorkerRowView: NSView {
     override var focusRingMaskBounds: NSRect { bounds }
 
     override func drawFocusRingMask() {
-        NSBezierPath(roundedRect: bounds, xRadius: 9, yRadius: 9).fill()
+        NSBezierPath(rect: bounds).fill()
     }
 
     override func keyDown(with event: NSEvent) {
@@ -284,11 +295,15 @@ final class WorkerRowView: NSView {
 
     private func build() {
         let top = NSStackView(views: [dot, title, state])
-        top.spacing = 9
+        top.spacing = CockpitStyle.Space.md
+        // The state word keeps its room, pinned to the right edge; the title
+        // takes what is left and is the one that is cut.
         state.setContentCompressionResistancePriority(.required, for: .horizontal)
         state.setContentHuggingPriority(.required, for: .horizontal)
+        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        answer.font = CockpitStyle.mono(11)
+        answer.font = CockpitStyle.meta
         answer.textColor = CockpitStyle.code
         answer.isSelectable = true
         answer.maximumNumberOfLines = 16
@@ -300,14 +315,19 @@ final class WorkerRowView: NSView {
         let column = NSStackView(views: [top, meta, answerBox])
         column.orientation = .vertical
         column.alignment = .leading
-        column.spacing = 6
-        column.setCustomSpacing(10, after: meta)
+        column.spacing = CockpitStyle.Space.sm
+        column.setCustomSpacing(CockpitStyle.Space.lg, after: meta)
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
+        hairline.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hairline)
 
         NSLayoutConstraint.activate([
-            dot.widthAnchor.constraint(equalToConstant: 8),
-            dot.heightAnchor.constraint(equalToConstant: 8),
+            dot.widthAnchor.constraint(equalToConstant: Self.dotSize),
+            dot.heightAnchor.constraint(equalToConstant: Self.dotSize),
+            hairline.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CockpitStyle.inset),
+            hairline.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CockpitStyle.inset),
+            hairline.bottomAnchor.constraint(equalTo: bottomAnchor),
             top.widthAnchor.constraint(equalTo: column.widthAnchor),
             // Under the title, not under the dot.
             meta.leadingAnchor.constraint(equalTo: title.leadingAnchor),
@@ -315,15 +335,16 @@ final class WorkerRowView: NSView {
             answerBox.leadingAnchor.constraint(equalTo: title.leadingAnchor),
             answerBox.trailingAnchor.constraint(equalTo: column.trailingAnchor),
 
-            answer.topAnchor.constraint(equalTo: answerBox.topAnchor, constant: 10),
-            answer.bottomAnchor.constraint(equalTo: answerBox.bottomAnchor, constant: -10),
-            answer.leadingAnchor.constraint(equalTo: answerBox.leadingAnchor, constant: 12),
-            answer.trailingAnchor.constraint(equalTo: answerBox.trailingAnchor, constant: -12),
+            answer.topAnchor.constraint(equalTo: answerBox.topAnchor, constant: CockpitStyle.Space.lg),
+            answer.bottomAnchor.constraint(equalTo: answerBox.bottomAnchor, constant: -CockpitStyle.Space.lg),
+            answer.leadingAnchor.constraint(equalTo: answerBox.leadingAnchor, constant: CockpitStyle.Space.lg),
+            answer.trailingAnchor.constraint(equalTo: answerBox.trailingAnchor, constant: -CockpitStyle.Space.lg),
 
-            column.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-            column.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
-            column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            // The same 12 pt above and below every row, on the shared inset.
+            column.topAnchor.constraint(equalTo: topAnchor, constant: CockpitStyle.Space.lg),
+            column.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -CockpitStyle.Space.lg),
+            column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CockpitStyle.inset),
+            column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CockpitStyle.inset),
         ])
     }
 }

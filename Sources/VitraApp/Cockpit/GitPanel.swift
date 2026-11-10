@@ -136,9 +136,10 @@ final class GitPanel: NSView {
                 guard let row = rows.arrangedSubviews[index] as? NSStackView,
                       let text = row.arrangedSubviews.last as? NSStackView,
                       text.arrangedSubviews.count > 1,
-                      let date = text.arrangedSubviews[1] as? NSTextField
+                      let meta = text.arrangedSubviews[1] as? NSTextField,
+                      let event = events?[index]
                 else { continue }
-                date.stringValue = stamp
+                meta.stringValue = Self.metaLine(event, when: stamp)
             }
             return
         }
@@ -155,8 +156,14 @@ final class GitPanel: NSView {
         for (index, event) in (events ?? []).enumerated() {
             let row = self.row(event, when: stamps[index])
             rows.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -36).isActive = true
+            row.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -2 * CockpitStyle.inset).isActive = true
         }
+    }
+
+    /// Date, how long ago, then what and who, on one line: the when comes
+    /// first so that it is never what is cut.
+    private static func metaLine(_ event: GitEvent, when: String) -> String {
+        [when, event.detail].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     private func row(_ event: GitEvent, when: String) -> NSView {
@@ -168,7 +175,8 @@ final class GitPanel: NSView {
         let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: name) ?? NSImage())
         icon.contentTintColor = tint
         icon.setContentHuggingPriority(.required, for: .horizontal)
-        icon.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        icon.widthAnchor.constraint(equalToConstant: CockpitStyle.iconSize).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: CockpitStyle.iconSize).isActive = true
 
         let title: NSView
         if let url = event.url.flatMap(URL.init(string:)) {
@@ -179,16 +187,15 @@ final class GitPanel: NSView {
         } else {
             title = NSTextField.wrapping(event.title, font: CockpitStyle.ui(13, .medium), color: CockpitStyle.text, lines: 3)
         }
-        // The date on a line of its own: the detail is cut when it is long,
-        // and the when must never be what is cut.
-        let date = NSTextField.label(when, font: CockpitStyle.mono(11), color: CockpitStyle.code)
-        let detail = NSTextField.wrapping(event.detail, font: CockpitStyle.mono(11), color: CockpitStyle.muted, lines: 2)
-        let text = NSStackView(views: [title, date, detail])
+        // Two lines to an event: what happened, and one line of when, what
+        // and who. The line is cut at its tail, and the when comes first.
+        let meta = NSTextField.label(Self.metaLine(event, when: when), font: CockpitStyle.meta, color: CockpitStyle.muted)
+        let text = NSStackView(views: [title, meta])
         text.orientation = .vertical
         text.alignment = .leading
-        text.spacing = 2
+        text.spacing = CockpitStyle.Space.hair
         let row = NSStackView(views: [icon, text])
-        row.spacing = 10
+        row.spacing = CockpitStyle.Space.lg
         row.alignment = .top
         row.toolTip = event.title
         return row
@@ -197,8 +204,8 @@ final class GitPanel: NSView {
     private func build() {
         rows.orientation = .vertical
         rows.alignment = .leading
-        rows.spacing = 12
-        rows.edgeInsets = NSEdgeInsets(top: 16, left: 18, bottom: 16, right: 18)
+        rows.spacing = CockpitStyle.Space.lg
+        rows.edgeInsets = NSEdgeInsets(top: CockpitStyle.inset, left: CockpitStyle.inset, bottom: CockpitStyle.inset, right: CockpitStyle.inset)
         rows.translatesAutoresizingMaskIntoConstraints = false
 
         let document = TopDownView()

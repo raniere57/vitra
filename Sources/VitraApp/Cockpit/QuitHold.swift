@@ -64,16 +64,16 @@ final class QuitHold {
     func show(in window: NSWindow?) {
         guard notice == nil, let content = window?.contentView else { return }
         let label = NSTextField.label("Segure ⌘Q para encerrar o Vitra", font: CockpitStyle.ui(13, .medium), color: CockpitStyle.text)
-        let pill = NSView.filled(CockpitStyle.raised, cornerRadius: 12)
+        let pill = NSView.filled(CockpitStyle.raised, cornerRadius: CockpitStyle.Radius.control)
         pill.layer?.borderWidth = 1
         pill.layer?.borderColor = CockpitStyle.controlLine.cgColor
         pill.addSubview(label)
         content.addSubview(pill)
         NSLayoutConstraint.activate([
-            label.topAnchor.constraint(equalTo: pill.topAnchor, constant: 12),
-            label.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -12),
-            label.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 18),
-            label.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -18),
+            label.topAnchor.constraint(equalTo: pill.topAnchor, constant: CockpitStyle.Space.lg),
+            label.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -CockpitStyle.Space.lg),
+            label.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: CockpitStyle.Space.xl),
+            label.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -CockpitStyle.Space.xl),
             pill.centerXAnchor.constraint(equalTo: content.centerXAnchor),
             pill.centerYAnchor.constraint(equalTo: content.centerYAnchor),
         ])

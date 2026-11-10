@@ -1,56 +1,10 @@
 import AppKit
+import VitraPanel
 
-/// The cockpit's look, in one place: every colour, face and fixed size it uses.
-///
-/// A graphite ground with a single amber accent. The accent is reserved for
-/// what is live — the maestro, a running worker — so that at a glance amber
-/// means "something is working here" and nothing else competes for it.
-enum CockpitStyle {
-    static let ground = color(0x14161A)
-    static let bar = color(0x0E1013)
-    static let panel = color(0x101216)
-    static let raised = color(0x1A1D22)
-    static let tab = color(0x1E2228)
-
-    static let line = color(0x262A31)
-    static let softLine = color(0x1E2228)
-    static let raisedLine = color(0x2C313A)
-    static let controlLine = color(0x343943)
-
-    static let text = color(0xE9E6DF)
-    static let muted = color(0xA9AFB9)
-    static let code = color(0xC9CDD4)
-
-    static let accent = color(0xE8A33D)
-    static let success = color(0x6FCF97)
-    static let danger = color(0xE5645A)
-    /// The danger colour as text: the dot's red is too dark to read at 12 pt.
-    static let dangerText = color(0xEE8F87)
-
-    static let barHeight: CGFloat = 44
-    static let headerHeight: CGFloat = 40
-    static let footerHeight: CGFloat = 46
-    static let workersWidth: CGFloat = 420
-    /// Room for the window's own close, minimise and zoom buttons.
-    static let trafficLightInset: CGFloat = 84
-
-    static func ui(_ size: CGFloat, _ weight: NSFont.Weight = .regular) -> NSFont {
-        .systemFont(ofSize: size, weight: weight)
-    }
-
-    static func mono(_ size: CGFloat, _ weight: NSFont.Weight = .regular) -> NSFont {
-        .monospacedSystemFont(ofSize: size, weight: weight)
-    }
-
-    private static func color(_ rgb: UInt32) -> NSColor {
-        NSColor(
-            srgbRed: CGFloat((rgb >> 16) & 0xFF) / 255,
-            green: CGFloat((rgb >> 8) & 0xFF) / 255,
-            blue: CGFloat(rgb & 0xFF) / 255,
-            alpha: 1
-        )
-    }
-}
+/// The cockpit's name for the shared `Theme` (VitraPanel), which holds every
+/// colour, face and fixed size. Nothing is defined here. Qualified because
+/// VitraCore has a `Theme` of its own: the terminal's colours.
+typealias CockpitStyle = VitraPanel.Theme
 
 extension NSView {
     /// A layer-backed view filled with one colour.
@@ -83,17 +37,17 @@ extension NSView {
     /// set apart from its neighbours instead of run together with them.
     static func pill(_ views: [NSView]) -> NSView {
         let row = NSStackView(views: views)
-        row.spacing = 6
+        row.spacing = CockpitStyle.Space.sm
         row.translatesAutoresizingMaskIntoConstraints = false
-        let pill = filled(CockpitStyle.raised, cornerRadius: 6)
+        let pill = filled(CockpitStyle.raised, cornerRadius: CockpitStyle.Radius.control)
         pill.layer?.borderWidth = 1
         pill.layer?.borderColor = CockpitStyle.raisedLine.cgColor
         pill.addSubview(row)
         NSLayoutConstraint.activate([
-            row.topAnchor.constraint(equalTo: pill.topAnchor, constant: 3),
-            row.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -3),
-            row.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 8),
-            row.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -8),
+            row.topAnchor.constraint(equalTo: pill.topAnchor, constant: CockpitStyle.Space.xs),
+            row.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -CockpitStyle.Space.xs),
+            row.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: CockpitStyle.Space.md),
+            row.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -CockpitStyle.Space.md),
         ])
         return pill
     }
