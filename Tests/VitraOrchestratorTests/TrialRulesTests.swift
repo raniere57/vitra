@@ -42,6 +42,22 @@ private func done(_ spec: WorkerSpec, score: Int? = 4, at began: Date = start) -
     #expect(TrialRules.problem(with: sonnet, history: [done(sonnet), done(sonnet, at: start.addingTimeInterval(1))], providers: 4)?.contains("still in its trial") == true)
 }
 
+@Test func anExplorationPieceCountsAsExplorationOnlyForTheRatingsHeldWhenItRan() {
+    let sonnet = worker(.claude, "sonnet", effort: "high")
+    let flash = worker(.gemini, "gemini-3.8-flash-low")
+    let opencode = worker(.opencode, "opencode/x-free")
+    let older = [done(sonnet), done(flash), done(opencode)]
+    // Four pieces by the rated worker A, each after A's own rating.
+    let pieces = (1...4).map { step in done(sonnet, at: start.addingTimeInterval(Double(step))) }
+    // Exploration piece X: untried when it ran, rated afterwards.
+    let explorer = worker(.cursor, "cursor-grok-4.6-low-fast")
+    let explored = done(explorer, at: start.addingTimeInterval(5))
+    let history = older + pieces + [explored]
+
+    // X is now rated, but its piece was an exploration piece: A is not refused.
+    #expect(TrialRules.problem(with: sonnet, history: history, providers: 4) == nil)
+}
+
 @Test func aWorkerAlreadyRatedOnAKindWaitsUntilThreeProvidersHaveBeen() {
     let sonnet = worker(.claude, "sonnet", effort: "high")
     let history = [done(sonnet)]

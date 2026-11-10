@@ -66,17 +66,21 @@ public enum TrialRules {
     }
 
     /// The refusal for a rated worker's piece when the last
-    /// `piecesBeforeExploration` finished pieces of its kind all went to
-    /// workers already rated on it; nil otherwise, and always nil for a worker
-    /// with no record on the kind. Approximated by current ratings, not the
-    /// ratings held when each run started.
+    /// `piecesBeforeExploration` finished pieces of its kind were all rated
+    /// workers' pieces; nil otherwise, and always nil for a worker with no
+    /// record on the kind. A recent piece counts as a rated worker's only if
+    /// that same worker had a rated run of the kind that started before it,
+    /// so the ratings held at the time decide, not the ratings held now.
     private static func explorationProblem(_ spec: WorkerSpec, judged: [Run], rated: [Run]) -> String? {
         let kind = spec.kind ?? .other
         let ratedWorkers = Set(rated.map { workerKey($0.spec) })
         guard ratedWorkers.contains(workerKey(spec)) else { return nil }
         let recent = judged.sorted { $0.started > $1.started }.prefix(piecesBeforeExploration)
         guard recent.count == piecesBeforeExploration,
-              recent.allSatisfy({ ratedWorkers.contains(workerKey($0.spec)) })
+              recent.allSatisfy({ run in
+                  let key = workerKey(run.spec)
+                  return rated.contains { workerKey($0.spec) == key && $0.started < run.started }
+              })
         else { return nil }
         return "\(kind.rawValue) is due an exploration turn: one piece in five goes to a worker with no record on "
             + "\(kind.rawValue), fast and cheap first (agent_models lists them). \(spec.worker) already has one."
