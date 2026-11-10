@@ -17,7 +17,7 @@ public enum AgentTools {
             Use the cheapest model that does this kind of task well — agent_models lists what is available and agent_scores how each has done so far. \
             The worker sees nothing of this conversation, so the prompt must stand on its own: the goal, the files or area, and what done looks like. \
             Spawn several and then agent_wait on all of them to run work in parallel. \
-            In a git repository each editing worker is given a worktree and a branch of its own automatically, so several can edit at once; its report says how to merge the branch. \
+            In a git repository each editing worker is given a worktree and a branch of its own automatically, so several can edit at once; when its delivery is done and its audit read, agent_merge with its id puts the branch on your checkout and cleans up, and agent_merge with discard drops it instead. \
             Outside a repository, give workers that edit at the same time a directory each: two editing the same checkout will overwrite one another. \
             A finished editing delivery with commits is audited first by a cheap read-only worker from another provider: agent_wait starts it and says its id. Pass audit false for a change too small to be worth that gate.
             """,
@@ -88,6 +88,24 @@ public enum AgentTools {
             "agent_cancel",
             "Stop a running worker agent and every process it started. An agent that has already stopped is left as it is.",
             properties: ["id": MCPTools.string("Id from agent_spawn.")],
+            required: ["id"]
+        ),
+        MCPTools.tool(
+            "agent_merge",
+            """
+            Put a finished editing worker's branch onto the branch checked out in its repository, then take its worktree \
+            and branch away. Refuses while the worker is still running, while its audit is reading the worktree, and when \
+            the checkout has uncommitted changes to tracked files. A merge that conflicts is aborted and the files are \
+            named; the worktree and branch stay so the work can be sent back. Pass discard true to drop the work without \
+            merging it.
+            """,
+            properties: [
+                "id": MCPTools.string("Id from agent_spawn."),
+                "discard": [
+                    "type": "boolean",
+                    "description": "Default false: merge the branch and clean up. true: drop the branch without merging it.",
+                ],
+            ],
             required: ["id"]
         ),
         MCPTools.tool(
@@ -183,6 +201,14 @@ public struct AgentToolExecutor: ToolExecutor {
                     try orchestrator.cancel(id)
                     return AgentReport.headline(try orchestrator.status(id))
                 }
+            case "agent_merge":
+                // A merge writes the checkout and may take a while: park it
+                // off the cooperative pool, as the spawn that made the branch.
+                let id = try Self.string("id", in: arguments)
+                let discard = arguments["discard"]?.boolValue ?? false
+                return try await Self.offThePool { [self] in
+                    try merge(id: id, discard: discard)
+                }
             case "agent_rate":
                 return try rate(arguments)
             case "agent_scores":
@@ -255,6 +281,118 @@ public struct AgentToolExecutor: ToolExecutor {
         try orchestrator.rate(id, score: Int(value), note: arguments["note"]?.stringValue)
         let run = try orchestrator.status(id)
         return "Rated agent \(id) \(Int(value))/5: \(run.spec.worker)."
+    }
+
+    /// Puts a finished editing run's branch on the branch checked out in its
+    /// repository, then takes its worktree and branch away; or, with
+    /// `discard`, takes them away without merging.
+    ///
+    /// It blocks for as long as git takes, so its caller runs it off the
+    /// cooperative pool. Reading git sets GIT_OPTIONAL_LOCKS=0 (see
+    /// `Git.run`), so a status here cannot take the index lock out from under
+    /// the user's own git.
+    private func merge(id: String, discard: Bool) throws -> String {
+        let run = try orchestrator.status(id)
+        guard run.state != .running else {
+            throw ToolError("agent \(id) is still running: wait for it to finish before merging")
+        }
+        guard let repository = run.repository, let worktree = run.worktree, let branch = run.branch else {
+            throw ToolError("agent \(id) has no branch to merge: it did not edit a git repository")
+        }
+        // The auditor is reading this worktree; taking it away now would pull
+        // the files out from under it.
+        if let refusal = auditRefusal(id) {
+            throw ToolError(refusal)
+        }
+
+        if !discard {
+            // A checkout with uncommitted work would make the merge refuse
+            // halfway, or bury the user's changes in it: say so and stop,
+            // never stashing what is not ours.
+            let status = Git.run(["status", "--porcelain", "--untracked-files=no"], in: repository)
+            guard status.succeeded else {
+                throw ToolError("could not read the checkout at \(repository): " + Self.reason(status))
+            }
+            guard status.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ToolError(
+                    "the checkout at \(repository) has uncommitted changes to tracked files: "
+                        + "commit them, then call agent_merge for \(id) again"
+                )
+            }
+
+            let merged = Git.run(["merge", "--no-edit", branch], in: repository)
+            guard merged.succeeded else {
+                // The conflicts are read before the abort clears them from the
+                // index. The worktree and branch stay, so the work can go back
+                // to the worker that made it.
+                let conflicts = (Git.output(["diff", "--name-only", "--diff-filter=U"], in: repository) ?? "")
+                    .split(whereSeparator: \.isNewline)
+                    .map(String.init)
+                _ = Git.run(["merge", "--abort"], in: repository)
+                let files = conflicts.isEmpty
+                    ? " — git said: " + Self.reason(merged)
+                    : ": " + conflicts.joined(separator: ", ")
+                throw ToolError(
+                    "merge of \(branch) conflicts\(files) — the merge was aborted and \(worktree) and \(branch) "
+                        + "are still there; send the work back to agent \(id) to resolve"
+                )
+            }
+        }
+
+        let removed = Git.run(["worktree", "remove", "--force", worktree], in: repository)
+        let deleted = Git.run(["branch", "-D", branch], in: repository)
+
+        var lines: [String]
+        if discard {
+            lines = ["Discarded agent \(id): \(branch) was not merged."]
+        } else {
+            var result = "Merged \(branch) into the checkout at \(repository)"
+            let log = Self.trimmed(Git.output(["log", "-1", "--oneline"], in: repository))
+            if !log.isEmpty { result += ": " + log }
+            if let base = run.baseCommit {
+                let stat = Self.trimmed(Git.output(["diff", "--shortstat", "\(base)..HEAD"], in: repository))
+                if !stat.isEmpty { result += " — " + stat }
+            }
+            lines = [result]
+        }
+        if removed.succeeded {
+            lines.append("Removed worktree \(worktree).")
+        } else {
+            lines.append("Could not remove worktree \(worktree): " + Self.reason(removed))
+        }
+        if deleted.succeeded {
+            lines.append("Deleted branch \(branch).")
+        } else {
+            lines.append("Could not delete branch \(branch): " + Self.reason(deleted))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// The refusal for a run an audit is still reading, if one is.
+    ///
+    /// `pending` is a claim another wait has taken and is spawning behind, so
+    /// there is no auditor id to name yet.
+    private func auditRefusal(_ id: String) -> String? {
+        guard let directory = orchestrator.directory(of: id) else { return nil }
+        let record = directory.appendingPathComponent("audit")
+        guard let text = try? String(contentsOf: record, encoding: .utf8) else { return nil }
+        let audit = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if audit.isEmpty || audit == "pending" {
+            return "an audit is still reading this worktree; agent_wait on it first"
+        }
+        guard let reading = try? orchestrator.status(audit), reading.state == .running else { return nil }
+        return "the audit \(audit) is still reading this worktree; agent_wait on it first"
+    }
+
+    /// What git printed, trimmed, or nil when it printed nothing.
+    private static func trimmed(_ text: String?) -> String {
+        (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// What git said, in one line, for a failure that has no better words.
+    private static func reason(_ result: (succeeded: Bool, output: String)) -> String {
+        let text = trimmed(result.output)
+        return text.isEmpty ? "git gave no reason" : text.split(whereSeparator: \.isNewline).joined(separator: " ")
     }
 
     /// The commands the worker may run, when any were named.
@@ -549,12 +687,10 @@ enum AgentReport {
     ///
     /// The worker was given a worktree and a branch of its own, so the
     /// orchestrator never has to hunt for the files: these two lines say how
-    /// much the branch holds against the commit it was made from, and the
-    /// commands that put it on the branch the maestro is working on and then
-    /// take the worktree away.
+    /// much the branch holds against the commit it was made from, and which
+    /// tool puts it on the branch the maestro is working on and then takes the
+    /// worktree away.
     ///
-    /// The paths are quoted: a repository called `my project; rm -rf ~` is a
-    /// name, not a command, and the line is meant to be pasted into a shell.
     /// When the commit failed the first line says so instead of reporting "no
     /// changes", which would leave the worker's edits stranded and unmentioned
     /// in the worktree.
@@ -562,8 +698,6 @@ enum AgentReport {
         guard let branch = run.branch, let base = run.baseCommit,
               let top = run.repository, let tree = run.worktree
         else { return [] }
-        let topArgument = ShellQuote.quote(top)
-        let branchArgument = ShellQuote.quote(branch)
         var lines: [String] = []
         if let failure = run.commitError {
             let reason = failure.isEmpty ? "git gave no reason" : failure
@@ -581,11 +715,7 @@ enum AgentReport {
             // cleanup above all, or it would pull the files out from under it.
             lines.append("merge after the audit: \(audit) is reading this worktree")
         } else {
-            lines.append(
-                "merge: git -C \(topArgument) merge \(branchArgument) — then clean up: "
-                    + "git -C \(topArgument) worktree remove \(ShellQuote.quote(tree)) && "
-                    + "git -C \(topArgument) branch -d \(branchArgument)"
-            )
+            lines.append("merge: agent_merge \(run.id)")
         }
         return lines
     }

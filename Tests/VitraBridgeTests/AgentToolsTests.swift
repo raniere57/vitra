@@ -297,31 +297,11 @@ private func makeRepository(at directory: URL) throws -> (head: String, trunk: S
         "changes on branch vitra/0123abcd (base \(base.prefix(7))): 1 file changed, 1 insertion(+)"
     ))
 
-    // The merge command is a shell word for each path: run it as one, from a
-    // directory unrelated to both, and the work actually lands on the trunk.
+    // The report hands the merge to the tool: neither path becomes part of a
+    // command line the orchestrator is told to paste into a shell.
     let mergeLine = try #require(lines.first { $0.hasPrefix("merge: ") })
-    let command = String(mergeLine.dropFirst("merge: ".count).components(separatedBy: " — then clean up: ")[0])
-    // Each path is one single-quoted shell word, not something a space or a
-    // semicolon in it could split or end.
-    #expect(command == "git -C '\(repository.path)' merge 'vitra/0123abcd'")
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/bin/sh")
-    process.arguments = ["-c", command]
-    process.currentDirectoryURL = scratch
-    process.standardInput = FileHandle.nullDevice
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = pipe
-    try process.run()
-    process.waitUntilExit()
-    #expect(process.terminationStatus == 0)
-    #expect(try String(contentsOf: repository.appendingPathComponent("from-worker.txt"), encoding: .utf8) == "changed\n")
-
-    // The cleanup half names both paths too, quoted.
-    #expect(mergeLine.hasSuffix(
-        "then clean up: git -C '\(repository.path)' worktree remove '\(worktree.path)' "
-            + "&& git -C '\(repository.path)' branch -d 'vitra/0123abcd'"
-    ))
+    #expect(mergeLine == "merge: agent_merge 0123abcd")
+    #expect(!report.contains("git -C"))
 }
 
 /// A worker that writes a file and commits nothing: the shell around it is
@@ -444,10 +424,10 @@ private let keepsReading = #"cat >/dev/null; sleep 30"#
     #expect(again.contains("merge after the audit: \(auditID) is reading this worktree"))
     #expect(!again.contains("worktree remove"))
 
-    // Once the auditor has stopped, the merge and cleanup line is back.
+    // Once the auditor has stopped, the merge line is back.
     _ = try await fixture.call("agent_cancel", ["id": .string(auditID)])
     let stopped = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
-    #expect(stopped.contains("worktree remove"))
+    #expect(stopped.contains("merge: agent_merge \(id)"))
     #expect(!stopped.contains("merge after the audit:"))
 }
 
@@ -469,8 +449,9 @@ private let keepsReading = #"cat >/dev/null; sleep 30"#
     #expect(!FileManager.default.fileExists(
         atPath: fixture.root.appendingPathComponent("runs/\(id)/audit").path
     ))
-    // With no auditor reading it, the worktree is the orchestrator's to remove.
-    #expect(report.contains("worktree remove"))
+    // With no auditor reading it, the worktree is the orchestrator's to merge
+    // and remove.
+    #expect(report.contains("merge: agent_merge \(id)"))
 }
 
 @Test func aDeliveryWithNoCommitsStartsNoAudit() async throws {
@@ -524,6 +505,179 @@ private let keepsReading = #"cat >/dev/null; sleep 30"#
     ))
 }
 
+/// A worker that rewrites a file the trunk goes on to change too: a conflict.
+private let rewritesReadme = #"""
+cat >/dev/null
+printf 'worker\n' > README
+echo '{"result":"done","is_error":false}'
+"""#
+
+@Test func agentMergePutsTheBranchOnTheCheckoutAndCleansUp() async throws {
+    let fixture = try Fixture(claude: leavesAFile)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    let (base, trunk) = try makeRepository(at: repository)
+
+    let id = try await fixture.spawn([
+        "access": "edit", "directory": .string(repository.path), "audit": false,
+    ])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let tree = fixture.root.appendingPathComponent("runs/\(id)/tree")
+    #expect(FileManager.default.fileExists(atPath: tree.path))
+
+    let result = try await fixture.call("agent_merge", ["id": .string(id)])
+    // The merge is reported with the commit it left and what it changed.
+    // (git answers with the repository's real path, which /var symlinks hide.)
+    let top = try git(["rev-parse", "--show-toplevel"], in: repository)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    #expect(result.contains("Merged vitra/\(id) into the checkout at \(top): "))
+    #expect(result.contains("1 file changed, 1 insertion(+)"))
+    #expect(result.contains("Removed worktree \(tree.path)."))
+    #expect(result.contains("Deleted branch vitra/\(id)."))
+
+    // The work is on the trunk the repository had checked out, and the
+    // worktree and branch are gone.
+    #expect(try String(contentsOf: repository.appendingPathComponent("from-worker.txt"), encoding: .utf8) == "changed\n")
+    #expect(try git(["rev-parse", "--verify", "HEAD"], in: repository).trimmingCharacters(in: .whitespacesAndNewlines) != base)
+    #expect(try git(["symbolic-ref", "--short", "HEAD"], in: repository)
+        .trimmingCharacters(in: .whitespacesAndNewlines) == trunk)
+    #expect(try git(["branch", "--list", "vitra/\(id)"], in: repository)
+        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: tree.path))
+}
+
+@Test func aConflictingMergeIsAbortedAndLeavesTheWorkInPlace() async throws {
+    let fixture = try Fixture(claude: rewritesReadme)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let id = try await fixture.spawn([
+        "access": "edit", "directory": .string(repository.path), "audit": false,
+    ])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let tree = fixture.root.appendingPathComponent("runs/\(id)/tree")
+    // The trunk moves after the worker's branch was made: both change README.
+    try "trunk\n".write(to: repository.appendingPathComponent("README"), atomically: true, encoding: .utf8)
+    try git(["add", "-A"], in: repository)
+    try git(["commit", "-q", "-m", "trunk work"], in: repository)
+
+    do {
+        _ = try await fixture.call("agent_merge", ["id": .string(id)])
+        Issue.record("the merge should have conflicted")
+    } catch let error as ToolError {
+        #expect(error.message.contains("merge of vitra/\(id) conflicts: README"))
+        #expect(error.message.contains("still there"))
+    }
+
+    // Aborted, not half-merged: the checkout holds the trunk's README, and
+    // the worktree and branch are still there for the work to go back.
+    #expect(try String(contentsOf: repository.appendingPathComponent("README"), encoding: .utf8) == "trunk\n")
+    #expect(try git(["status", "--porcelain"], in: repository).isEmpty)
+    #expect(FileManager.default.fileExists(atPath: tree.path))
+    #expect(try !git(["branch", "--list", "vitra/\(id)"], in: repository)
+        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+}
+
+@Test func agentMergeDiscardDropsTheBranchWithoutMergingIt() async throws {
+    let fixture = try Fixture(claude: leavesAFile)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let id = try await fixture.spawn([
+        "access": "edit", "directory": .string(repository.path), "audit": false,
+    ])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let tree = fixture.root.appendingPathComponent("runs/\(id)/tree")
+
+    let result = try await fixture.call("agent_merge", ["id": .string(id), "discard": true])
+    #expect(result.hasPrefix("Discarded agent \(id): vitra/\(id) was not merged."))
+    #expect(result.contains("Removed worktree \(tree.path)."))
+    #expect(result.contains("Deleted branch vitra/\(id)."))
+    #expect(!FileManager.default.fileExists(atPath: repository.appendingPathComponent("from-worker.txt").path))
+    #expect(try git(["branch", "--list", "vitra/\(id)"], in: repository)
+        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: tree.path))
+}
+
+@Test func agentMergeRefusesAnAgentThatIsStillRunning() async throws {
+    let fixture = try Fixture(claude: "cat >/dev/null; sleep 30")
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let id = try await fixture.spawn([
+        "access": "edit", "directory": .string(repository.path), "audit": false,
+    ])
+
+    do {
+        _ = try await fixture.call("agent_merge", ["id": .string(id)])
+        Issue.record("a running agent should not be merged")
+    } catch let error as ToolError {
+        #expect(error.message.contains("agent \(id) is still running"))
+    }
+    _ = try await fixture.call("agent_cancel", ["id": .string(id)])
+}
+
+@Test func agentMergeRefusesWhileItsAuditIsStillReadingTheWorktree() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: keepsReading)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let auditID = try String(
+        contentsOf: fixture.root.appendingPathComponent("runs/\(id)/audit"), encoding: .utf8
+    )
+    let tree = fixture.root.appendingPathComponent("runs/\(id)/tree")
+
+    do {
+        _ = try await fixture.call("agent_merge", ["id": .string(id)])
+        Issue.record("a worktree being audited should not be merged")
+    } catch let error as ToolError {
+        #expect(error.message == "the audit \(auditID) is still reading this worktree; agent_wait on it first")
+    }
+    #expect(FileManager.default.fileExists(atPath: tree.path))
+
+    // A claim another wait has just taken has no auditor id to name yet, and
+    // is refused just the same.
+    _ = try await fixture.call("agent_cancel", ["id": .string(auditID)])
+    try "pending".write(
+        to: fixture.root.appendingPathComponent("runs/\(id)/audit"), atomically: true, encoding: .utf8
+    )
+    do {
+        _ = try await fixture.call("agent_merge", ["id": .string(id)])
+        Issue.record("a pending audit should not be merged")
+    } catch let error as ToolError {
+        #expect(error.message == "an audit is still reading this worktree; agent_wait on it first")
+    }
+}
+
+@Test func agentMergeRefusesACheckoutWithUncommittedTrackedChanges() async throws {
+    let fixture = try Fixture(claude: leavesAFile)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let id = try await fixture.spawn([
+        "access": "edit", "directory": .string(repository.path), "audit": false,
+    ])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let tree = fixture.root.appendingPathComponent("runs/\(id)/tree")
+    // The user's own uncommitted work in the checkout is not to be stashed
+    // or merged over: the merge waits for it to be committed.
+    try "dirty\n".write(to: repository.appendingPathComponent("README"), atomically: true, encoding: .utf8)
+
+    do {
+        _ = try await fixture.call("agent_merge", ["id": .string(id)])
+        Issue.record("a dirty checkout should not be merged into")
+    } catch let error as ToolError {
+        #expect(error.message.contains("has uncommitted changes to tracked files"))
+    }
+    #expect(try String(contentsOf: repository.appendingPathComponent("README"), encoding: .utf8) == "dirty\n")
+    #expect(!FileManager.default.fileExists(atPath: repository.appendingPathComponent("from-worker.txt").path))
+    #expect(FileManager.default.fileExists(atPath: tree.path))
+    #expect(try !git(["branch", "--list", "vitra/\(id)"], in: repository)
+        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+}
+
 @Test func agentToolsRunLocallyAndPanelToolsGoToTheWindow() async throws {
     struct Named: ToolExecutor {
         let name: String
@@ -536,7 +690,7 @@ private let keepsReading = #"cat >/dev/null; sleep 30"#
     }
     #expect(try await router.run(tool: "browser_open", arguments: [:], pane: nil) == "panel:browser_open")
     #expect(AgentTools.names == [
-        "agent_spawn", "agent_wait", "agent_list", "agent_cancel", "agent_models", "agent_rate", "agent_scores",
+        "agent_spawn", "agent_wait", "agent_list", "agent_cancel", "agent_merge", "agent_models", "agent_rate", "agent_scores",
     ])
 }
 

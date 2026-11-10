@@ -25,6 +25,8 @@ private func spec(
     #expect(claude == [
         "-p", "--model", "haiku", "--output-format", "json", "--effort", "low", "--permission-mode", "acceptEdits",
         "--allowedTools", "Bash(bun test:*)", "Bash(git diff:*)",
+        // The git an editing worker always has, and never has twice.
+        "Bash(git status:*)", "Bash(git log:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git show:*)",
     ])
 
 
@@ -67,6 +69,7 @@ private func spec(
     #expect(edit.arguments(browserConfig: "/x/mcp.json") == [
         "-p", "--model", "haiku", "--output-format", "json", "--effort", "low", "--permission-mode", "acceptEdits",
         "--mcp-config", "/x/mcp.json", "--allowedTools", "mcp__vitra", "Bash(bun test:*)",
+        "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git show:*)",
     ])
     #expect(spec(.claude, model: "sonnet", effort: "high").arguments(browserConfig: "/x/mcp.json") == [
         "-p", "--model", "sonnet", "--output-format", "json", "--effort", "high",
@@ -94,8 +97,38 @@ private func spec(
     let arguments = spec(.claude, model: "haiku", effort: "low", access: .edit).arguments
     #expect(arguments == [
         "-p", "--model", "haiku", "--output-format", "json", "--effort", "low", "--permission-mode", "acceptEdits",
+        "--allowedTools", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
+        "Bash(git add:*)", "Bash(git commit:*)", "Bash(git show:*)",
     ])
     #expect(!arguments.contains { $0.contains("bypass") || $0.contains("dangerously") })
+}
+
+@Test func everyEditingClaudeWorkerMayUseGitOnItsOwnWorktree() {
+    // Committing in its own worktree is the same step of every editing task:
+    // the worker gets these without the orchestrator listing them, and none
+    // of them reaches another branch or another machine.
+    let edit = spec(.claude, model: "haiku", effort: "low", access: .edit).allowedCommands
+    #expect(edit == ["git status", "git diff", "git log", "git add", "git commit", "git show"])
+    #expect(!edit.contains { ["push", "reset", "checkout", "rebase", "merge", "branch"].contains($0.split(separator: " ").last.map(String.init) ?? "") })
+
+    // A read worker writes nothing, so it is given none of them.
+    #expect(spec(.claude, model: "haiku", effort: "low").allowedCommands.isEmpty)
+    // Other CLIs do not take the list, so nothing is added for them either.
+    #expect(spec(.opencode, model: "opencode/x-free", access: .edit).allowedCommands.isEmpty)
+
+    // They are free: naming them does not use up the eight project commands.
+    #expect(throws: Never.self) {
+        try spec(
+            .claude, model: "haiku", effort: "low", access: .edit,
+            commands: ["git commit", "git add"] + Array(repeating: "bun test", count: 8)
+        ).validate()
+    }
+    #expect(throws: OrchestratorError.self) {
+        try spec(
+            .claude, model: "haiku", effort: "low", access: .edit,
+            commands: Array(repeating: "bun test", count: 9)
+        ).validate()
+    }
 }
 
 @Test func aReadOnlyOpenCodeWorkerRunsThePlanAgent() {

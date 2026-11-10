@@ -56,7 +56,7 @@ private func request(_ method: String, _ params: JSONValue? = nil, id: JSONValue
     let response = await server.handle(request("tools/list"))
     let tools = try? #require(response?.result?["tools"]?.arrayValue)
 
-    #expect(tools?.count == 23)
+    #expect(tools?.count == 24)
     for tool in tools ?? [] {
         #expect(tool["name"]?.stringValue?.isEmpty == false)
         // A description is what the agent picks the tool by; an empty one is a bug.

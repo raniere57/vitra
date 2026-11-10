@@ -136,6 +136,30 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
 
     static let mostCommands = 8
 
+    /// The git commands every editing claude worker may run.
+    ///
+    /// The worker is given a worktree of its own, so these act only on its own
+    /// tree: reading what it changed, staging it and committing it. They are
+    /// the one part of every editing task that is the same, so they are not
+    /// left for the orchestrator to repeat in `commands`. What could reach
+    /// another branch or another machine is deliberately absent: no push,
+    /// reset, checkout, rebase, merge or branch deletion.
+    public static let editingGitCommands = [
+        "git status", "git diff", "git log", "git add", "git commit", "git show",
+    ]
+
+    /// Everything the worker may run without approval: the commands it was
+    /// given, plus, for an editing claude worker, the git commands its own
+    /// worktree needs.
+    public var allowedCommands: [String] {
+        guard cli == .claude, access == .edit else { return commands }
+        var allowed = commands
+        for command in Self.editingGitCommands where !allowed.contains(command) {
+            allowed.append(command)
+        }
+        return allowed
+    }
+
     /// Whether `command` names one command and nothing that could widen it.
     ///
     /// The string ends up inside a permission rule, `Bash(<command>:*)`. Only
@@ -183,7 +207,7 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
             // whatever follows it, and nothing else.
             // Vitra's own tools need no one's approval either: headless,
             // there is no one, and a tool that waits for approval is refused.
-            let rules = (browserConfig == nil ? [] : ["mcp__vitra"]) + commands.map { "Bash(\($0):*)" }
+            let rules = (browserConfig == nil ? [] : ["mcp__vitra"]) + allowedCommands.map { "Bash(\($0):*)" }
             let server = browserConfig.map { ["--mcp-config", $0] } ?? []
             return base + mode + server + (rules.isEmpty ? [] : ["--allowedTools"] + rules)
         case .opencode:
@@ -234,7 +258,12 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
         if let problem = ModelCatalog.problem(with: cli, model: model, effort: effort) {
             throw .invalidSpec(problem)
         }
-        guard commands.count <= Self.mostCommands else {
+        // The git commands an editing claude worker gets anyway do not count:
+        // naming one of them is not one of the project's own commands.
+        let counted = cli == .claude && access == .edit
+            ? commands.filter { !Self.editingGitCommands.contains($0) }
+            : commands
+        guard counted.count <= Self.mostCommands else {
             throw .invalidSpec("a worker can be allowed at most \(Self.mostCommands) commands")
         }
         for command in commands where !Self.isPlainCommand(command, kind: kind) {

@@ -347,6 +347,11 @@ enum Maestro {
     instead of rereading the whole change; rate the auditor too. When the verdict asks for fixes, send them back to \
     the implementer before you report.
 
+    Once the audit is read and you accept the work, take it with agent_merge: it merges the worker's branch into \
+    the checkout and removes its worktree and branch. If you are dropping the work instead, call agent_merge with \
+    discard. A merge that conflicts is aborted and names the files, with the worktree and branch left in place: \
+    send the work back to the implementer to resolve them, then merge again.
+
     The project has a shared terminal, in Vitra's Terminal tab, that the user types in too. terminal_read shows \
     what is on it: read it when the user refers to something they ran or saw there. terminal_run types a command \
     into it, for what the user should watch or keep using afterwards — a dev server, a long build, a log being \
