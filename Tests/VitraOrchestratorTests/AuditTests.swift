@@ -74,10 +74,15 @@ private func implementer(_ cli: WorkerCLI) -> WorkerSpec {
 
 @Test func withNoReviewRecordTheCheapListIsUsedInOrder() {
     let installed: Set<WorkerCLI> = [.claude, .opencode, .cursor, .gemini]
+    // opencode comes first and is skipped only when it is the implementer.
     #expect(Audit.chooseAuditor(implementer: implementer(.claude), history: [], installed: installed)?.cli == .opencode)
-    #expect(Audit.chooseAuditor(implementer: implementer(.opencode), history: [], installed: installed)?.cli == .cursor)
-    #expect(Audit.chooseAuditor(implementer: implementer(.cursor), history: [], installed: installed)?.cli == .claude)
+    #expect(Audit.chooseAuditor(implementer: implementer(.cursor), history: [], installed: installed)?.cli == .opencode)
     #expect(Audit.chooseAuditor(implementer: implementer(.gemini), history: [], installed: installed)?.cli == .opencode)
+    #expect(Audit.chooseAuditor(implementer: implementer(.opencode), history: [], installed: installed)?.cli == .cursor)
+    // claude is third in the list, after the two that are missing here.
+    #expect(Audit.chooseAuditor(
+        implementer: implementer(.opencode), history: [], installed: [.claude, .opencode]
+    )?.cli == .claude)
 
     let cheapest = Audit.chooseAuditor(implementer: implementer(.claude), history: [], installed: installed)
     #expect(cheapest?.model == "opencode/glm-5.3-flash-free")
