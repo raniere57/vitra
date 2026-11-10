@@ -32,18 +32,23 @@ public struct Orchestrator: Sendable {
     private static let cancelExitCodes: Set<Int32> = [128 + SIGTERM, 128 + SIGKILL]
 
     private let root: URL
+    private let memoryRoot: URL
     private let executables: Executables
     private let browserConfig: String?
 
     /// `browserConfig` is the MCP configuration that hands workers Vitra's
     /// browser. Left out, it is the one the app installed — for the real run
     /// store only, so a test's workers are not given the user's browser.
+    /// `memoryRoot` is where project notes are read from; tests point it at a
+    /// scratch directory for the same reason.
     public init(
         root: URL = Orchestrator.defaultRoot,
         executables: Executables = .discover(),
-        browserConfig: String? = nil
+        browserConfig: String? = nil,
+        memoryRoot: URL = ProjectMemory.defaultRoot
     ) {
         self.root = root
+        self.memoryRoot = memoryRoot
         self.executables = executables
         self.browserConfig = browserConfig ?? (root == Orchestrator.defaultRoot ? Self.installedBrowserConfig : nil)
     }
@@ -58,7 +63,7 @@ public struct Orchestrator: Sendable {
 
         let (id, directory) = try makeRunDirectory()
         do {
-            try Data(spec.prompt.utf8).write(to: directory.appendingPathComponent("prompt"))
+            try Data(promptWithNotes(spec).utf8).write(to: directory.appendingPathComponent("prompt"))
         } catch {
             try? FileManager.default.removeItem(at: directory)
             throw .spawnFailed("\(error.localizedDescription)")
@@ -110,6 +115,26 @@ public struct Orchestrator: Sendable {
             throw .spawnFailed("\(error.localizedDescription)")
         }
         return id
+    }
+
+    /// The prompt the worker is given: the project's notes first, when there
+    /// are any, so the worker reads what earlier agents learned before the task.
+    ///
+    /// Only the file the worker reads carries the notes. The record keeps the
+    /// prompt as it was asked, so the history stays the request, not the notes
+    /// as they stood that day.
+    private func promptWithNotes(_ spec: WorkerSpec) -> String {
+        guard let project = spec.project else { return spec.prompt }
+        let notes = ProjectMemory(root: memoryRoot).read(project: project)
+        guard !notes.isEmpty else { return spec.prompt }
+        return """
+        Notes on this project left by earlier agents. Read them first, and add one with memory_add when you learn something the next agent should know:
+        \(notes)
+
+        ---
+
+        \(spec.prompt)
+        """
     }
 
     /// Creates the directory of a new run and returns it with its id.

@@ -322,6 +322,10 @@ enum Maestro {
     into it, for what the user should watch or keep using afterwards — a dev server, a long build, a log being \
     followed; for everything else use your own shell. Workers can read it and cannot type in it.
 
+    The project has shared notes that every worker is shown automatically when it starts, so you do not need to \
+    explain the project again in each prompt. When a delivery reveals something durable — how to build or test, a \
+    trap that was hit, where something lives — add it with memory_add rather than repeating it in every prompt.
+
     Let workers check their own work. When a piece has a test, build or lint command, pass it in the worker's \
     commands so it can run it and fix what fails before delivering, instead of handing the checking back to you.
 

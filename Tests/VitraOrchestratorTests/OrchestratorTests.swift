@@ -27,6 +27,9 @@ private struct Sandbox {
 
     func cleanUp() { try? FileManager.default.removeItem(at: root) }
 
+    /// Where project notes go, so no test touches the real home folder.
+    var memoryRoot: URL { root.appendingPathComponent("memory") }
+
     /// An orchestrator whose `claude` is the given shell script.
     func orchestrator(claude script: String) throws -> Orchestrator {
         let path = root.appendingPathComponent("fake-claude")
@@ -34,7 +37,8 @@ private struct Sandbox {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
         return Orchestrator(
             root: root.appendingPathComponent("runs"),
-            executables: Executables(paths: [.claude: path.path])
+            executables: Executables(paths: [.claude: path.path]),
+            memoryRoot: memoryRoot
         )
     }
 
@@ -100,6 +104,27 @@ echo '{"result":"done","is_error":false,"total_cost_usd":0.5,"usage":{"input_tok
     // expanded by the shell or taken for a flag.
     #expect(try read("got-args.txt") == "[-p]\n[--model]\n[grok-4.7-low]\n[--output-format]\n[json]\n[--mode]\n[ask]\n[--trust]\n[--]\n[\(prompt)]\n")
     #expect(try read("got-stdin.txt").isEmpty)
+}
+
+@Test func aWorkersPromptStartsWithTheProjectsNotesAndTheRecordKeepsTheOriginal() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    let orchestrator = try sandbox.orchestrator(claude: answersDone)
+    let projectPath = sandbox.project.path
+    try ProjectMemory(root: sandbox.memoryRoot).add("Test with bun test", author: "maestro", project: projectPath, now: Date())
+    let notes = ProjectMemory(root: sandbox.memoryRoot).read(project: projectPath)
+
+    let spec = WorkerSpec(
+        cli: .claude, model: "haiku", prompt: "fix the sidebar", directory: projectPath,
+        effort: "low", project: projectPath
+    )
+    let id = try orchestrator.spawn(spec)
+    let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)
+
+    let header = "Notes on this project left by earlier agents. Read them first, and add one with memory_add when you learn something the next agent should know:\n"
+    let received = try String(contentsOf: sandbox.project.appendingPathComponent("got-prompt.txt"), encoding: .utf8)
+    #expect(received == header + notes + "\n\n---\n\n" + "fix the sidebar")
+    #expect(run.spec.prompt == "fix the sidebar")
 }
 
 @Test func aDeliveryCanBeRatedAndTheRatingStaysWithTheRun() async throws {

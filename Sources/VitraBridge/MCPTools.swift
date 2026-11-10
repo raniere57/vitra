@@ -108,10 +108,10 @@ public enum MCPTools {
     /// What a worker is served: the panel's tools, less the one that types
     /// in the shared terminal — that would be a way round the list of
     /// commands the maestro allowed it.
-    public static let worker: [JSONValue] = panel.filter { $0["name"]?.stringValue != "terminal_run" }
+    public static let worker: [JSONValue] = panel.filter { $0["name"]?.stringValue != "terminal_run" } + MemoryTools.all
 
-    /// Every tool `vitra mcp` serves: the panel's, and the orchestrator's.
-    public static let all: [JSONValue] = panel + AgentTools.all
+    /// Every tool `vitra mcp` serves: the panel's, the orchestrator's, and the notes.
+    public static let all: [JSONValue] = panel + AgentTools.all + MemoryTools.all
 
     public static let names: [String] = all.compactMap { $0["name"]?.stringValue }
 
