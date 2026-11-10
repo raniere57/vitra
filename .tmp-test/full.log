@@ -783,4 +783,56 @@ Test Suite 'All tests' passed at 2026-11-10 16:25:08.037.
 ✔ Test noAuditorWhenEveryCandidateIsGone() passed after 0.001 seconds.
 ◇ Test theAuditorIsToldTheTaskTheDiffAndHowToAnswer() started.
 ✔ Test theAuditorIsToldTheTaskTheDiffAndHowToAnswer() passed after 0.001 seconds.
-◇ Tes
+◇ Test aHugeDiffIsCutAndTheAuditorIsSentToTheFiles() started.
+✔ Test aHugeDiffIsCutAndTheAuditorIsSentToTheFiles() passed after 0.385 seconds.
+◇ Test theVerdictRuleAndTheTaskComeBeforeTheFencedDiff() started.
+✔ Test theVerdictRuleAndTheTaskComeBeforeTheFencedDiff() passed after 0.001 seconds.
+◇ Test aCutDiffEndsAtAFileBoundaryAndSaysHowManyFilesWereLeftOut() started.
+✔ Test aCutDiffEndsAtAFileBoundaryAndSaysHowManyFilesWereLeftOut() passed after 0.010 seconds.
+◇ Test aWorkerRunsInItsDirectoryWithThePromptOnStdin() started.
+✔ Test aWorkerRunsInItsDirectoryWithThePromptOnStdin() passed after 0.530 seconds.
+◇ Test aCLIThatTakesItsPromptAsAnArgumentGetsItWholeAfterTheOptions() started.
+✔ Test aCLIThatTakesItsPromptAsAnArgumentGetsItWholeAfterTheOptions() passed after 0.417 seconds.
+◇ Test aWorkersPromptStartsWithTheProjectsNotesAndTheRecordKeepsTheOriginal() started.
+✔ Test aWorkersPromptStartsWithTheProjectsNotesAndTheRecordKeepsTheOriginal() passed after 0.423 seconds.
+◇ Test aDeliveryCanBeRatedAndTheRatingStaysWithTheRun() started.
+✔ Test aDeliveryCanBeRatedAndTheRatingStaysWithTheRun() passed after 0.437 seconds.
+◇ Test onlyARealDeliveryCanBeRatedAndOnlyFromOneToFive() started.
+✔ Test onlyARealDeliveryCanBeRatedAndOnlyFromOneToFive() passed after 2.010 seconds.
+◇ Test aWorkerThatExitsNonZeroIsFinishedAndAnError() started.
+✔ Test aWorkerThatExitsNonZeroIsFinishedAndAnError() passed after 0.420 seconds.
+◇ Test aZeroExitDoesNotHideAnErrorTheCLIReported() started.
+✔ Test aZeroExitDoesNotHideAnErrorTheCLIReported() passed after 0.429 seconds.
+◇ Test waitingGivesUpAtTheTimeoutAndReportsTheWorkerStillRunning() started.
+✔ Test waitingGivesUpAtTheTimeoutAndReportsTheWorkerStillRunning() passed after 2.542 seconds.
+◇ Test aCancelledWorkerStopsAlongWithEverythingItStarted() started.
+✔ Test aCancelledWorkerStopsAlongWithEverythingItStarted() passed after 2.479 seconds.
+◇ Test aWorkerKilledFromOutsideIsLostNotRunningForEver() started.
+✔ Test aWorkerKilledFromOutsideIsLostNotRunningForEver() passed after 0.417 seconds.
+◇ Test aFinishedRunKeepsItsAnswerEvenIfACancelLandedJustAfter() started.
+✔ Test aFinishedRunKeepsItsAnswerEvenIfACancelLandedJustAfter() passed after 0.845 seconds.
+◇ Test aWorkerRecordedAsKilledByTheCancelIsCancelledNotFailed() started.
+✔ Test aWorkerRecordedAsKilledByTheCancelIsCancelledNotFailed() passed after 0.430 seconds.
+◇ Test aRecordWhosePidCouldNotBeAWorkersIsNotARun() started.
+✔ Test aRecordWhosePidCouldNotBeAWorkersIsNotARun() passed after 0.006 seconds.
+◇ Test aPidThatNowBelongsToSomethingElseIsNeverSignalled() started.
+✔ Test aPidThatNowBelongsToSomethingElseIsNeverSignalled() passed after 2.071 seconds.
+◇ Test whatARunLeavesOnDiskIsTheUsersAlone() started.
+✔ Test whatARunLeavesOnDiskIsTheUsersAlone() passed after 0.424 seconds.
+◇ Test outputThatIsNotValidTextIsStillRead() started.
+✔ Test outputThatIsNotValidTextIsStillRead() passed after 0.514 seconds.
+◇ Test cancellingAFinishedWorkerLeavesItsResultAlone() started.
+✔ Test cancellingAFinishedWorkerLeavesItsResultAlone() passed after 0.419 seconds.
+◇ Test severalWorkersRunAtOnceAndComeBackInTheOrderAsked() started.
+✔ Test severalWorkersRunAtOnceAndComeBackInTheOrderAsked() passed after 0.425 seconds.
+◇ Test recentListsTheNewestRunFirst() started.
+✔ Test recentListsTheNewestRunFirst() passed after 0.450 seconds.
+◇ Test anIdThatIsNotOneOfOursNeverTouchesTheFilesystem() started.
+✔ Test anIdThatIsNotOneOfOursNeverTouchesTheFilesystem() passed after 0.001 seconds.
+◇ Test aCLIThatIsNotInstalledIsReportedByName() started.
+✔ Test aCLIThatIsNotInstalledIsReportedByName() passed after 0.001 seconds.
+◇ Test theOpenCodeBundledWithItsAppIsPreferredOverTheOneOnThePath() started.
+✔ Test theOpenCodeBundledWithItsAppIsPreferredOverTheOneOnThePath() passed after 0.002 seconds.
+◇ Test anEditingWorkerGetsAWorktreeAndABranchOfItsOwn() started.
+✔ Test anEditingWorkerGetsAWorktreeAndABranchOfItsOwn() passed after 0.565 seconds.
+◇ Test anEditingWorkerThatFailsStillHasItsWorkCommitted
