@@ -506,3 +506,46 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(MaestroStatus.model(for: "/work/hapto", in: directory) == MaestroModel(name: "Fable 5.2", effort: "high"))
     #expect(MaestroStatus.model(for: "/work/site", in: directory) == nil)
 }
+
+@Test func aSessionsNameIsTheLastCustomTitleElseTheGeneratedOne() {
+    let custom = #"{"type":"custom-title","customTitle":"revisão do PR 61","sessionId":"s1"}"#
+    let generated = #"{"type":"agent-name","agentName":"quero revisar o PR","sessionId":"s1"}"#
+    let message = #"{"type":"assistant","message":{"content":"olá"}}"#
+
+    #expect(SessionName.name(inTail: Data(generated.utf8)) == "quero revisar o PR")
+    #expect(SessionName.name(inTail: Data(custom.utf8)) == "revisão do PR 61")
+    // Both present: the custom title wins whichever comes last.
+    #expect(SessionName.name(inTail: Data([generated, message, custom].joined(separator: "\n").utf8)) == "revisão do PR 61")
+    #expect(SessionName.name(inTail: Data([custom, generated].joined(separator: "\n").utf8)) == "revisão do PR 61")
+    #expect(SessionName.name(inTail: Data(message.utf8)) == nil)
+    #expect(SessionName.name(inTail: Data()) == nil)
+}
+
+@Test func aPartialFirstLineOfTheTailIsSkipped() {
+    let custom = #"{"type":"custom-title","customTitle":"revisão do PR 61","sessionId":"s1"}"#
+    // The tail was cut mid-line: the fragment is not JSON and must not be read.
+    let cut = #"{"type":"agent-name","agentName":"quero rev"#
+    let tail = [cut, #"{"type":"assistant"}"#, custom].joined(separator: "\n")
+    #expect(SessionName.name(inTail: Data(tail.utf8)) == "revisão do PR 61")
+    #expect(SessionName.name(inTail: Data(cut.utf8)) == nil)
+}
+
+@Test func aSessionsNameIsReadFromTheTranscriptFile() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("transcript-\(UUID().uuidString).jsonl")
+    defer { try? FileManager.default.removeItem(at: file) }
+    let filler = String(repeating: #"{"type":"assistant","message":"xxxxxxxxxxxxxxxxxxxxxxxx"}"# + "\n", count: 20_000)
+    let text = #"{"type":"agent-name","agentName":"antigo"}"# + "\n" + filler
+    try text.write(to: file, atomically: true, encoding: .utf8)
+    // The generated name is far back, past the tail: nothing is found.
+    #expect(SessionName.named(atTranscript: file.path) == nil)
+    let input = Data(#"{"model":{"display_name":"Fable 5.2"},"transcript_path":"\#(file.path)"}"#.utf8)
+    #expect(MaestroStatus.model(fromStatusInput: input, fallbackEffort: nil)?.session == nil)
+    try (text + #"{"type":"custom-title","customTitle":"PR 61"}"#).write(to: file, atomically: true, encoding: .utf8)
+    #expect(MaestroStatus.model(fromStatusInput: input, fallbackEffort: nil)?.session == "PR 61")
+}
+
+@Test func aModelNotedBeforeSessionsExistedStillDecodes() throws {
+    let old = Data(#"{"name":"Fable 5.2","effort":"high"}"#.utf8)
+    #expect(try JSONDecoder().decode(MaestroModel.self, from: old) == MaestroModel(name: "Fable 5.2", effort: "high"))
+    #expect(try JSONDecoder().decode(MaestroModel.self, from: old).session == nil)
+}
