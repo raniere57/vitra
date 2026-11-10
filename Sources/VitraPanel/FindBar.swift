@@ -14,14 +14,14 @@ final class FindBar: NSView {
         self.browser = browser
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = PanelStyle.surface.cgColor
-        layer?.borderColor = PanelStyle.hairline.cgColor
+        layer?.backgroundColor = Theme.raised.cgColor
+        layer?.borderColor = Theme.raisedLine.cgColor
         layer?.borderWidth = 1
-        layer?.cornerRadius = 7
+        layer?.cornerRadius = Theme.Radius.control
         translatesAutoresizingMaskIntoConstraints = false
 
-        field.font = PanelStyle.monospaced(11)
-        field.textColor = PanelStyle.primaryText
+        field.font = Theme.meta
+        field.textColor = Theme.text
         field.backgroundColor = .clear
         field.drawsBackground = false
         field.isBordered = false
@@ -32,7 +32,7 @@ final class FindBar: NSView {
         field.translatesAutoresizingMaskIntoConstraints = false
 
         status.wantsLayer = true
-        status.layer?.cornerRadius = 3
+        status.layer?.cornerRadius = Theme.Radius.dot
         status.layer?.backgroundColor = NSColor.clear.cgColor
         status.translatesAutoresizingMaskIntoConstraints = false
 
@@ -42,8 +42,8 @@ final class FindBar: NSView {
 
         let row = NSStackView(views: [field, status, previous, next, close])
         row.orientation = .horizontal
-        row.spacing = 6
-        row.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 8)
+        row.spacing = Theme.Space.sm
+        row.edgeInsets = NSEdgeInsets(top: 0, left: Theme.Space.lg, bottom: 0, right: Theme.Space.md)
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
 
@@ -52,9 +52,11 @@ final class FindBar: NSView {
             row.bottomAnchor.constraint(equalTo: bottomAnchor),
             row.leadingAnchor.constraint(equalTo: leadingAnchor),
             row.trailingAnchor.constraint(equalTo: trailingAnchor),
-            field.widthAnchor.constraint(equalToConstant: 180),
-            status.widthAnchor.constraint(equalToConstant: 6),
-            status.heightAnchor.constraint(equalToConstant: 6),
+            // At most 180, and less where the panel is narrow: the bar must
+            // fit the panel's 260 pt minimum with its buttons and margins.
+            field.widthAnchor.constraint(lessThanOrEqualToConstant: 180),
+            status.widthAnchor.constraint(equalToConstant: 2 * Theme.Radius.dot),
+            status.heightAnchor.constraint(equalToConstant: 2 * Theme.Radius.dot),
         ])
     }
 
@@ -66,9 +68,11 @@ final class FindBar: NSView {
         if superview == nil {
             parent.addSubview(self)
             NSLayoutConstraint.activate([
-                topAnchor.constraint(equalTo: parent.topAnchor, constant: 40),
-                trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -12),
-                heightAnchor.constraint(equalToConstant: 30),
+                topAnchor.constraint(equalTo: parent.topAnchor, constant: Theme.headerHeight + Theme.Space.md),
+                trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Theme.Space.lg),
+                // Never wider than the panel it sits in.
+                leadingAnchor.constraint(greaterThanOrEqualTo: parent.leadingAnchor, constant: Theme.Space.lg),
+                heightAnchor.constraint(equalToConstant: Theme.rowHeight),
             ])
         }
         isHidden = false
@@ -104,7 +108,7 @@ final class FindBar: NSView {
     private func button(_ symbol: String, _ action: Selector) -> NSButton {
         let button = NSButton(title: "", target: self, action: action)
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        button.contentTintColor = PanelStyle.secondaryText
+        button.contentTintColor = Theme.muted
         button.isBordered = false
         button.setContentHuggingPriority(.required, for: .horizontal)
         return button

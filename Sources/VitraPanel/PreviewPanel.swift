@@ -75,7 +75,7 @@ public final class PreviewPanel: NSView {
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.backgroundColor = PanelStyle.surface.cgColor
+        layer?.backgroundColor = Theme.panel.cgColor
         buildHeader()
         buildContentContainer()
         showEmptyState()
@@ -382,30 +382,30 @@ public final class PreviewPanel: NSView {
     private func buildHeader() {
         let header = NSView()
         header.wantsLayer = true
-        header.layer?.backgroundColor = PanelStyle.headerSurface.cgColor
+        header.layer?.backgroundColor = Theme.ground.cgColor
         header.translatesAutoresizingMaskIntoConstraints = false
         addSubview(header)
 
         let hairline = NSView()
         hairline.wantsLayer = true
-        hairline.layer?.backgroundColor = PanelStyle.hairline.cgColor
+        hairline.layer?.backgroundColor = Theme.softLine.cgColor
         hairline.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hairline)
 
-        titleLabel.font = PanelStyle.monospaced(11.5, weight: .medium)
-        titleLabel.textColor = PanelStyle.primaryText
+        titleLabel.font = Theme.mono(11, .medium)
+        titleLabel.textColor = Theme.text
         titleLabel.lineBreakMode = .byTruncatingMiddle
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        detailLabel.font = PanelStyle.monospaced(10.5)
-        detailLabel.textColor = PanelStyle.secondaryText
+        detailLabel.font = Theme.meta
+        detailLabel.textColor = Theme.muted
         detailLabel.translatesAutoresizingMaskIntoConstraints = false
         detailLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         backButton.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back to files")
         backButton.target = self
         backButton.action = #selector(backClicked)
-        backButton.contentTintColor = PanelStyle.secondaryText
+        backButton.contentTintColor = Theme.muted
         backButton.isBordered = false
         backButton.bezelStyle = .inline
         backButton.toolTip = "Back to the file list"
@@ -414,7 +414,7 @@ public final class PreviewPanel: NSView {
 
         let close = NSButton(title: "", target: self, action: #selector(closeClicked))
         close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close preview")
-        close.contentTintColor = PanelStyle.secondaryText
+        close.contentTintColor = Theme.muted
         close.isBordered = false
         close.bezelStyle = .inline
         close.translatesAutoresizingMaskIntoConstraints = false
@@ -431,7 +431,7 @@ public final class PreviewPanel: NSView {
         zoomButton.isHidden = false
         let actions = NSStackView(views: [revealButton, openButton, copyPathButton, zoomButton])
         actions.orientation = .horizontal
-        actions.spacing = 8
+        actions.spacing = Theme.Space.md
         actions.translatesAutoresizingMaskIntoConstraints = false
 
         header.addSubview(backButton)
@@ -440,37 +440,37 @@ public final class PreviewPanel: NSView {
         header.addSubview(actions)
         header.addSubview(close)
 
-        titleLeading = titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 12)
-        titleAfterBack = titleLabel.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 6)
+        titleLeading = titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: Theme.inset)
+        titleAfterBack = titleLabel.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: Theme.Space.md)
         titleLeading?.isActive = true
 
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: topAnchor),
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
-            header.heightAnchor.constraint(equalToConstant: PanelStyle.headerHeight),
+            header.heightAnchor.constraint(equalToConstant: Theme.headerHeight),
 
             hairline.topAnchor.constraint(equalTo: header.bottomAnchor),
             hairline.leadingAnchor.constraint(equalTo: leadingAnchor),
             hairline.trailingAnchor.constraint(equalTo: trailingAnchor),
             hairline.heightAnchor.constraint(equalToConstant: 1),
 
-            backButton.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 8),
+            backButton.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: Theme.inset),
             backButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            backButton.widthAnchor.constraint(equalToConstant: 16),
+            backButton.widthAnchor.constraint(equalToConstant: Theme.iconSize),
 
             titleLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: detailLabel.leadingAnchor, constant: -8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: detailLabel.leadingAnchor, constant: -Theme.Space.md),
 
-            detailLabel.trailingAnchor.constraint(equalTo: actions.leadingAnchor, constant: -10),
+            detailLabel.trailingAnchor.constraint(equalTo: actions.leadingAnchor, constant: -Theme.Space.lg),
             detailLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
 
-            actions.trailingAnchor.constraint(equalTo: close.leadingAnchor, constant: -10),
+            actions.trailingAnchor.constraint(equalTo: close.leadingAnchor, constant: -Theme.Space.md),
             actions.centerYAnchor.constraint(equalTo: header.centerYAnchor),
 
-            close.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -8),
+            close.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -Theme.inset),
             close.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            close.widthAnchor.constraint(equalToConstant: 18),
+            close.widthAnchor.constraint(equalToConstant: Theme.iconSize),
         ])
     }
 
@@ -478,20 +478,20 @@ public final class PreviewPanel: NSView {
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
         button.target = self
         button.action = action
-        button.contentTintColor = PanelStyle.secondaryText
+        button.contentTintColor = Theme.muted
         button.isBordered = false
         button.bezelStyle = .inline
         button.toolTip = tip
         button.isHidden = true
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        button.widthAnchor.constraint(equalToConstant: Theme.iconSize).isActive = true
     }
 
     private func buildContentContainer() {
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(contentContainer)
         NSLayoutConstraint.activate([
-            contentContainer.topAnchor.constraint(equalTo: topAnchor, constant: PanelStyle.headerHeight + 1),
+            contentContainer.topAnchor.constraint(equalTo: topAnchor, constant: Theme.headerHeight + 1),
             contentContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
             contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -508,15 +508,15 @@ public final class PreviewPanel: NSView {
         vitra open report.html
         printf '\\033]7337;file=%s\\a' shot.png
         """)
-        hint.font = PanelStyle.monospaced(10.5)
-        hint.textColor = PanelStyle.secondaryText
+        hint.font = Theme.meta
+        hint.textColor = Theme.muted
         hint.alignment = .left
         hint.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.addSubview(hint)
         NSLayoutConstraint.activate([
-            hint.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 14),
-            hint.trailingAnchor.constraint(lessThanOrEqualTo: contentContainer.trailingAnchor, constant: -14),
-            hint.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: 18),
+            hint.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: Theme.inset),
+            hint.trailingAnchor.constraint(lessThanOrEqualTo: contentContainer.trailingAnchor, constant: -Theme.inset),
+            hint.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: Theme.inset),
         ])
         emptyState = hint
     }

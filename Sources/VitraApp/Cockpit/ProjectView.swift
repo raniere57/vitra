@@ -12,6 +12,17 @@ struct TerminalKit {
     let config: Config
 }
 
+/// The maestro's header row. Reports its width so the project can decide which
+/// of the plates fit, before the layout pass that would squeeze them.
+private final class MaestroHeader: NSStackView {
+    var onResize: ((CGFloat) -> Void)?
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        onResize?(newSize.width)
+    }
+}
+
 /// One project: the maestro's terminal on the left and, on the right, tabs
 /// for its workers, their ranking, a browser, the project's files and what
 /// was last done in its repository.
@@ -100,26 +111,38 @@ final class ProjectView: NSView {
     private let kit: TerminalKit
     private let terminalSlot = NSView()
     private let place: NSTextField = {
-        let label = NSTextField.label(font: CockpitStyle.mono(11), color: CockpitStyle.muted)
+        let label = NSTextField.label(font: CockpitStyle.meta, color: CockpitStyle.muted)
         // A long path loses its beginning, not the folder and branch at its end.
         label.lineBreakMode = .byTruncatingHead
         label.alignment = .right
         return label
     }()
     private(set) var terminal: TerminalView?
-    private let usage = NSTextField.label(font: CockpitStyle.mono(11), color: CockpitStyle.muted)
+    private let usage = NSTextField.label(font: CockpitStyle.meta, color: CockpitStyle.muted)
     private lazy var usagePill = NSView.pill([usage])
-    private let model = NSTextField.label("claude", font: CockpitStyle.ui(12, .medium), color: CockpitStyle.accent)
-    private let effort = NSTextField.label(font: CockpitStyle.mono(11), color: CockpitStyle.muted)
-    private let session = NSTextField.label(font: CockpitStyle.ui(12, .medium), color: CockpitStyle.text)
+    private let model = NSTextField.label("claude", font: CockpitStyle.label, color: CockpitStyle.accent)
+    private let effort = NSTextField.label(font: CockpitStyle.meta, color: CockpitStyle.muted)
+    private let session = NSTextField.label(font: CockpitStyle.label, color: CockpitStyle.text)
     private lazy var sessionPill = NSView.pill([session])
-    private let branch = NSTextField.label(font: CockpitStyle.mono(11), color: CockpitStyle.code)
+    private let branch = NSTextField.label(font: CockpitStyle.meta, color: CockpitStyle.code)
     private lazy var branchPill: NSView = {
         let icon = NSImageView(image: NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "branch") ?? NSImage())
         icon.contentTintColor = CockpitStyle.muted
-        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 10, weight: .medium)
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        icon.widthAnchor.constraint(equalToConstant: CockpitStyle.iconSize).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: CockpitStyle.iconSize).isActive = true
         return NSView.pill([icon, branch])
     }()
+    private let titleLabel = NSTextField.label("Maestro", font: CockpitStyle.title, color: CockpitStyle.text)
+    private lazy var modelPill = NSView.pill([model, effort])
+    /// The maestro's session name, when it has told one; what the header can
+    /// hide is decided by `fitHeader`.
+    private var sessionName: String?
+    private var headerWidth: CGFloat = 0
+    /// Narrower than this the session name is cut to an ellipsis; narrower
+    /// than what it takes to keep this and the path's minimum, it is hidden.
+    private static let sessionMinWidth: CGFloat = 96
+    private static let placeMinWidth: CGFloat = 56
 
     /// `startsTerminal: false` builds the view without a shell, a timer or an
     /// event monitor; the UI snapshot tool uses it to lay the project out
@@ -153,6 +176,7 @@ final class ProjectView: NSView {
         case .calm, nil: CockpitStyle.muted
         }
         usage.toolTip = "Uso semanal da assinatura Claude, como o maestro informou por último"
+        fitHeader()
     }
 
     /// Shows which model the maestro is on and at what effort, as it last
@@ -163,7 +187,24 @@ final class ProjectView: NSView {
         effort.isHidden = current?.effort == nil
         session.stringValue = current?.session ?? ""
         session.toolTip = current?.session
-        sessionPill.isHidden = current?.session == nil
+        sessionName = current?.session
+        fitHeader()
+    }
+
+    /// Shows the session plate only when the header has room for it at its
+    /// minimum width beside everything that never gives way. Decided from the
+    /// header's width, not from how the layout came out, so it cannot flap.
+    private func fitHeader() {
+        guard sessionName != nil else {
+            sessionPill.isHidden = true
+            return
+        }
+        let fixed = [titleLabel, modelPill, usagePill, branchPill].filter { !$0.isHidden }
+        let visible = fixed.count + 3 // plus the session plate, the spacer and the path
+        let widths = fixed.map(\.fittingSize.width).reduce(0, +)
+        let gaps = CGFloat(visible - 1) * CockpitStyle.Space.md + (CockpitStyle.Space.lg - CockpitStyle.Space.md)
+        let needed = 2 * CockpitStyle.inset + widths + gaps + Self.sessionMinWidth + Self.placeMinWidth
+        sessionPill.isHidden = headerWidth < needed
     }
 
     /// Hands the keyboard to the maestro.
@@ -612,32 +653,42 @@ final class ProjectView: NSView {
         place.stringValue = path
         self.branch.stringValue = branch ?? ""
         branchPill.isHidden = branch == nil
+        fitHeader()
     }
 
     // MARK: - Layout
 
     private func build() {
-        let title = NSTextField.label("Maestro", font: CockpitStyle.ui(13, .semibold), color: CockpitStyle.text)
+        let title = titleLabel
         // Each fact on a plate of its own: which model and how hard it is
         // thinking, how much of the week is spent, and on the far side where
         // the project is and on which branch.
         effort.isHidden = true
-        let modelPill = NSView.pill([model, effort])
         modelPill.toolTip = "Modelo e effort do maestro"
         usagePill.isHidden = true
-        for view in [title, usage, model, effort, branch] as [NSView] {
+        for view in [title, usage, model, effort, branch, modelPill, usagePill, branchPill] as [NSView] {
             view.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
-        // The session name is the one plate allowed to shrink: it truncates in
-        // the middle rather than pushing the branch off the bar.
-        session.lineBreakMode = .byTruncatingMiddle
-        session.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // What gives way, in this order: the path (head-truncated, lowest
+        // priority), then the session name, which truncates down to a minimum
+        // width and is hidden below it — never drawn as an empty plate. The
+        // model, effort, usage and branch plates never clip.
+        place.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        place.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.placeMinWidth).isActive = true
+        session.lineBreakMode = .byTruncatingTail
+        session.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(300), for: .horizontal)
         session.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        sessionPill.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(300), for: .horizontal)
+        sessionPill.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.sessionMinWidth).isActive = true
         sessionPill.isHidden = true
-        let header = NSStackView(views: [title, modelPill, usagePill, sessionPill, NSView(), place, branchPill])
-        header.spacing = 8
-        header.setCustomSpacing(12, after: title)
-        header.edgeInsets = NSEdgeInsets(top: 0, left: 22, bottom: 0, right: 22)
+        let header = MaestroHeader(views: [title, modelPill, usagePill, sessionPill, NSView(), place, branchPill])
+        header.spacing = CockpitStyle.Space.md
+        header.setCustomSpacing(CockpitStyle.Space.lg, after: title)
+        header.edgeInsets = NSEdgeInsets(top: 0, left: CockpitStyle.inset, bottom: 0, right: CockpitStyle.inset)
+        header.onResize = { [weak self] width in
+            self?.headerWidth = width
+            self?.fitHeader()
+        }
         refreshPlace()
 
         let headerRule = NSView.rule(CockpitStyle.softLine)

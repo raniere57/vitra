@@ -15,8 +15,8 @@ final class CockpitTabBar: NSView {
 
     private let tabs = NSStackView()
     private let add = NSButton(title: "", target: nil, action: nil)
-    private let today = NSTextField.label("hoje", font: CockpitStyle.mono(12), color: CockpitStyle.muted)
-    private let cost = NSTextField.label("$0.00", font: CockpitStyle.mono(12), color: CockpitStyle.text)
+    private let today = NSTextField.label("hoje", font: CockpitStyle.meta, color: CockpitStyle.muted)
+    private let cost = NSTextField.label("$0.00", font: CockpitStyle.meta, color: CockpitStyle.text)
     private var shown: [Tab] = []
     private var selected = -1
 
@@ -62,12 +62,12 @@ final class CockpitTabBar: NSView {
         add.action = #selector(addProject(_:))
         add.setAccessibilityLabel("Abrir projeto")
         add.toolTip = "Abrir projeto"
-        add.widthAnchor.constraint(equalToConstant: 30).isActive = true
-        add.heightAnchor.constraint(equalToConstant: 30).isActive = true
+        add.widthAnchor.constraint(equalToConstant: CockpitStyle.rowHeight).isActive = true
+        add.heightAnchor.constraint(equalToConstant: CockpitStyle.rowHeight).isActive = true
 
-        tabs.spacing = 4
+        tabs.spacing = CockpitStyle.Space.xs
         let spend = NSStackView(views: [today, cost])
-        spend.spacing = 8
+        spend.spacing = CockpitStyle.Space.md
         let rule = NSView.rule(CockpitStyle.line)
         for view in [tabs, spend, rule] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -77,8 +77,8 @@ final class CockpitTabBar: NSView {
         NSLayoutConstraint.activate([
             tabs.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CockpitStyle.trafficLightInset),
             tabs.centerYAnchor.constraint(equalTo: centerYAnchor),
-            tabs.trailingAnchor.constraint(lessThanOrEqualTo: spend.leadingAnchor, constant: -16),
-            spend.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            tabs.trailingAnchor.constraint(lessThanOrEqualTo: spend.leadingAnchor, constant: -CockpitStyle.inset),
+            spend.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CockpitStyle.inset),
             spend.centerYAnchor.constraint(equalTo: centerYAnchor),
             rule.leadingAnchor.constraint(equalTo: leadingAnchor),
             rule.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -99,7 +99,7 @@ private final class TabView: NSView {
         self.isSelected = isSelected
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 7
+        layer?.cornerRadius = CockpitStyle.Radius.control
         translatesAutoresizingMaskIntoConstraints = false
 
         let name = NSTextField.label(
@@ -110,20 +110,20 @@ private final class TabView: NSView {
         name.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         var views: [NSView] = [name]
         if tab.running > 0 {
-            let dot = NSView.filled(CockpitStyle.accent, cornerRadius: 3.5)
-            dot.widthAnchor.constraint(equalToConstant: 7).isActive = true
-            dot.heightAnchor.constraint(equalToConstant: 7).isActive = true
-            let count = NSTextField.label("\(tab.running)", font: CockpitStyle.mono(11), color: CockpitStyle.muted)
+            let dot = NSView.filled(CockpitStyle.accent, cornerRadius: CockpitStyle.Radius.dot)
+            dot.widthAnchor.constraint(equalToConstant: 2 * CockpitStyle.Radius.dot).isActive = true
+            dot.heightAnchor.constraint(equalToConstant: 2 * CockpitStyle.Radius.dot).isActive = true
+            let count = NSTextField.label("\(tab.running)", font: CockpitStyle.meta, color: CockpitStyle.muted)
             views = [dot, name, count]
         }
         let row = NSStackView(views: views)
-        row.spacing = 8
+        row.spacing = CockpitStyle.Space.md
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 30),
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            heightAnchor.constraint(equalToConstant: CockpitStyle.rowHeight),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CockpitStyle.Space.lg),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CockpitStyle.Space.lg),
             row.centerYAnchor.constraint(equalTo: centerYAnchor),
             widthAnchor.constraint(lessThanOrEqualToConstant: 220),
         ])
