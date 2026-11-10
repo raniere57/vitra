@@ -107,8 +107,18 @@ public struct Orchestrator: Sendable {
         if [ -n "$VITRA_WORKTREE" ]; then
             vitra_commit_error="$VITRA_RUN/commit-error"
             rm -f "$vitra_commit_error"
+            # What the setup linked or copied in is the project's, not the
+            # worker's work. `git add` refuses an exclude pathspec that reaches
+            # into an ignored folder such as vendor/, so everything is added
+            # and those paths are unstaged again by literal pathspec.
+            set --
+            while IFS= read -r vitra_path; do
+                set -- "$@" ":(literal)$vitra_path"
+            done <"$VITRA_RUN/worktree-excludes"
             if ! git -C "$VITRA_WORKTREE" add -A >/dev/null 2>"$vitra_commit_error"; then
                 : # git's reason is in the file; the worker's edits stay where they are
+            elif [ $# -gt 0 ] && ! git -C "$VITRA_WORKTREE" reset -q -- "$@" >/dev/null 2>"$vitra_commit_error"; then
+                : # git's reason is in the file, as above
             elif git -C "$VITRA_WORKTREE" diff --cached --quiet >/dev/null 2>&1; then
                 rm -f "$vitra_commit_error"
             elif ! GIT_AUTHOR_NAME='Vitra worker' GIT_AUTHOR_EMAIL='worker@vitra.local' \\
@@ -126,6 +136,8 @@ public struct Orchestrator: Sendable {
         ]
         if let worktree {
             variables["VITRA_WORKTREE"] = worktree.tree
+            // Read by the shell after the worker: one path per line, never
+            // spliced into the script.
             let label = spec.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             variables["VITRA_COMMIT_MESSAGE"] = "vitra \(id): " + (label.isEmpty ? spec.worker : label)
         }
@@ -223,6 +235,18 @@ public struct Orchestrator: Sendable {
         guard added.succeeded else {
             throw .spawnFailed(added.output.trimmingCharacters(in: .whitespacesAndNewlines))
         }
+
+        // What the project keeps out of git but the worker needs. Whatever
+        // could not be applied is written beside the run for the report.
+        let setup = WorktreeSetup.apply(repository: URL(fileURLWithPath: topLevel), to: tree)
+        if !setup.skipped.isEmpty {
+            try? Data((setup.skipped.joined(separator: "\n") + "\n").utf8)
+                .write(to: run.appendingPathComponent("worktree-setup"))
+        }
+        // What the setup put there is kept out of the worker's commits; the
+        // file is always written, so the shell can read it.
+        try? Data(setup.applied.map { $0 + "\n" }.joined().utf8)
+            .write(to: run.appendingPathComponent("worktree-excludes"))
 
         let directory = prefix.isEmpty ? tree : tree.appendingPathComponent(prefix)
         // A directory that exists only on disk is not in the repository, so
@@ -503,8 +527,16 @@ public struct Orchestrator: Sendable {
             baseCommit: record.baseCommit,
             commitError: commitError(id),
             rating: (try? Data(contentsOf: file(id, "rating.json")))
-                .flatMap { try? JSONDecoder().decode(Rating.self, from: $0) }
+                .flatMap { try? JSONDecoder().decode(Rating.self, from: $0) },
+            worktreeSkipped: worktreeSkipped(id)
         )
+    }
+
+    /// The lines of `.vitra/worktree` that could not be applied to the run's
+    /// worktree, each with why. Empty when there were none.
+    private func worktreeSkipped(_ id: String) -> [String] {
+        guard let text = try? String(contentsOf: file(id, "worktree-setup"), encoding: .utf8) else { return [] }
+        return text.split(whereSeparator: \.isNewline).map(String.init)
     }
 
     /// Why the shell could not commit the worker's work, when it could not.

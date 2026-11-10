@@ -525,6 +525,9 @@ enum AgentReport {
             lines.append("stderr: " + errorTail)
         }
         lines.append(contentsOf: branchLines(run, audit: audit))
+        if !run.worktreeSkipped.isEmpty {
+            lines.append("worktree setup skipped: " + run.worktreeSkipped.joined(separator: "; "))
+        }
         return lines.joined(separator: "\n")
     }
 
