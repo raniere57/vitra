@@ -111,6 +111,8 @@ final class ProjectView: NSView {
     private lazy var usagePill = NSView.pill([usage])
     private let model = NSTextField.label("claude", font: CockpitStyle.ui(12, .medium), color: CockpitStyle.accent)
     private let effort = NSTextField.label(font: CockpitStyle.mono(11), color: CockpitStyle.muted)
+    private let session = NSTextField.label(font: CockpitStyle.ui(12, .medium), color: CockpitStyle.text)
+    private lazy var sessionPill = NSView.pill([session])
     private let branch = NSTextField.label(font: CockpitStyle.mono(11), color: CockpitStyle.code)
     private lazy var branchPill: NSView = {
         let icon = NSImageView(image: NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "branch") ?? NSImage())
@@ -152,6 +154,9 @@ final class ProjectView: NSView {
         model.stringValue = current?.name ?? "claude"
         effort.stringValue = current?.effort ?? ""
         effort.isHidden = current?.effort == nil
+        session.stringValue = current?.session ?? ""
+        session.toolTip = current?.session
+        sessionPill.isHidden = current?.session == nil
     }
 
     /// Hands the keyboard to the maestro.
@@ -615,7 +620,13 @@ final class ProjectView: NSView {
         for view in [title, usage, model, effort, branch] as [NSView] {
             view.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
-        let header = NSStackView(views: [title, modelPill, usagePill, NSView(), place, branchPill])
+        // The session name is the one plate allowed to shrink: it truncates in
+        // the middle rather than pushing the branch off the bar.
+        session.lineBreakMode = .byTruncatingMiddle
+        session.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        session.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        sessionPill.isHidden = true
+        let header = NSStackView(views: [title, modelPill, usagePill, sessionPill, NSView(), place, branchPill])
         header.spacing = 8
         header.setCustomSpacing(12, after: title)
         header.edgeInsets = NSEdgeInsets(top: 0, left: 22, bottom: 0, right: 22)

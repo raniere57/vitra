@@ -533,6 +533,62 @@ struct SubscriptionUsage: Codable, Equatable {
 struct MaestroModel: Codable, Equatable {
     let name: String
     let effort: String?
+    /// The maestro's session name: the last `/rename` title, else claude's
+    /// generated one. Optional, so files noted before it existed still decode.
+    let session: String?
+
+    init(name: String, effort: String?, session: String? = nil) {
+        self.name = name
+        self.effort = effort
+        self.session = session
+    }
+}
+
+/// The name of the session a transcript belongs to, as claude records it.
+///
+/// `/rename` appends `{"type":"custom-title","customTitle":...}`; claude's own
+/// generated name is `{"type":"agent-name","agentName":...}`. The last custom
+/// title wins, else the last generated name. Only the tail of the file is read,
+/// since transcripts run to many megabytes and the status line runs often.
+enum SessionName {
+    static let tailBytes = 256 * 1024
+
+    static func named(atTranscript path: String) -> String? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return nil }
+        let start = size > UInt64(tailBytes) ? size - UInt64(tailBytes) : 0
+        guard (try? handle.seek(toOffset: start)) != nil,
+              let tail = try? handle.readToEnd()
+        else { return nil }
+        return name(inTail: tail)
+    }
+
+    /// The name in a transcript's tail. A line cut by the start of the tail is
+    /// not JSON, so it is skipped like any other line that does not parse.
+    static func name(inTail tail: Data) -> String? {
+        let customMarker = Data(#""custom-title""#.utf8)
+        let generatedMarker = Data(#""agent-name""#.utf8)
+        var custom: String?
+        var generated: String?
+        for line in tail.split(separator: UInt8(ascii: "\n")).reversed() {
+            let isCustom = line.range(of: customMarker) != nil
+            let isGenerated = line.range(of: generatedMarker) != nil
+            guard isCustom || isGenerated,
+                  let entry = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any]
+            else { continue }
+            if isCustom, custom == nil, entry["type"] as? String == "custom-title",
+               let title = entry["customTitle"] as? String, !title.isEmpty {
+                custom = title
+            }
+            if isGenerated, generated == nil, entry["type"] as? String == "agent-name",
+               let title = entry["agentName"] as? String, !title.isEmpty {
+                generated = title
+            }
+            if custom != nil { break }
+        }
+        return custom ?? generated
+    }
 }
 
 /// The usage figure as the maestro's bar shows it.
@@ -599,7 +655,8 @@ enum MaestroStatus {
             (value as? String) ?? ((value as? [String: Any])?["level"] as? String)
         }
         let effort = level(input["effort"]) ?? level(model["effort"]) ?? level(input["effort_level"]) ?? fallbackEffort
-        return MaestroModel(name: name, effort: effort.flatMap { $0.isEmpty ? nil : $0 })
+        let session = (input["transcript_path"] as? String).flatMap(SessionName.named(atTranscript:))
+        return MaestroModel(name: name, effort: effort.flatMap { $0.isEmpty ? nil : $0 }, session: session)
     }
 
     /// Where a project's model is noted: beside the usage, in the folder the
