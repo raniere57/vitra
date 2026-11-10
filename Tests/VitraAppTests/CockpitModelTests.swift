@@ -284,6 +284,15 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(Maestro.conversation(silent, in: conversations.appendingPathComponent("missing")) == .new(silent))
 }
 
+@Test func theMaestrosMCPConfigCarriesItsRole() throws {
+    // Without the role the helper serves a worker's tool set to the maestro.
+    let config = try #require(try JSONSerialization.jsonObject(with: Data(Maestro.mcpConfig(binary: "/Apps/Vitra").utf8)) as? [String: Any])
+    let vitra = try #require((config["mcpServers"] as? [String: Any])?["vitra"] as? [String: Any])
+
+    #expect(vitra["command"] as? String == "/Apps/Vitra")
+    #expect((vitra["env"] as? [String: String])?["VITRA_ROLE"] == "maestro")
+}
+
 @Test func theMaestroIsBriefedOnTheSharedNotes() {
     // Workers are shown the notes automatically; the maestro must know to add to them.
     #expect(Maestro.brief.contains("memory_add"))

@@ -39,22 +39,30 @@ public struct Orchestrator: Sendable {
     private let memoryRoot: URL
     private let executables: Executables
     private let browserConfig: String?
+    /// The `vitra` binary a worker's own MCP configuration starts.
+    private let vitraBinary: String?
 
     /// `browserConfig` is the MCP configuration that hands workers Vitra's
     /// browser. Left out, it is the one the app installed — for the real run
     /// store only, so a test's workers are not given the user's browser.
+    /// `vitraBinary` is the binary that configuration starts; claude and
+    /// opencode workers get their own configuration naming it, and without one
+    /// they get no Vitra tools at all rather than the maestro's shared file.
     /// `memoryRoot` is where project notes are read from; tests point it at a
     /// scratch directory for the same reason.
     public init(
         root: URL = Orchestrator.defaultRoot,
         executables: Executables = .discover(),
         browserConfig: String? = nil,
+        vitraBinary: String? = nil,
         memoryRoot: URL = ProjectMemory.defaultRoot
     ) {
+        let isRealStore = root == Orchestrator.defaultRoot
         self.root = root
         self.memoryRoot = memoryRoot
         self.executables = executables
-        self.browserConfig = browserConfig ?? (root == Orchestrator.defaultRoot ? Self.installedBrowserConfig : nil)
+        self.browserConfig = browserConfig ?? (isRealStore ? Self.installedBrowserConfig : nil)
+        self.vitraBinary = vitraBinary ?? (isRealStore ? Self.installedVitraBinary : nil)
     }
 
     // MARK: - Spawning
@@ -71,6 +79,17 @@ public struct Orchestrator: Sendable {
         } catch {
             try? FileManager.default.removeItem(at: directory)
             throw .spawnFailed("\(error.localizedDescription)")
+        }
+
+        // The worker's MCP configuration, which names this run. Written before
+        // anything is started, so a failure leaves nothing behind but the run
+        // directory, which is removed here.
+        let served: (config: String?, environment: [String: String])
+        do {
+            served = try serving(spec, id: id, run: directory)
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
         }
 
         // An editing worker is given a tree of its own before it starts, so
@@ -145,11 +164,12 @@ public struct Orchestrator: Sendable {
             // VITRA_AGENT is who the worker is to Vitra's browser: the tab it
             // opens there is filed under its run.
             .merging(variables) { _, new in new }
+            .merging(served.environment) { _, new in new }
 
         let pid: pid_t
         do {
             pid = try Self.launch(
-                ["/bin/sh", "-c", script, "vitra-worker", executable] + spec.arguments(browserConfig: browserConfig),
+                ["/bin/sh", "-c", script, "vitra-worker", executable] + spec.arguments(browserConfig: served.config),
                 environment: environment,
                 directory: worktree?.directory.path ?? spec.directory
             )
@@ -325,6 +345,57 @@ public struct Orchestrator: Sendable {
     static var installedBrowserConfig: String? {
         let path = NSHomeDirectory() + "/.vitra/maestro/mcp.json"
         return FileManager.default.fileExists(atPath: path) ? path : nil
+    }
+
+    /// The `vitra` binary the installed configuration starts, so a worker's own
+    /// configuration starts the same one.
+    static var installedVitraBinary: String? {
+        guard let path = installedBrowserConfig,
+              let data = FileManager.default.contents(atPath: path),
+              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let servers = config["mcpServers"] as? [String: Any],
+              let vitra = servers["vitra"] as? [String: Any],
+              let command = vitra["command"] as? String, !command.isEmpty
+        else { return nil }
+        return command
+    }
+
+    /// The MCP configuration a worker is started with, and the environment
+    /// that goes with it. Claude and opencode take one per run, so each gets
+    /// its own naming this worker. The other CLIs read only their global
+    /// configuration, and keep the shared one as before.
+    private func serving(
+        _ spec: WorkerSpec,
+        id: String,
+        run: URL
+    ) throws(OrchestratorError) -> (config: String?, environment: [String: String]) {
+        guard let browserConfig else { return (nil, [:]) }
+        guard spec.cli == .claude || spec.cli == .opencode else { return (browserConfig, [:]) }
+        guard let vitraBinary else { return (nil, [:]) }
+        return try Self.writeRunConfig(for: spec, id: id, run: run, binary: vitraBinary)
+    }
+
+    /// Writes this run's configuration for a claude or opencode worker into its
+    /// run directory, and returns what the worker is started with.
+    static func writeRunConfig(
+        for spec: WorkerSpec,
+        id: String,
+        run: URL,
+        binary: String
+    ) throws(OrchestratorError) -> (config: String?, environment: [String: String]) {
+        let identity = VitraMCPConfig.workerEnvironment(id: id, run: run, project: spec.project)
+        let isClaude = spec.cli == .claude
+        let file = run.appendingPathComponent(isClaude ? "mcp.json" : "opencode.json")
+        let text = isClaude
+            ? VitraMCPConfig.claudeConfig(binary: binary, environment: identity)
+            : VitraMCPConfig.opencodeConfig(binary: binary, environment: identity)
+        do {
+            try Data(text.utf8).write(to: file, options: .atomic)
+        } catch {
+            throw .spawnFailed("\(error.localizedDescription)")
+        }
+        // opencode finds its configuration through the environment, not a flag.
+        return (file.path, isClaude ? [:] : ["OPENCODE_CONFIG": file.path])
     }
 
     public static func workerEnvironment(from environment: [String: String]) -> [String: String] {

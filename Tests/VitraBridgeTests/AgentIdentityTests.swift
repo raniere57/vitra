@@ -99,6 +99,91 @@ private func procargs2(argv: [String], exec: String = "/usr/bin/vitra", padding:
     #expect(AgentIdentity.projectFromRunRecord(Data("not json".utf8)) == nil)
 }
 
+// MARK: - Which tool set the helper serves
+
+@Test func onlyTheMaestroRoleGetsTheMaestrosTools() {
+    #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_ROLE": "maestro"]) == .maestro)
+}
+
+@Test func aWorkerEnvironmentGetsTheWorkerSetEvenWithTheMaestroRole() {
+    // A worker's helper inherits the maestro's role from its spawner; the run
+    // it names is what decides.
+    #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_ROLE": "maestro", "VITRA_AGENT": "abcd1234"]) == .worker)
+    #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_ROLE": "maestro", "VITRA_RUN": "/x/runs/abcd1234"]) == .worker)
+}
+
+@Test func anUnknownCallerGetsTheWorkerSet() {
+    #expect(AgentIdentity.ServedRole.decide(own: [:]) == .worker)
+    #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_ROLE": "something"]) == .worker)
+    #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_ROLE": ""]) == .worker)
+}
+
+// MARK: - Identity by working directory
+
+/// A runs root holding one run whose `run.json` names a project.
+private func fakeRuns() throws -> (root: URL, run: URL) {
+    let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-runs-\(UUID().uuidString)")
+    let root = scratch.appendingPathComponent("runs")
+    let run = root.appendingPathComponent("abcd1234")
+    try FileManager.default.createDirectory(at: run.appendingPathComponent("tree"), withIntermediateDirectories: true)
+    try Data(#"{"spec":{"project":"/work/app"}}"#.utf8).write(to: run.appendingPathComponent("run.json"))
+    return (root, run)
+}
+
+@Test func workingDirectoryInsideARunNamesTheRun() throws {
+    let (root, run) = try fakeRuns()
+    let identity = AgentIdentity.resolve(
+        own: [:],
+        cwd: run.appendingPathComponent("tree").path,
+        runsRoot: root,
+        nearestAncestor: { nil },
+        runProject: { AgentIdentity.projectFromRunRecord(at: URL(fileURLWithPath: $0).appendingPathComponent("run.json")) }
+    )
+
+    #expect(identity == AgentIdentity(agent: "abcd1234", project: "/work/app", pane: nil))
+}
+
+@Test func workingDirectoryOutsideTheRunsDoesNotNameARun() throws {
+    let (root, run) = try fakeRuns()
+    let outside = [run.deletingLastPathComponent().deletingLastPathComponent().path, root.path, "/work/app"]
+    for cwd in outside {
+        let identity = AgentIdentity.resolve(
+            own: [:],
+            cwd: cwd,
+            runsRoot: root,
+            nearestAncestor: { nil },
+            runProject: { _ in "/never" }
+        )
+        #expect(identity.agent == nil, "cwd \(cwd)")
+    }
+}
+
+@Test func theEnvironmentBeatsTheWorkingDirectory() throws {
+    let (root, run) = try fakeRuns()
+    let identity = AgentIdentity.resolve(
+        own: ["VITRA_AGENT": "own00001"],
+        cwd: run.path,
+        runsRoot: root,
+        nearestAncestor: { nil },
+        runProject: { _ in "/never" }
+    )
+
+    #expect(identity.agent == "own00001")
+}
+
+@Test func theWorkingDirectoryBeatsTheAncestor() throws {
+    let (root, run) = try fakeRuns()
+    let identity = AgentIdentity.resolve(
+        own: [:],
+        cwd: run.path,
+        runsRoot: root,
+        nearestAncestor: { ["VITRA_AGENT": "anc00002"] },
+        runProject: { _ in nil }
+    )
+
+    #expect(identity.agent == "abcd1234")
+}
+
 /// Live: a shell started with `VITRA_AGENT=abcd1234` runs `env -i sleep`, so
 /// the sleep (the grandchild) has an empty environment. Its identity has to be
 /// found by walking up to the shell. The test does the walk from the
