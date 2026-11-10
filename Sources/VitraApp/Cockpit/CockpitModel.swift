@@ -429,10 +429,23 @@ enum Maestro {
     /// it, and resuming an id it never wrote down is an error at its prompt.
     /// So an id is resumed only when its file is there; until then the same id
     /// is simply started again.
-    static func conversation(_ id: String, in directory: URL = conversationsDirectory) -> Conversation {
+    static func conversation(_ id: String, in directory: URL = conversationsDirectory, project: String? = nil) -> Conversation {
+        let file = id + ".jsonl"
+        // claude names a project's folder after its absolute path, with every
+        // "/" and "." turned into "-". Looking there first is one stat; listing
+        // every project under ~/.claude/projects is not.
+        if let project {
+            let encoded = project
+                .replacingOccurrences(of: "/", with: "-")
+                .replacingOccurrences(of: ".", with: "-")
+            let direct = directory.appendingPathComponent(encoded).appendingPathComponent(file)
+            if FileManager.default.fileExists(atPath: direct.path) {
+                return .resume(id)
+            }
+        }
         let folders = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         let exists = folders.contains {
-            FileManager.default.fileExists(atPath: $0.appendingPathComponent(id + ".jsonl").path)
+            FileManager.default.fileExists(atPath: $0.appendingPathComponent(file).path)
         }
         return exists ? .resume(id) : .new(id)
     }

@@ -512,7 +512,8 @@ final class ProjectView: NSView {
                         conversation: Maestro.conversation(
                             Maestro.rememberedSession(for: project.path)
                                 ?? project.session
-                                ?? UUID().uuidString.lowercased()
+                                ?? UUID().uuidString.lowercased(),
+                            project: project.path
                         ),
                         in: Maestro.supportDirectory
                     )

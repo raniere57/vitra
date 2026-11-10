@@ -112,6 +112,19 @@ enum GitHistory {
 
     // MARK: - Running
 
+    /// The shared git directory of `path`, even when `path` is a worktree.
+    ///
+    /// `HEAD` and the reflog live there, so a watch on the checkout's `.git`
+    /// file would miss every commit. Resolved once; relative paths are made
+    /// absolute against the repository.
+    static func gitCommonDirectory(in path: String) -> String? {
+        guard let data = run("/usr/bin/git", ["rev-parse", "--git-common-dir"], in: path) else { return nil }
+        let dir = text(data).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !dir.isEmpty else { return nil }
+        if dir.hasPrefix("/") { return dir }
+        return URL(fileURLWithPath: path).appendingPathComponent(dir).standardizedFileURL.path
+    }
+
     /// Commits and pushes of the repository at `path`; nil when it is not one.
     static func loadLocal(in path: String, done: @escaping @MainActor @Sendable ([GitEvent]?) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {

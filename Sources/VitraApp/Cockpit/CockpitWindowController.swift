@@ -19,6 +19,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     private var selected = 0
     private var runs: [Run] = []
     private var usageWatch: DispatchSourceFileSystemObject?
+    private var usageDebounce: DispatchWorkItem?
 
     init(kit: TerminalKit, feed: RunFeed, store: URL = CockpitState.defaultURL) {
         self.kit = kit
@@ -219,25 +220,49 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    /// Usage and model labels only: the maestro folder is rewritten many times
+    /// a minute, and rebuilding the worker board from that would be the whole
+    /// cockpit redrawing for a percentage that changed.
+    private func refreshMaestroStatus() {
+        guard projects.indices.contains(selected), let view = views[projects[selected].path] else { return }
+        let now = Date()
+        view.show(usage: MaestroStatus.label(MaestroStatus.load(), now: now))
+        view.show(model: MaestroStatus.model(for: projects[selected].path))
+    }
+
     /// Redraws the usage figure whenever the maestro's status line writes a
     /// new one. A watch on the folder, not a timer: the file is replaced
     /// whole each time, and nothing needs to run between replacements.
+    /// Writes are coalesced: usage.json and model-* land as several atomic
+    /// replaces in a burst, and one refresh half a second later is enough.
     private func watchUsage() {
         let folder = Maestro.supportDirectory
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let descriptor = open(folder.path, O_EVTONLY)
         guard descriptor >= 0 else { return }
         let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: .write, queue: .main)
-        source.setEventHandler { [weak self] in self?.refresh() }
+        source.setEventHandler { [weak self] in self?.usageWrote() }
         // Darwin's close: inside a window controller a bare `close` is the window's.
         source.setCancelHandler { Darwin.close(descriptor) }
         source.resume()
         usageWatch = source
     }
 
+    private func usageWrote() {
+        usageDebounce?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.usageDebounce = nil
+            self?.refreshMaestroStatus()
+        }
+        usageDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
     // MARK: - Window
 
     func windowWillClose(_ notification: Notification) {
+        usageDebounce?.cancel()
+        usageDebounce = nil
         usageWatch?.cancel()
         usageWatch = nil
         views.values.forEach { $0.shutDown() }

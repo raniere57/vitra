@@ -358,7 +358,12 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     }
 
     @objc private func renderFrame() {
-        if session.updateSnapshot(snapshot) { needsRedraw = true }
+        if session.updateSnapshot(snapshot) {
+            needsRedraw = true
+            // Cursor blink is a property of the program, and can turn on or off
+            // without the window changing; the timer follows that, not the clock.
+            updateBlinkTimer()
+        }
 
         guard needsRedraw else {
             // Nothing changed this tick, so stop asking for ticks.
@@ -520,10 +525,12 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
             // A one-pixel drawable is the smallest a layer can be asked for, and
             // asking releases the pool it was holding.
             metalLayer?.drawableSize = CGSize(width: 1, height: 1)
+            updateBlinkTimer()
             return
         }
         becameVisible()
         startDisplayLink()
+        updateBlinkTimer()
     }
 
     /// Brings the pane back after it was hidden — by the panel taking the whole
@@ -617,27 +624,34 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         focusBar.isHidden = !(showsFocusIndicator && window?.firstResponder === self)
     }
 
-    /// Runs the blink timer only while the window has focus.
+    /// Runs the blink timer only while the cursor is actually blinking on a
+    /// visible, focused pane.
     ///
-    /// A background window with a blinking cursor would wake the CPU twice a
-    /// second forever, which is exactly the idle cost this design exists to avoid.
+    /// A background window — or a focused one whose program asked for a steady
+    /// cursor — would otherwise wake the CPU twice a second forever, which is
+    /// exactly the idle cost this design exists to avoid.
     func updateBlinkTimer() {
-        blinkTimer?.cancel()
-        blinkTimer = nil
-        cursorOn = true
-
-        guard window?.isKeyWindow == true else {
+        let shouldBlink = isDrawingActive
+            && window?.isKeyWindow == true
+            && snapshot.cursor?.isBlinking == true
+        guard shouldBlink else {
+            guard blinkTimer != nil else { return }
+            blinkTimer?.cancel()
+            blinkTimer = nil
+            cursorOn = true
             setNeedsRender()
             return
         }
+        guard blinkTimer == nil else { return }
 
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
         timer.setEventHandler { [weak self] in
             guard let self else { return }
-            // Only blink when the terminal asked for a blinking cursor; plenty of
-            // programs turn it off, and honouring that keeps the app idle.
-            guard self.snapshot.cursor?.isBlinking == true else { return }
+            guard self.snapshot.cursor?.isBlinking == true else {
+                self.updateBlinkTimer()
+                return
+            }
             self.cursorOn.toggle()
             self.setNeedsRender()
         }

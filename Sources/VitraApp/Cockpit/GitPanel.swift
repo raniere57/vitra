@@ -6,7 +6,7 @@ final class GitPanel: NSView {
     /// A pull request was clicked.
     var onOpenURL: ((URL) -> Void)?
 
-    private static let refreshEvery: TimeInterval = 5
+    private static let refreshEvery: TimeInterval = 60
 
     private let path: String
     private let rows = NSStackView()
@@ -15,8 +15,10 @@ final class GitPanel: NSView {
     private var local: [GitEvent]? = []
     private var pulls: [GitEvent] = []
     private var shown: [GitEvent]?
-    private var shownMinute = 0
+    private var shownStamps: [String] = []
     private var timer: Timer?
+    private var watches: [DispatchSourceFileSystemObject] = []
+    private var watchGeneration = 0
 
     init(path: String) {
         self.path = path
@@ -29,9 +31,15 @@ final class GitPanel: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
+    deinit {
+        watches.forEach { $0.cancel() }
+    }
+
     /// Starts or stops following the repository. Only while the tab is the one
     /// on screen: nobody is reading it otherwise.
     func setActive(_ active: Bool) {
+        watchGeneration += 1
+        stopWatching()
         timer?.invalidate()
         timer = nil
         guard active else { return }
@@ -41,9 +49,47 @@ final class GitPanel: NSView {
             self?.pulls = pulls
             self?.render()
         }
+        startWatching(generation: watchGeneration)
+        // A watch on HEAD misses nothing a local commit does; this is only
+        // for relative times going stale and for a fetch that never touches HEAD.
         timer = Timer.scheduledTimer(withTimeInterval: Self.refreshEvery, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.reloadLocal() }
         }
+    }
+
+    private func startWatching(generation: Int) {
+        let path = self.path
+        DispatchQueue.global(qos: .utility).async {
+            guard let git = GitHistory.gitCommonDirectory(in: path) else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.watchGeneration == generation else { return }
+                // HEAD and its reflog for commits and pushes; the directory
+                // itself because those files are replaced, which drops a watch
+                // on the inode that was.
+                for target in [git, git + "/HEAD", git + "/logs/HEAD"] {
+                    self.watch(path: target)
+                }
+            }
+        }
+    }
+
+    private func watch(path: String) {
+        let descriptor = open(path, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .rename, .delete, .extend],
+            queue: .main
+        )
+        source.setEventHandler { [weak self] in self?.reloadLocal() }
+        source.setCancelHandler { Darwin.close(descriptor) }
+        source.resume()
+        watches.append(source)
+    }
+
+    private func stopWatching() {
+        watches.forEach { $0.cancel() }
+        watches.removeAll()
     }
 
     private func reloadLocal() {
@@ -55,13 +101,26 @@ final class GitPanel: NSView {
 
     private func render() {
         let events = local.map { GitHistory.timeline($0, pulls) }
-        // Rebuilt only when something changed: the list is re-read every few
-        // seconds, and rebuilding it each time would jump the scroll.
-        // ...or when the minute turned, so "há 3 min" does not go stale.
-        let minute = Int(Date().timeIntervalSince1970 / 60)
-        guard events != shown || minute != shownMinute else { return }
+        // Rebuilt only when the events changed: rebuilding would jump the scroll.
+        // Relative times are rewritten in place so "há 3 min" does not go stale
+        // without tearing the list down.
+        let now = Date()
+        let stamps = (events ?? []).map { GitHistory.stamp($0.date, now: now) }
+        if events == shown {
+            guard stamps != shownStamps else { return }
+            shownStamps = stamps
+            for (index, stamp) in stamps.enumerated() where index < rows.arrangedSubviews.count {
+                guard let row = rows.arrangedSubviews[index] as? NSStackView,
+                      let text = row.arrangedSubviews.last as? NSStackView,
+                      text.arrangedSubviews.count > 1,
+                      let date = text.arrangedSubviews[1] as? NSTextField
+                else { continue }
+                date.stringValue = stamp
+            }
+            return
+        }
         shown = events
-        shownMinute = minute
+        shownStamps = stamps
 
         empty.stringValue = events == nil
             ? "Esta pasta não é um repositório git."
@@ -70,9 +129,8 @@ final class GitPanel: NSView {
         scroll.isHidden = !empty.isHidden
 
         rows.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let now = Date()
-        for event in events ?? [] {
-            let row = self.row(event, when: GitHistory.stamp(event.date, now: now))
+        for (index, event) in (events ?? []).enumerated() {
+            let row = self.row(event, when: stamps[index])
             rows.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -36).isActive = true
         }

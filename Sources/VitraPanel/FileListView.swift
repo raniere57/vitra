@@ -16,6 +16,8 @@ final class FileListView: NSView, PreviewContentView, NSTableViewDataSource, NST
     private let table = NSTableView()
     private let scroll = NSScrollView()
     private var entries: [DirectoryEntry] = []
+    /// Drops a listing that finished after the directory had already moved on.
+    private var listingToken = 0
     /// Whether the list starts with a row for the parent directory.
     private var showsParent: Bool { directory.pathComponents.count > 1 }
 
@@ -61,9 +63,20 @@ final class FileListView: NSView, PreviewContentView, NSTableViewDataSource, NST
     func reload() {
         // Dotfiles included: the panel is for looking at what a project has,
         // and `.env`, `.gitignore` and a `.github/` are what it has.
-        entries = DirectoryListing.entries(of: directory, includeHidden: true)
-        table.reloadData()
-        table.scrollRowToVisible(0)
+        // contentsOfDirectory plus a stat per name is work a large folder
+        // should not do on the main thread before the table can draw.
+        listingToken += 1
+        let token = listingToken
+        let directory = self.directory
+        DispatchQueue.global(qos: .userInitiated).async {
+            let entries = DirectoryListing.entries(of: directory, includeHidden: true)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, token == self.listingToken, self.directory == directory else { return }
+                self.entries = entries
+                self.table.reloadData()
+                self.table.scrollRowToVisible(0)
+            }
+        }
     }
 
     /// How many files are listed, for the panel's header.
