@@ -144,6 +144,10 @@ public final class PreviewPanel: NSView {
         emptyState = nil
 
         let list = FileListView(directory: directory)
+        list.onListed = { [weak self, weak list] in
+            guard let self, let list, self.content === list else { return }
+            self.updateFileHeader(list)
+        }
         list.onOpenFile = { [weak self] url in
             guard let self else { return }
             // Resolution is the same gate the escape sequence goes through, so

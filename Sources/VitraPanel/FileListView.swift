@@ -10,6 +10,9 @@ import VitraCore
 final class FileListView: NSView, PreviewContentView, NSTableViewDataSource, NSTableViewDelegate {
     var onOpenFile: ((URL) -> Void)?
     var onOpenDirectory: ((URL) -> Void)?
+    /// The listing arrived: it is read off the main thread, so whoever shows
+    /// the count has to be told when there is one.
+    var onListed: (() -> Void)?
 
     private(set) var directory: URL
 
@@ -75,6 +78,7 @@ final class FileListView: NSView, PreviewContentView, NSTableViewDataSource, NST
                 self.entries = entries
                 self.table.reloadData()
                 self.table.scrollRowToVisible(0)
+                self.onListed?()
             }
         }
     }
