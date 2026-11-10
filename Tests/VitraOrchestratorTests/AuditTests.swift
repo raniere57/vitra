@@ -29,14 +29,17 @@ private func review(
 }
 
 @Test func anExplorationTurnGoesToAnUntriedCheapAuditor() {
-    // Three providers rated on review; the last four audits all went to
-    // grok-4.7-low-fast, so the next one must explore.
+    // Three providers rated on review; grok-4.7-low-fast already earned a
+    // rating, then the last four audits all went to it, so the next one
+    // must explore. Started dates increase so each of those four counts as
+    // a rated worker's piece (a same-worker rating that started before it).
     let older = [
-        review(.opencode, "opencode/a-free", score: 4),
-        review(.gemini, "gemini-3.8-flash-low", score: 3),
+        review(.cursor, "grok-4.7-low-fast", score: 5, at: start),
+        review(.opencode, "opencode/a-free", score: 4, at: start.addingTimeInterval(1)),
+        review(.gemini, "gemini-3.8-flash-low", score: 3, at: start.addingTimeInterval(2)),
     ]
     let recent = (1...4).map { step in
-        review(.cursor, "grok-4.7-low-fast", score: 5, at: start.addingTimeInterval(Double(step)))
+        review(.cursor, "grok-4.7-low-fast", score: 5, at: start.addingTimeInterval(Double(step + 2)))
     }
     let chosen = Audit.chooseAuditor(
         implementer: implementer(.claude),
@@ -50,12 +53,15 @@ private func review(
 @Test func anExplorationTurnFallsBackWhenNoUntriedCandidateIsInstalled() {
     // Every installed candidate is rated and due exploration: the audit still
     // goes to the first that passes the rest of the guards, not to nothing.
+    // Seed rating on glm first, then four more of it, so exploration is due
+    // (same-worker rating that started before each recent piece).
     let older = [
-        review(.cursor, "grok-4.7-low-fast", score: 3),
-        review(.gemini, "gemini-3.8-flash-low", score: 3),
+        review(.opencode, "opencode/glm-5.3-flash-free", score: 4, at: start),
+        review(.cursor, "grok-4.7-low-fast", score: 3, at: start.addingTimeInterval(1)),
+        review(.gemini, "gemini-3.8-flash-low", score: 3, at: start.addingTimeInterval(2)),
     ]
     let recent = (1...4).map { step in
-        review(.opencode, "opencode/glm-5.3-flash-free", score: 4, at: start.addingTimeInterval(Double(step)))
+        review(.opencode, "opencode/glm-5.3-flash-free", score: 4, at: start.addingTimeInterval(Double(step + 2)))
     }
     let chosen = Audit.chooseAuditor(
         implementer: implementer(.claude),
