@@ -678,6 +678,105 @@ echo '{"result":"done","is_error":false}'
         .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 }
 
+@Test func agentMergeRefusesADeliveryWhoseCommitFailed() async throws {
+    let fixture = try Fixture(claude: leavesAFile)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    // A hook that refuses the shell's commit: the worker's edits stay in the
+    // worktree, uncommitted.
+    let hook = repository.appendingPathComponent(".git/hooks/pre-commit")
+    try "#!/bin/sh\necho 'no commits today' >&2\nexit 1\n".write(to: hook, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
+
+    let id = try await fixture.spawn([
+        "access": "edit", "directory": .string(repository.path), "audit": false,
+    ])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    #expect(report.contains("commit failed: no commits today"))
+    let tree = fixture.root.appendingPathComponent("runs/\(id)/tree")
+
+    do {
+        _ = try await fixture.call("agent_merge", ["id": .string(id)])
+        Issue.record("a delivery whose commit failed should not be merged")
+    } catch let error as ToolError {
+        #expect(error.message.contains("the edits are still uncommitted in \(tree.path)"))
+    }
+
+    // Removing the worktree with --force would have deleted the edits: the
+    // work, the worktree and the branch are all still there, and nothing was
+    // merged.
+    #expect(FileManager.default.fileExists(atPath: tree.appendingPathComponent("from-worker.txt").path))
+    #expect(FileManager.default.fileExists(atPath: tree.path))
+    #expect(try !git(["branch", "--list", "vitra/\(id)"], in: repository)
+        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: repository.appendingPathComponent("from-worker.txt").path))
+}
+
+@Test func agentMergeRefusesAWorktreeWithUncommittedEdits() async throws {
+    let fixture = try Fixture(claude: leavesAFile)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let id = try await fixture.spawn([
+        "access": "edit", "directory": .string(repository.path), "audit": false,
+    ])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let tree = fixture.root.appendingPathComponent("runs/\(id)/tree")
+    // An edit made after the shell's commit: still uncommitted when the merge
+    // would remove the worktree with --force.
+    try "late\n".write(to: tree.appendingPathComponent("late.txt"), atomically: true, encoding: .utf8)
+
+    do {
+        _ = try await fixture.call("agent_merge", ["id": .string(id)])
+        Issue.record("a worktree with uncommitted edits should not be merged")
+    } catch let error as ToolError {
+        #expect(error.message.contains("edits still uncommitted in \(tree.path)"))
+    }
+
+    #expect(FileManager.default.fileExists(atPath: tree.appendingPathComponent("late.txt").path))
+    #expect(FileManager.default.fileExists(atPath: tree.path))
+    #expect(try !git(["branch", "--list", "vitra/\(id)"], in: repository)
+        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: repository.appendingPathComponent("from-worker.txt").path))
+}
+
+@Test func agentMergeRefusesACheckoutThatIsAlreadyMerging() async throws {
+    let fixture = try Fixture(claude: rewritesReadme)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let id = try await fixture.spawn([
+        "access": "edit", "directory": .string(repository.path), "audit": false,
+    ])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let tree = fixture.root.appendingPathComponent("runs/\(id)/tree")
+
+    // The user's own merge is under way and conflicts, so it is left open.
+    try "trunk\n".write(to: repository.appendingPathComponent("README"), atomically: true, encoding: .utf8)
+    try git(["add", "-A"], in: repository)
+    try git(["commit", "-q", "-m", "trunk work"], in: repository)
+    _ = try? git(["merge", "vitra/\(id)"], in: repository)
+    #expect(try !git(["rev-parse", "-q", "--verify", "MERGE_HEAD"], in: repository)
+        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+    do {
+        _ = try await fixture.call("agent_merge", ["id": .string(id)])
+        Issue.record("a checkout already in a merge should not be merged into")
+    } catch let error as ToolError {
+        #expect(error.message.contains("already in the middle of a merge"))
+    }
+
+    // The other merge is left exactly as it was: neither finished nor aborted
+    // by this call, and the worker's worktree and branch are still there.
+    #expect(try !git(["rev-parse", "-q", "--verify", "MERGE_HEAD"], in: repository)
+        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    #expect(try git(["status", "--porcelain"], in: repository).contains("UU README"))
+    #expect(FileManager.default.fileExists(atPath: tree.path))
+    #expect(try !git(["branch", "--list", "vitra/\(id)"], in: repository)
+        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+}
+
 @Test func agentToolsRunLocallyAndPanelToolsGoToTheWindow() async throws {
     struct Named: ToolExecutor {
         let name: String

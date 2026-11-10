@@ -138,12 +138,12 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
 
     /// The git commands every editing claude worker may run.
     ///
-    /// The worker is given a worktree of its own, so these act only on its own
-    /// tree: reading what it changed, staging it and committing it. They are
-    /// the one part of every editing task that is the same, so they are not
-    /// left for the orchestrator to repeat in `commands`. What could reach
-    /// another branch or another machine is deliberately absent: no push,
-    /// reset, checkout, rebase, merge or branch deletion.
+    /// They are allowed so the worker can check and commit its work: reading
+    /// what it changed, staging it and committing it. The worker runs inside
+    /// its own worktree, and that is where they are meant to act; a rule only
+    /// matches the start of a command line, though, so it is not a sandbox.
+    /// What could reach another branch or another machine is deliberately
+    /// absent: no push, reset, checkout, rebase, merge or branch deletion.
     public static let editingGitCommands = [
         "git status", "git diff", "git log", "git add", "git commit", "git show",
     ]

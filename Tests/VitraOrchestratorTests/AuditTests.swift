@@ -42,6 +42,27 @@ private func implementer(_ cli: WorkerCLI) -> WorkerSpec {
     // Three providers have a review record, so the trial is over and the
     // scoreboard's order decides: the highest rated first.
     let history = [
+        review(.cursor, "grok-4.7-low-fast", score: 5),
+        review(.opencode, "opencode/a-free", score: 4),
+        review(.gemini, "gemini-3.8-flash-low", score: 3),
+    ]
+    let chosen = Audit.chooseAuditor(
+        implementer: implementer(.claude),
+        history: history,
+        installed: [.claude, .opencode, .gemini, .cursor]
+    )
+    #expect(chosen?.cli == .cursor)
+    #expect(chosen?.model == "grok-4.7-low-fast")
+    #expect(chosen?.effort == nil)
+}
+
+@Test func aGeminiWorkerIsNeverTheAuditor() {
+    // gemini workers run through Antigravity's agy, which reaches for shell
+    // commands even when told to read; headless it is refused and the audit
+    // fails. So it is not tried from the cheap list, nor from a review record
+    // however good: another provider is preferred, and with none it is no
+    // audit at all.
+    let history = [
         review(.gemini, "gemini-3.8-flash-low", score: 5),
         review(.opencode, "opencode/a-free", score: 4),
         review(.cursor, "grok-4.7-low-fast", score: 3),
@@ -51,9 +72,10 @@ private func implementer(_ cli: WorkerCLI) -> WorkerSpec {
         history: history,
         installed: [.claude, .opencode, .gemini, .cursor]
     )
-    #expect(chosen?.cli == .gemini)
-    #expect(chosen?.model == "gemini-3.8-flash-low")
-    #expect(chosen?.effort == nil)
+    #expect(chosen?.cli == .opencode)
+    #expect(Audit.chooseAuditor(
+        implementer: implementer(.claude), history: [], installed: [.claude, .gemini]
+    ) == nil)
 }
 
 @Test func theImplementersOwnProviderIsNeverTheAuditor() {
@@ -69,7 +91,7 @@ private func implementer(_ cli: WorkerCLI) -> WorkerSpec {
         history: history,
         installed: [.claude, .gemini, .opencode]
     )
-    #expect(chosen?.cli == .gemini)
+    #expect(chosen?.cli == .opencode)
 }
 
 @Test func withNoReviewRecordTheCheapListIsUsedInOrder() {
@@ -93,10 +115,10 @@ private func implementer(_ cli: WorkerCLI) -> WorkerSpec {
     let chosen = Audit.chooseAuditor(
         implementer: implementer(.claude),
         history: [],
-        installed: [.claude, .gemini]
+        installed: [.claude, .cursor]
     )
-    #expect(chosen?.cli == .gemini)
-    #expect(chosen?.model == "gemini-3.8-flash-low")
+    #expect(chosen?.cli == .cursor)
+    #expect(chosen?.model == "grok-4.7-low-fast")
 }
 
 @Test func aReviewerTheTrialRulesRefuseIsPassedOver() {

@@ -109,7 +109,12 @@ private func spec(
     // of them reaches another branch or another machine.
     let edit = spec(.claude, model: "haiku", effort: "low", access: .edit).allowedCommands
     #expect(edit == ["git status", "git diff", "git log", "git add", "git commit", "git show"])
-    #expect(!edit.contains { ["push", "reset", "checkout", "rebase", "merge", "branch"].contains($0.split(separator: " ").last.map(String.init) ?? "") })
+    // Whole rules, not their last word: a rule such as "git branch -D" would
+    // slip past a check that only looked at the word after the space.
+    let forbidden = ["git push", "git reset", "git checkout", "git rebase", "git merge", "git branch"]
+    #expect(!edit.contains { rule in
+        forbidden.contains { rule == $0 || rule.hasPrefix($0 + " ") }
+    })
 
     // A read worker writes nothing, so it is given none of them.
     #expect(spec(.claude, model: "haiku", effort: "low").allowedCommands.isEmpty)

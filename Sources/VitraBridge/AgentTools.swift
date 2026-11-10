@@ -94,10 +94,11 @@ public enum AgentTools {
             "agent_merge",
             """
             Put a finished editing worker's branch onto the branch checked out in its repository, then take its worktree \
-            and branch away. Refuses while the worker is still running, while its audit is reading the worktree, and when \
-            the checkout has uncommitted changes to tracked files. A merge that conflicts is aborted and the files are \
-            named; the worktree and branch stay so the work can be sent back. Pass discard true to drop the work without \
-            merging it.
+            and branch away. Refuses while the worker is still running, while its audit is reading the worktree, when \
+            the checkout has uncommitted changes to tracked files or is already in the middle of a merge, and — unless \
+            discard is true — when the worker left edits uncommitted in its worktree, as a failed commit does: those \
+            would be deleted with it. A merge that conflicts is aborted and the files are named; the worktree and \
+            branch stay so the work can be sent back. Pass discard true to drop the work without merging it.
             """,
             properties: [
                 "id": MCPTools.string("Id from agent_spawn."),
@@ -287,6 +288,12 @@ public struct AgentToolExecutor: ToolExecutor {
     /// repository, then takes its worktree and branch away; or, with
     /// `discard`, takes them away without merging.
     ///
+    /// A checkout already in the middle of a merge is refused outright, and
+    /// only a failed merge this call started is ever aborted. The worktree is
+    /// removed with `--force`, so unless the work is being discarded, a failed
+    /// commit or any edit still uncommitted there stops the merge rather than
+    /// being deleted with the tree.
+    ///
     /// It blocks for as long as git takes, so its caller runs it off the
     /// cooperative pool. Reading git sets GIT_OPTIONAL_LOCKS=0 (see
     /// `Git.run`), so a status here cannot take the index lock out from under
@@ -305,7 +312,39 @@ public struct AgentToolExecutor: ToolExecutor {
             throw ToolError(refusal)
         }
 
+        // A merge somebody else started is theirs to finish or abort: taking
+        // it over would bury their resolution, and aborting it would throw it
+        // away. Nothing here touches a checkout that is mid-merge, not even a
+        // discard.
+        guard !Self.isMerging(repository) else {
+            throw ToolError(
+                "the checkout at \(repository) is already in the middle of a merge: "
+                    + "finish or abort it, then call agent_merge for \(id) again"
+            )
+        }
+
         if !discard {
+            // The worktree is removed with --force below, so anything still
+            // uncommitted there would be deleted with it. A failed commit is
+            // exactly that case, and a status catches edits made after one.
+            if let failure = run.commitError {
+                let reason = failure.isEmpty ? "git gave no reason" : failure
+                throw ToolError(
+                    "agent \(id)'s commit failed (\(reason)): the edits are still uncommitted in \(worktree) — "
+                        + "commit them there, or pass discard true to drop them"
+                )
+            }
+            let tree = Git.run(["status", "--porcelain"], in: worktree)
+            guard tree.succeeded else {
+                throw ToolError("could not read the worktree at \(worktree): " + Self.reason(tree))
+            }
+            guard tree.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ToolError(
+                    "agent \(id) has edits still uncommitted in \(worktree): "
+                        + "commit them there before merging, or pass discard true to drop them"
+                )
+            }
+
             // A checkout with uncommitted work would make the merge refuse
             // halfway, or bury the user's changes in it: say so and stop,
             // never stashing what is not ours.
@@ -328,13 +367,16 @@ public struct AgentToolExecutor: ToolExecutor {
                 let conflicts = (Git.output(["diff", "--name-only", "--diff-filter=U"], in: repository) ?? "")
                     .split(whereSeparator: \.isNewline)
                     .map(String.init)
-                _ = Git.run(["merge", "--abort"], in: repository)
+                // Only the merge this call just started may be aborted: a
+                // merge that was already in progress was refused above.
+                let aborted = Self.abortMerge(repository)
                 let files = conflicts.isEmpty
                     ? " — git said: " + Self.reason(merged)
                     : ": " + conflicts.joined(separator: ", ")
                 throw ToolError(
-                    "merge of \(branch) conflicts\(files) — the merge was aborted and \(worktree) and \(branch) "
-                        + "are still there; send the work back to agent \(id) to resolve"
+                    "merge of \(branch) conflicts\(files) — "
+                        + (aborted ? "the merge was aborted and " : "nothing was merged and ")
+                        + "\(worktree) and \(branch) are still there; send the work back to agent \(id) to resolve"
                 )
             }
         }
@@ -387,6 +429,19 @@ public struct AgentToolExecutor: ToolExecutor {
     /// What git printed, trimmed, or nil when it printed nothing.
     private static func trimmed(_ text: String?) -> String {
         (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Whether `repository` has a merge in progress.
+    private static func isMerging(_ repository: String) -> Bool {
+        Git.run(["rev-parse", "-q", "--verify", "MERGE_HEAD"], in: repository).succeeded
+    }
+
+    /// Aborts the merge this call started, if its conflict left one on, and
+    /// says whether it did. A checkout that was already merging was refused
+    /// before the merge, so a merge still in progress here is this call's.
+    private static func abortMerge(_ repository: String) -> Bool {
+        guard isMerging(repository) else { return false }
+        return Git.run(["merge", "--abort"], in: repository).succeeded
     }
 
     /// What git said, in one line, for a failure that has no better words.

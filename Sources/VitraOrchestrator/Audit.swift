@@ -21,12 +21,13 @@ public enum Audit {
     ///
     /// Cheap and fast by design: the gate is meant to cost a fraction of the
     /// review it saves. Effort is nil where the CLI carries it inside the
-    /// model id.
+    /// model id. gemini is not here: run through Antigravity's agy, it reaches
+    /// for shell commands even when told to read, is refused headless, and the
+    /// audit fails.
     static let cheapAuditors: [(cli: WorkerCLI, model: String, effort: String?)] = [
         (.opencode, "opencode/glm-5.3-flash-free", nil),
         (.cursor, "grok-4.7-low-fast", nil),
         (.claude, "haiku", "low"),
-        (.gemini, "gemini-3.8-flash-low", nil),
     ]
 
     /// The worker that should audit `implementer`'s delivery, or nil when no
@@ -36,7 +37,9 @@ public enum Audit {
     /// `Scoreboard` puts them; then the fixed cheap list. Both are filtered by
     /// what can actually run now: the CLI must be installed, must not be the
     /// implementer's own, and must not be refused by the trial rules for a
-    /// review. Pure, so the choice can be tested without spawning anything.
+    /// review. gemini is skipped wherever it appears: headless, agy reaches
+    /// for shell commands it is not allowed and the audit fails. Pure, so the
+    /// choice can be tested without spawning anything.
     public static func chooseAuditor(
         implementer: WorkerSpec,
         history: [Run],
@@ -46,7 +49,9 @@ public enum Audit {
             (cli: $0.cli, model: $0.model, effort: $0.effort)
         }
         for candidate in ranked + cheapAuditors {
-            guard candidate.cli != implementer.cli, installed.contains(candidate.cli) else { continue }
+            guard candidate.cli != implementer.cli, candidate.cli != .gemini,
+                  installed.contains(candidate.cli)
+            else { continue }
             let spec = WorkerSpec(
                 cli: candidate.cli,
                 model: candidate.model,
