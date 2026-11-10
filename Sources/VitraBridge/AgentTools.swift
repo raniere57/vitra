@@ -136,7 +136,7 @@ public struct AgentToolExecutor: ToolExecutor {
     /// The project the cockpit named in the maestro's shell, which this helper
     /// inherits. Absent when the helper was started outside the cockpit.
     public static var inheritedProject: String? {
-        ProcessInfo.processInfo.environment["VITRA_PROJECT"].flatMap { $0.isEmpty ? nil : $0 }
+        AgentIdentity.current.project
     }
 
     public init(executables: Executables = .discover()) {
