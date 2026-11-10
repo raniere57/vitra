@@ -21,6 +21,22 @@ public struct Run: Equatable, Sendable {
     public let output: WorkerOutput?
     /// The end of what the worker wrote to stderr, when it wrote anything.
     public let errorTail: String?
+    /// The repository an editing worker was given a worktree of, when it was.
+    ///
+    /// A worker that edits gets a tree of its own so two of them cannot
+    /// overwrite one another; these four fields are where its work went.
+    public var repository: String? = nil
+    /// The root of that worktree.
+    public var worktree: String? = nil
+    /// The branch its changes were committed to, `vitra/<id>`.
+    public var branch: String? = nil
+    /// The commit the branch was made from.
+    public var baseCommit: String? = nil
+    /// Why the shell could not commit the worker's work, when it could not.
+    ///
+    /// Present with an empty string when git refused without saying why. When
+    /// it is set the edits are still uncommitted in `worktree`.
+    public var commitError: String? = nil
     /// What the orchestrator made of the delivery, once it has said.
     public var rating: Rating? = nil
 
@@ -41,4 +57,11 @@ struct RunRecord: Codable {
     /// its start time together are not, which is what keeps a signal meant for
     /// a worker from landing on whatever holds its number after a reboot.
     let leaderStarted: Double?
+    /// The repository, worktree and branch an editing worker was given, and
+    /// the commit its branch was made from. Absent for a run that got none:
+    /// optional, so a record written before worktrees existed still loads.
+    let repository: String?
+    let worktree: String?
+    let branch: String?
+    let baseCommit: String?
 }
