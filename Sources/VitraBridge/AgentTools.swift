@@ -222,9 +222,9 @@ public struct AgentToolExecutor: ToolExecutor {
             effort: arguments["effort"]?.stringValue,
             project: project,
             commands: try commands(in: arguments),
-            // Only an explicit false turns the gate off: a missing argument
-            // is the default, which is on.
-            audit: arguments["audit"]?.boolValue == false ? false : nil
+            // Nil is the default, which is on: only an explicit false turns
+            // the gate off, and an explicit true is kept as it was asked.
+            audit: arguments["audit"]?.boolValue
         )
         // Held to the trial and the effort ladder, unless the maestro says
         // why it cannot be: the record is only worth choosing by if it was
