@@ -859,6 +859,114 @@ echo '{"result":"done","is_error":false}'
     #expect(!committed.contains { $0.hasPrefix("vendor/") })
 }
 
+// MARK: - Listing and the finished-run cache
+
+/// Answers `done`, or hangs when the prompt says so, or answers at length.
+private let answersByPrompt = #"""
+prompt=$(cat)
+case "$prompt" in
+*hang*) sleep 30 ;;
+*long*)
+    body=$(head -c 10000 /dev/zero | tr '\0' x)
+    echo "{\"result\":\"$body\",\"is_error\":false,\"total_cost_usd\":0.25,\"usage\":{\"input_tokens\":3,\"output_tokens\":4}}"
+    ;;
+*) echo '{"result":"done","is_error":false,"total_cost_usd":0.5,"usage":{"input_tokens":5,"output_tokens":2}}' ;;
+esac
+"""#
+
+@Test func recentListsRunningFinishedAndRatedRunsNewestFirstAsStatusSeesThem() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    let orchestrator = try sandbox.orchestrator(claude: answersByPrompt)
+
+    let first = try orchestrator.spawn(sandbox.spec(prompt: "one"))
+    let second = try orchestrator.spawn(sandbox.spec(prompt: "two"))
+    let third = try orchestrator.spawn(sandbox.spec(prompt: "hang"))
+    defer { try? orchestrator.cancel(third) }
+    _ = try await orchestrator.wait(ids: [first, second], timeout: 10)
+    try orchestrator.rate(first, score: 5, note: "good")
+
+    let listed = orchestrator.recent(limit: 10)
+
+    #expect(listed.map(\.id) == [third, second, first])
+    #expect(listed.map(\.started) == listed.map(\.started).sorted(by: >))
+    #expect(listed[0].state == .running)
+    #expect(listed[0].output == nil)
+    #expect(listed[1].output?.text == "done")
+    #expect(listed[2].rating?.score == 5)
+    // Short answers lose nothing in the list: it is the same run status gives.
+    for run in listed {
+        let read = try orchestrator.status(run.id)
+        #expect(run.state == read.state)
+        #expect(run.output == read.output)
+        #expect(run.rating == read.rating)
+        #expect(run.ended == read.ended)
+        #expect(run.errorTail == read.errorTail)
+    }
+}
+
+@Test func recentOpensOnlyTheNewestRunsAndKeepsStartedOrder() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    let orchestrator = try sandbox.orchestrator(claude: answersByPrompt)
+
+    let ids = try (0..<4).map { try orchestrator.spawn(sandbox.spec(prompt: "run \($0)")) }
+    _ = try await orchestrator.wait(ids: ids, timeout: 10)
+
+    #expect(orchestrator.recent(limit: 2).map(\.id) == [ids[3], ids[2]])
+    #expect(orchestrator.recent(limit: 0).isEmpty)
+    #expect(orchestrator.recent(limit: 100).map(\.id) == ids.reversed())
+}
+
+@Test func aFinishedRunsStdoutIsReadOnceAndItsRatingStillMoves() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    let orchestrator = try sandbox.orchestrator(claude: answersByPrompt)
+
+    let id = try orchestrator.spawn(sandbox.spec(prompt: "one"))
+    _ = try await orchestrator.wait(ids: [id], timeout: 10)
+    let before = try #require(orchestrator.recent(limit: 5).first)
+    #expect(before.output?.text == "done")
+
+    // Whatever happens to the files after the first look is not seen again.
+    let directory = sandbox.root.appendingPathComponent("runs/\(id)")
+    #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("summary.json").path))
+    try "garbage".write(to: directory.appendingPathComponent("stdout"), atomically: true, encoding: .utf8)
+    #expect(orchestrator.recent(limit: 5).first == before)
+    try FileManager.default.removeItem(at: directory.appendingPathComponent("stdout"))
+    #expect(orchestrator.recent(limit: 5).first == before)
+    #expect(try orchestrator.status(id) == before)
+
+    // A new process reads the summary, not stdout either.
+    let fresh = try sandbox.orchestrator(claude: answersByPrompt)
+    #expect(fresh.recent(limit: 5).first == before)
+
+    // The rating is the one thing that moves, and both see it move.
+    try orchestrator.rate(id, score: 3, note: nil)
+    #expect(orchestrator.recent(limit: 5).first?.rating?.score == 3)
+    #expect(fresh.recent(limit: 5).first?.rating?.score == 3)
+    try orchestrator.rate(id, score: 5, note: "better")
+    #expect(fresh.recent(limit: 5).first?.rating?.note == "better")
+}
+
+@Test func theListCutsALongAnswerAndStatusGivesItWhole() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    let orchestrator = try sandbox.orchestrator(claude: answersByPrompt)
+
+    let id = try orchestrator.spawn(sandbox.spec(prompt: "long"))
+    _ = try await orchestrator.wait(ids: [id], timeout: 10)
+
+    let listed = try #require(orchestrator.recent(limit: 1).first)
+    #expect(listed.output?.text.count == RunSummary.textLimit)
+    #expect(listed.output?.costUSD == 0.25)
+    #expect(listed.output?.inputTokens == 3)
+    let whole = try orchestrator.status(id)
+    #expect(whole.output?.text.count == 10000)
+    let waited = try await orchestrator.wait(ids: [id], timeout: 1)
+    #expect(waited.first?.output?.text.count == 10000)
+}
+
 private extension URL {
     /// The same URL, with its folder made, for writing a file into it.
     func createDirectoryIfNeeded() -> URL {

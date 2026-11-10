@@ -5,20 +5,26 @@ import VitraOrchestrator
 ///
 /// At rest it costs nothing: there is no timer, only a watch on the runs
 /// directory that fires when a worker is spawned. A one-second tick exists
-/// only while something is running, to catch workers finishing and to move
-/// their clocks, and stops with the last of them.
+/// only while something is running and the window can be seen, to catch
+/// workers finishing and to move their clocks, and stops with the last of them.
 final class RunFeed: @unchecked Sendable {
     private static let listed = 60
     /// How far back the ranking looks.
     private static let scored = 2000
     /// When to look again after a run directory appears.
     private static let recordDelays: [TimeInterval] = [0.3, 1.5]
+    /// How many one-second ticks pass between full re-reads of the list.
+    private static let fullRefreshEvery = 5
 
     private let orchestrator: Orchestrator
     private let root: URL
     private let queue = DispatchQueue(label: "dev.vitra.runfeed", qos: .utility)
     private var watch: DispatchSourceFileSystemObject?
     private var timer: DispatchSourceTimer?
+    // All three are touched on `queue` only.
+    private var isVisible = true
+    private var shown: [Run] = []
+    private var ticks = 0
 
     /// Called on the main queue with the newest runs first.
     var onChange: (@MainActor @Sendable ([Run]) -> Void)?
@@ -95,8 +101,44 @@ final class RunFeed: @unchecked Sendable {
         }
     }
 
+    /// Whether anyone can see the cockpit. While nobody can, nothing is read
+    /// and nothing ticks; coming back reads once and starts the clock again.
+    func setVisible(_ visible: Bool) {
+        queue.async { [self] in
+            guard visible != isVisible else { return }
+            isVisible = visible
+            if visible {
+                refresh()
+            } else {
+                timer?.cancel()
+                timer = nil
+            }
+        }
+    }
+
+    /// Lists the newest runs afresh.
     private func refresh() {
-        let runs = orchestrator.recent(limit: Self.listed)
+        guard isVisible else { return }
+        publish(orchestrator.recent(limit: Self.listed))
+    }
+
+    /// A tick between full refreshes. Only a running worker's clock moves, so
+    /// only the running ones are looked at again; the others stay as they were
+    /// and the finished ones cost nothing. Every `fullRefreshEvery` ticks the
+    /// whole list is read afresh, which is when a rating another process gave
+    /// is noticed.
+    private func tick() {
+        guard isVisible else { return }
+        ticks += 1
+        guard ticks % Self.fullRefreshEvery != 0 else { return refresh() }
+        publish(shown.map { run in
+            guard run.state == .running else { return run }
+            return (try? orchestrator.status(run.id, fullText: false)) ?? run
+        })
+    }
+
+    private func publish(_ runs: [Run]) {
+        shown = runs
         setTicking(runs.contains { $0.state == .running })
         let handler = onChange
         DispatchQueue.main.async { MainActor.assumeIsolated { handler?(runs) } }
@@ -109,9 +151,10 @@ final class RunFeed: @unchecked Sendable {
             timer = nil
             return
         }
+        ticks = 0
         let source = DispatchSource.makeTimerSource(queue: queue)
         source.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(200))
-        source.setEventHandler { [weak self] in self?.refresh() }
+        source.setEventHandler { [weak self] in self?.tick() }
         source.resume()
         timer = source
     }

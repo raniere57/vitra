@@ -54,6 +54,15 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         tabBar.onClose = { [weak self] in self?.close(at: $0) }
         tabBar.onAdd = { [weak self] in self?.openProject(nil) }
         feed.onChange = { [weak self] runs in self?.show(runs) }
+        // Covered, minimised, on another space or hidden with the app: the
+        // window's own word for "nobody is looking", and the feed stops
+        // reading the runs until somebody is.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(occlusionChanged),
+            name: NSWindow.didChangeOcclusionStateNotification,
+            object: window
+        )
         watchUsage()
         select(selected)
     }
@@ -260,9 +269,14 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Window
 
+    @objc private func occlusionChanged(_ notification: Notification) {
+        feed.setVisible(window?.occlusionState.contains(.visible) ?? false)
+    }
+
     func windowWillClose(_ notification: Notification) {
         usageDebounce?.cancel()
         usageDebounce = nil
+        feed.setVisible(false)
         usageWatch?.cancel()
         usageWatch = nil
         views.values.forEach { $0.shutDown() }
