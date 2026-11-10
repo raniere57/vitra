@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import os
 import VitraCore
 import VitraOrchestrator
 
@@ -133,23 +134,47 @@ enum WorkerBoard {
     /// another year. "Today" is judged in `timeZone`, the same zone the clock
     /// is read in, so a run started just before midnight stays on its own day.
     static func startedText(_ started: Date, now: Date, timeZone: TimeZone = .current) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
-        let format: String
-        if calendar.isDate(started, inSameDayAs: now) {
-            format = "HH:mm"
-        } else if calendar.component(.year, from: started) == calendar.component(.year, from: now) {
-            format = "dd/MM HH:mm"
-        } else {
-            format = "dd/MM/yyyy HH:mm"
+        clocks.withLockUnchecked { $0.text(started, now: now, timeZone: timeZone) }
+    }
+
+    /// One calendar and one formatter per zone and format, kept for the life
+    /// of the app: every row of every refresh asks for one, and building a
+    /// `DateFormatter` costs far more than using it. Behind a lock because a
+    /// formatter is not safe to share between threads.
+    private static let clocks = OSAllocatedUnfairLock(uncheckedState: Clocks())
+
+    private struct Clocks {
+        private var calendars: [String: Calendar] = [:]
+        private var formatters: [String: DateFormatter] = [:]
+
+        mutating func text(_ started: Date, now: Date, timeZone: TimeZone) -> String {
+            let calendar = calendars[timeZone.identifier] ?? {
+                var made = Calendar(identifier: .gregorian)
+                made.timeZone = timeZone
+                calendars[timeZone.identifier] = made
+                return made
+            }()
+            let format: String
+            if calendar.isDate(started, inSameDayAs: now) {
+                format = "HH:mm"
+            } else if calendar.component(.year, from: started) == calendar.component(.year, from: now) {
+                format = "dd/MM HH:mm"
+            } else {
+                format = "dd/MM/yyyy HH:mm"
+            }
+            let key = timeZone.identifier + "|" + format
+            let formatter = formatters[key] ?? {
+                let made = DateFormatter()
+                // POSIX digits regardless of the machine's language or calendar settings.
+                made.locale = Locale(identifier: "en_US_POSIX")
+                made.calendar = calendar
+                made.timeZone = timeZone
+                made.dateFormat = format
+                formatters[key] = made
+                return made
+            }()
+            return formatter.string(from: started)
         }
-        let formatter = DateFormatter()
-        // POSIX digits regardless of the machine's language or calendar settings.
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = calendar
-        formatter.timeZone = timeZone
-        formatter.dateFormat = format
-        return formatter.string(from: started)
     }
 
     static func row(_ run: Run, now: Date, timeZone: TimeZone = .current) -> WorkerRow {
