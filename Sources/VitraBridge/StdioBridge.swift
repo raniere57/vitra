@@ -13,9 +13,22 @@ public enum StdioBridge {
         // gets the browser and the preview, and nothing to delegate with: the
         // maestro hands work out, a worker does it.
         let isWorker = !(ProcessInfo.processInfo.environment["VITRA_AGENT"] ?? "").isEmpty
+        // The notes are served here for both, so a worker reads what the
+        // maestro and earlier workers left, and adds to it the same way.
+        let memory = MemoryToolExecutor()
         let server = isWorker
-            ? MCPServer(executor: RemoteExecutor(), tools: MCPTools.worker)
-            : MCPServer(executor: RoutingExecutor(agents: AgentToolExecutor(), panel: RemoteExecutor()))
+            ? MCPServer(
+                executor: LocalToolRouter(names: MemoryTools.names, local: memory, otherwise: RemoteExecutor()),
+                tools: MCPTools.worker
+            )
+            : MCPServer(
+                executor: LocalToolRouter(
+                    names: MemoryTools.names,
+                    local: memory,
+                    otherwise: RoutingExecutor(agents: AgentToolExecutor(), panel: RemoteExecutor())
+                ),
+                tools: MCPTools.all
+            )
         let out = OutputQueue()
         let group = DispatchGroup()
 

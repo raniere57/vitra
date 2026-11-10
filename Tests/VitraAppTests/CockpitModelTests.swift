@@ -262,6 +262,12 @@ private let now = start.addingTimeInterval(38)
     #expect(Maestro.conversation(silent, in: conversations.appendingPathComponent("missing")) == .new(silent))
 }
 
+@Test func theMaestroIsBriefedOnTheSharedNotes() {
+    // Workers are shown the notes automatically; the maestro must know to add to them.
+    #expect(Maestro.brief.contains("memory_add"))
+    #expect(Maestro.brief.contains("shared notes"))
+}
+
 @Test func theMaestroIsLaunchedWithVitrasToolsItsBriefAndItsConversation() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("maestro \(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: directory) }
