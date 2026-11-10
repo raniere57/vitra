@@ -223,6 +223,14 @@ public struct Orchestrator: Sendable {
             throw .spawnFailed(added.output.trimmingCharacters(in: .whitespacesAndNewlines))
         }
 
+        // What the project keeps out of git but the worker needs. Whatever
+        // could not be applied is written beside the run for the report.
+        let skipped = WorktreeSetup.apply(repository: URL(fileURLWithPath: topLevel), to: tree)
+        if !skipped.isEmpty {
+            try? Data((skipped.joined(separator: "\n") + "\n").utf8)
+                .write(to: run.appendingPathComponent("worktree-setup"))
+        }
+
         let directory = prefix.isEmpty ? tree : tree.appendingPathComponent(prefix)
         // A directory that exists only on disk is not in the repository, so
         // the checkout has no counterpart: make it, rather than sending the
@@ -492,8 +500,16 @@ public struct Orchestrator: Sendable {
             baseCommit: record.baseCommit,
             commitError: commitError(id),
             rating: (try? Data(contentsOf: file(id, "rating.json")))
-                .flatMap { try? JSONDecoder().decode(Rating.self, from: $0) }
+                .flatMap { try? JSONDecoder().decode(Rating.self, from: $0) },
+            worktreeSkipped: worktreeSkipped(id)
         )
+    }
+
+    /// The lines of `.vitra/worktree` that could not be applied to the run's
+    /// worktree, each with why. Empty when there were none.
+    private func worktreeSkipped(_ id: String) -> [String] {
+        guard let text = try? String(contentsOf: file(id, "worktree-setup"), encoding: .utf8) else { return [] }
+        return text.split(whereSeparator: \.isNewline).map(String.init)
     }
 
     /// Why the shell could not commit the worker's work, when it could not.

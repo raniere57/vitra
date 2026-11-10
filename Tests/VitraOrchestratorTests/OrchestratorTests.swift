@@ -716,3 +716,40 @@ echo '{"result":"done","is_error":false}'
     #expect(loaded.baseCommit == nil)
 }
 
+
+@Test func anEditingWorkerFindsTheFilesItsProjectsWorktreeFileLinksIntoItsTree() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    // The vendored library is ignored by git, so the worktree gets none of it
+    // unless the project asks for it.
+    try "vendor/\n".write(to: sandbox.project.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+    try "archive\n".write(to: sandbox.project.appendingPathComponent("vendor/lib/a.a").createDirectoryIfNeeded(), atomically: true, encoding: .utf8)
+    try "link vendor/lib\nlink vendor/absent\n".write(
+        to: sandbox.project.appendingPathComponent(".vitra/worktree").createDirectoryIfNeeded(),
+        atomically: true,
+        encoding: .utf8
+    )
+    try sandbox.makeRepository()
+    let orchestrator = try sandbox.orchestrator(claude: #"""
+    cat >/dev/null
+    if [ -f vendor/lib/a.a ]; then echo found > found.txt; fi
+    echo '{"result":"done","is_error":false}'
+    """#)
+
+    let id = try orchestrator.spawn(sandbox.spec(access: .edit))
+    let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)
+
+    #expect(run.state == .finished(exitCode: 0))
+    #expect(try sandbox.git(["show", "vitra/\(id):found.txt"]) == "found\n")
+    // The entry whose source is missing is not fatal, and it is recorded for
+    // the report.
+    #expect(run.worktreeSkipped == ["link vendor/absent: missing in the checkout"])
+}
+
+private extension URL {
+    /// The same URL, with its folder made, for writing a file into it.
+    func createDirectoryIfNeeded() -> URL {
+        try? FileManager.default.createDirectory(at: deletingLastPathComponent(), withIntermediateDirectories: true)
+        return self
+    }
+}

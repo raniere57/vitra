@@ -39,6 +39,9 @@ public struct Run: Equatable, Sendable {
     public var commitError: String? = nil
     /// What the orchestrator made of the delivery, once it has said.
     public var rating: Rating? = nil
+    /// The lines of the project's `.vitra/worktree` that could not be applied
+    /// to the worktree, each with why. Empty when all applied or there was none.
+    public var worktreeSkipped: [String] = []
 
     /// How long the run took, or has taken so far.
     public var duration: TimeInterval {
