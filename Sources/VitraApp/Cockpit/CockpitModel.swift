@@ -336,10 +336,16 @@ enum Maestro {
     that way. That is only found out by trying the cheap ones, so agent_spawn holds you to two rules: until workers \
     from three providers have been rated on a kind, a worker already rated on it is not used for it again; and a \
     model runs at its lowest effort before a higher one. Start each kind with the fast, cheap workers — a free \
-    opencode model, gemini flash at low, a grok at low, haiku at low — and move up only when one falls short. When \
+    opencode model, gemini flash at low, a grok at low, haiku at low — and move up only when one falls short. Every \
+    model and every effort agent_models lists is a separate worker, and so is every version: Grok 4.5, 4.6 and 4.7 \
+    are three workers, and a newer one does not spare you trying the others, since an older one may do the same job \
+    faster or cheaper. When \
     agent_spawn refuses a worker, pick another; pass override only when no other worker can do the piece, and say \
-    why. After the trial, take the first in agent_scores that fits, and still give an untried worker about one piece \
-    in five. After reviewing a delivery, always record your verdict with agent_rate, honestly; a poor delivery rated \
+    why. After the trial, take the first in agent_scores that fits, and one piece in five goes to an untried worker; \
+    agent_spawn enforces that and names the turn when it comes. A rating below 4 rules out that model at that effort \
+    only: try the next effort of the same model before giving up on the provider. Gemini and cursor cannot be given \
+    commands, so they take reading work: explore, review and docs, and code changes whose checking the audit or the \
+    deploy will do. After reviewing a delivery, always record your verdict with agent_rate, honestly; a poor delivery rated \
     well sends the next task to the wrong worker.
 
     Every editing delivery is audited first by a cheap read-only worker from another provider: agent_wait starts \
