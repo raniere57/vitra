@@ -33,8 +33,8 @@ private func done(_ spec: WorkerSpec, score: Int? = 4, at began: Date = start) -
     #expect(TrialRules.problem(with: worker(.cursor, "cursor-grok-4.6-low-fast"), history: history, providers: 4) == nil)
     // Only three recent pieces: no exploration turn yet.
     // The fourth most recent is an untried worker's piece, so no refusal.
-    let untriedBefore = done(worker(.cursor, "cursor-grok-4.6-low-fast"), score: nil)
-    #expect(TrialRules.problem(with: sonnet, history: [untriedBefore] + recent.dropFirst(), providers: 4) == nil)
+    let untriedBefore = done(worker(.cursor, "cursor-grok-4.6-low-fast"), score: nil, at: start.addingTimeInterval(0.5))
+    #expect(TrialRules.problem(with: sonnet, history: older + [untriedBefore] + recent.dropFirst(), providers: 4) == nil)
     // An untried worker in the last four lifts the refusal.
     let fresh = done(worker(.cursor, "cursor-grok-4.6-low-fast"), score: nil, at: start.addingTimeInterval(5))
     #expect(TrialRules.problem(with: sonnet, history: history + [fresh], providers: 4) == nil)
