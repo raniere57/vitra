@@ -41,6 +41,19 @@ public struct WorkerOutput: Equatable, Sendable {
         )
     }
 
+    /// The same output with another text and verdict: what the orchestrator
+    /// makes of a run, as against what the CLI said.
+    func replacing(text: String, isError: Bool) -> WorkerOutput {
+        WorkerOutput(
+            text: text,
+            isError: isError,
+            costUSD: costUSD,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            sessionID: sessionID
+        )
+    }
+
     /// Reads what `cli` printed on stdout in its JSON output mode.
     ///
     /// Output that is not the expected JSON — a shell error, a crash — is kept

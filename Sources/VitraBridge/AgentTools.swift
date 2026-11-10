@@ -55,6 +55,10 @@ public enum AgentTools {
                     "type": "boolean",
                     "description": "Left out: a finished editing delivery is audited by a cheap read-only worker from another provider when it changed 40 lines or more, and agent_wait gives the audit's id. true audits it whatever its size; false skips the gate.",
                 ],
+                "minutes": [
+                    "type": "number",
+                    "description": "Time limit for this worker, 1 to 180. Left out: 45. A worker still running past it is cancelled the next time agent_wait or agent_cancel reads it, and reported as failed (timed out after N min). The automatic auditor gets 8.",
+                ],
             ],
             required: ["prompt", "directory"]
         ),
@@ -169,10 +173,19 @@ public struct AgentToolExecutor: ToolExecutor {
         }
     }
 
+    /// How long the automatic auditor may run before it is cancelled as hung.
+    static let auditMinutes = 8
+    /// A `pending` audit claim older than this was left by a helper that died
+    /// between taking it and writing the auditor's id.
+    static let staleClaimAge: TimeInterval = 60
+
     private let orchestrator: Orchestrator
     private let executables: Executables
     /// The project this helper's maestro belongs to.
     private let project: String?
+    /// How long a merge or an audit start waits for the repository's lock
+    /// before it answers that the repository is busy.
+    private let lockTimeout: TimeInterval
 
     /// The project the cockpit named in the maestro's shell, which this helper
     /// inherits. Absent when the helper was started outside the cockpit.
@@ -184,9 +197,15 @@ public struct AgentToolExecutor: ToolExecutor {
         self.init(orchestrator: Orchestrator(executables: executables), executables: executables, project: Self.inheritedProject)
     }
 
-    public init(orchestrator: Orchestrator, executables: Executables, project: String? = nil) {
+    public init(
+        orchestrator: Orchestrator,
+        executables: Executables,
+        project: String? = nil,
+        lockTimeout: TimeInterval = RepositoryLock.defaultTimeout
+    ) {
         self.orchestrator = orchestrator
         self.executables = executables
+        self.lockTimeout = lockTimeout
         // One spelling per directory, as the cockpit keeps it.
         self.project = project.map { $0.count > 1 && $0.hasSuffix("/") ? String($0.dropLast()) : $0 }
     }
@@ -310,7 +329,8 @@ public struct AgentToolExecutor: ToolExecutor {
             commands: commands,
             // Nil is the default, which is on: only an explicit false turns
             // the gate off, and an explicit true is kept as it was asked.
-            audit: arguments["audit"]?.boolValue
+            audit: arguments["audit"]?.boolValue,
+            minutes: try minutes(in: arguments)
         )
         let id = try orchestrator.spawn(spec)
         let why = picked.map { "picked \(spec.worker): \($0.reason). " } ?? ""
@@ -351,6 +371,29 @@ public struct AgentToolExecutor: ToolExecutor {
         guard let repository = run.repository, let worktree = run.worktree, let branch = run.branch else {
             throw ToolError("agent \(id) has no branch to merge: it did not edit a git repository")
         }
+        // An auditor past its deadline is cancelled by this read, which can
+        // take seconds: do it before the lock, not under it.
+        if let audit = auditID(id) { _ = try? orchestrator.status(audit) }
+
+        // Everything from here to the end is one critical section per
+        // repository: the checks and the merge are not atomic, and another
+        // helper's `git merge --abort` could abort this one's merge. What
+        // waits for the lock is never a worker, only another merge or an
+        // auditor being started.
+        do {
+            return try RepositoryLock.withLock(repository, timeout: lockTimeout) {
+                try mergeLocked(run, repository: repository, worktree: worktree, branch: branch, discard: discard)
+            }
+        } catch let error as RepositoryLockError {
+            throw ToolError(error.description)
+        }
+    }
+
+    /// The part of `merge` that holds the repository's lock.
+    private func mergeLocked(
+        _ run: Run, repository: String, worktree: String, branch: String, discard: Bool
+    ) throws -> String {
+        let id = run.id
         // The auditor is reading this worktree; taking it away now would pull
         // the files out from under it.
         if let refusal = auditRefusal(id) {
@@ -459,16 +502,42 @@ public struct AgentToolExecutor: ToolExecutor {
     ///
     /// `pending` is a claim another wait has taken and is spawning behind, so
     /// there is no auditor id to name yet.
+    ///
+    /// An audit that stopped, however it ended — failed, cancelled, timed out —
+    /// refuses nothing, and neither does a claim abandoned before its auditor
+    /// was recorded.
     private func auditRefusal(_ id: String) -> String? {
         guard let directory = orchestrator.directory(of: id) else { return nil }
         let record = directory.appendingPathComponent("audit")
-        guard let text = try? String(contentsOf: record, encoding: .utf8) else { return nil }
-        let audit = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let audit = Self.claimText(record) else { return nil }
         if audit.isEmpty || audit == "pending" {
-            return "an audit is still reading this worktree; agent_wait on it first"
+            return Self.isAbandoned(record) ? nil : "an audit is still reading this worktree; agent_wait on it first"
         }
         guard let reading = try? orchestrator.status(audit), reading.state == .running else { return nil }
         return "the audit \(audit) is still reading this worktree; agent_wait on it first"
+    }
+
+    /// The id of the audit recorded for run `id`, when there is one.
+    private func auditID(_ id: String) -> String? {
+        guard let directory = orchestrator.directory(of: id),
+              let text = Self.claimText(directory.appendingPathComponent("audit")),
+              !text.isEmpty, text != "pending"
+        else { return nil }
+        return text
+    }
+
+    /// What the claim file says, trimmed, or nil when there is no claim.
+    private static func claimText(_ record: URL) -> String? {
+        (try? String(contentsOf: record, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Whether the claim is a `pending` one nobody finished: older than
+    /// `staleClaimAge` by its modification date, with no auditor id in it.
+    private static func isAbandoned(_ record: URL) -> Bool {
+        guard let text = claimText(record), text.isEmpty || text == "pending",
+              let modified = (try? FileManager.default.attributesOfItem(atPath: record.path))?[.modificationDate] as? Date
+        else { return false }
+        return Date().timeIntervalSince(modified) > staleClaimAge
     }
 
     /// What git printed, trimmed, or nil when it printed nothing.
@@ -493,6 +562,16 @@ public struct AgentToolExecutor: ToolExecutor {
     private static func reason(_ result: (succeeded: Bool, output: String)) -> String {
         let text = trimmed(result.output)
         return text.isEmpty ? "git gave no reason" : text.split(whereSeparator: \.isNewline).joined(separator: " ")
+    }
+
+    /// The time limit named in the arguments, when one was: a whole number,
+    /// not 4.5 silently kept as 4. The range is the spec's to check.
+    private static func minutes(in arguments: JSONValue) throws -> Int? {
+        guard let value = arguments["minutes"], value != .null else { return nil }
+        guard case let .number(number) = value, number == number.rounded(), abs(number) < 1e6 else {
+            throw ToolError("minutes must be a whole number from 1 to 180")
+        }
+        return Int(number)
     }
 
     /// The commands the worker may run, when any were named.
@@ -566,7 +645,8 @@ public struct AgentToolExecutor: ToolExecutor {
         else { return Gate() }
 
         let record = directory.appendingPathComponent("audit")
-        if FileManager.default.fileExists(atPath: record.path) {
+        // A claim abandoned half-way is not an audit: it is taken over below.
+        if FileManager.default.fileExists(atPath: record.path), !Self.isAbandoned(record) {
             return Self.existingGate(record, orchestrator: orchestrator)
         }
         guard run.spec.audit != false else { return Gate() }
@@ -606,6 +686,48 @@ public struct AgentToolExecutor: ToolExecutor {
                 + (reason.isEmpty ? "git gave no reason" : reason))
         }
 
+        let label = run.spec.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let spec = WorkerSpec(
+            cli: choice.cli,
+            model: choice.model,
+            prompt: Audit.prompt(task: run.spec.prompt, diff: read.output, label: run.spec.label),
+            directory: worktree,
+            access: .read,
+            label: "auditoria: " + (label.isEmpty ? run.id : label),
+            kind: .review,
+            effort: choice.effort,
+            project: run.spec.project,
+            minutes: Self.auditMinutes
+        )
+
+        // Claim and spawn hold the repository's lock, the same one a merge
+        // holds while it removes the worktree: a merge cannot delete the tree
+        // an auditor is being started in, and an auditor cannot be started in
+        // a tree already deleted. The diff and the choice above were made
+        // outside it, so the lock is held for the spawn only.
+        do {
+            return try RepositoryLock.withLock(repository, timeout: lockTimeout) {
+                claimAndSpawn(spec, run: run, worktree: worktree, record: record)
+            }
+        } catch let error as RepositoryLockError {
+            if case .busy = error {
+                return Gate(line: "gate: audit not started, the repository is busy — agent_wait again to start it.")
+            }
+            return Gate(line: "gate: could not start an auditor: \(error) — review this delivery yourself.")
+        } catch {
+            return Gate(line: "gate: could not start an auditor: \(error) — review this delivery yourself.")
+        }
+    }
+
+    /// The claim and the auditor's spawn, under the repository's lock.
+    private func claimAndSpawn(_ spec: WorkerSpec, run: Run, worktree: String, record: URL) -> Gate {
+        // A merge that got the lock first has taken the worktree away.
+        guard FileManager.default.fileExists(atPath: worktree) else { return Gate() }
+
+        // A claim abandoned by a helper that died is not an audit; the lock
+        // makes the removal safe, since nobody else is between claim and spawn.
+        if Self.isAbandoned(record) { try? FileManager.default.removeItem(at: record) }
+
         // The claim is taken before the spawn, not after: two waits finishing
         // the same delivery at once would otherwise both read no record, both
         // spawn an auditor, and both pay for it.
@@ -618,18 +740,6 @@ public struct AgentToolExecutor: ToolExecutor {
             break
         }
 
-        let label = run.spec.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let spec = WorkerSpec(
-            cli: choice.cli,
-            model: choice.model,
-            prompt: Audit.prompt(task: run.spec.prompt, diff: read.output, label: run.spec.label),
-            directory: worktree,
-            access: .read,
-            label: "auditoria: " + (label.isEmpty ? run.id : label),
-            kind: .review,
-            effort: choice.effort,
-            project: run.spec.project
-        )
         do {
             let id = try orchestrator.spawn(spec)
             do {
@@ -720,6 +830,11 @@ enum AgentReport {
     /// A worker can write a great deal; past this its answer is cut so one
     /// chatty worker cannot crowd the orchestrator's context.
     static let longestAnswer = 16000
+    /// Seconds without a write to stdout or stderr before a running worker is
+    /// reported as silent.
+    static let silenceThreshold: TimeInterval = 120
+    /// How many changed files the branch line lists before "and N more".
+    static let mostFiles = 8
 
     /// One line: who, what state, how long, what it cost.
     static func headline(_ run: Run) -> String {
@@ -729,7 +844,9 @@ enum AgentReport {
         case .cancelled: state = "cancelled"
         case .lost: state = "LOST (the process is gone and left no result)"
         case let .finished(exitCode):
-            if run.output?.isError == true {
+            if run.timedOutAfter != nil {
+                state = "FAILED (timed out)"
+            } else if run.output?.isError == true {
                 state = exitCode == 0 ? "FAILED" : "FAILED (exit \(exitCode))"
             } else {
                 state = "finished"
@@ -744,6 +861,11 @@ enum AgentReport {
         if let output = run.output {
             fields.append(String(format: "$%.4f", output.costUSD))
             fields.append("\(output.inputTokens) in / \(output.outputTokens) out")
+        }
+        // A worker that has written nothing for minutes may be hung. (claude's
+        // json mode writes stdout only at the end, so there it is a hint, not proof.)
+        if run.state == .running, let silent = run.silentFor, silent > silenceThreshold {
+            fields.append("silent for \(Int(silent.rounded()))s")
         }
         if let rating = run.rating { fields.append("rated \(rating.score)/5") }
         // The label is free text from a model and the headline is one line: a
@@ -781,16 +903,36 @@ enum AgentReport {
 
     /// The gate line for an audit that already exists: who is auditing and
     /// where it stands, so a second wait reports it instead of starting another.
+    ///
+    /// An audit that did not give a verdict — timed out, failed, cancelled,
+    /// lost — blocks nothing: the line says to review the delivery oneself.
     static func gate(_ audit: Run) -> String {
-        let state: String
+        let who = "gate: audit \(audit.id) by \(audit.spec.worker)"
+        let readIt = " — read its verdict before reviewing yourself."
+        let noVerdict = " — review this delivery yourself."
         switch audit.state {
-        case .running: state = "running"
-        case .cancelled: state = "cancelled"
-        case .lost: state = "LOST"
+        case .running: return who + " running" + readIt
+        case .cancelled: return who + " cancelled" + noVerdict
+        case .lost: return who + " LOST" + noVerdict
         case let .finished(exitCode):
-            state = audit.output?.isError == true || exitCode != 0 ? "FAILED (exit \(exitCode))" : "finished"
+            if audit.timedOutAfter != nil { return "gate: audit \(audit.id) timed out" + noVerdict }
+            if audit.output?.isError == true || exitCode != 0 { return who + " FAILED (exit \(exitCode))" + noVerdict }
+            return who + " finished" + readIt
         }
-        return "gate: audit \(audit.id) by \(audit.spec.worker) \(state) — read its verdict before reviewing yourself."
+    }
+
+    /// The files the branch changed, `  path | +added -deleted`, at most
+    /// `mostFiles` of them and then `  and N more`.
+    private static func fileLines(base: String, branch: String, in repository: String) -> [String] {
+        guard let numstat = Git.output(["diff", "--numstat", "\(base)..\(branch)"], in: repository) else { return [] }
+        let files = numstat.split(whereSeparator: \.isNewline).compactMap { line -> String? in
+            let fields = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+            guard fields.count == 3 else { return nil }
+            // A binary file has no line counts: git prints dashes.
+            let counts = Int(fields[0]) != nil && Int(fields[1]) != nil ? "+\(fields[0]) -\(fields[1])" : "binary"
+            return "  \(fields[2]) | \(counts)"
+        }
+        return Array(files.prefix(mostFiles)) + (files.count > mostFiles ? ["  and \(files.count - mostFiles) more"] : [])
     }
 
     /// Where an editing worker's work is and how to take it.
@@ -819,6 +961,7 @@ enum AgentReport {
                 "changes on branch \(branch) (base \(base.prefix(7))): "
                     + (stat.map { $0.isEmpty ? "no changes" : $0 } ?? "no changes")
             )
+            lines.append(contentsOf: fileLines(base: base, branch: branch, in: top))
         }
         if let audit {
             // The auditor is reading this worktree: the merge waits, and the

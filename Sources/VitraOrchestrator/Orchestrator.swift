@@ -12,6 +12,8 @@ import Foundation
 ///     <root>/<id>/commit-error why the shell could not commit an editing
 ///                             worker's work, when it could not
 ///     <root>/<id>/cancelled   present when the run was cancelled
+///     <root>/<id>/timed-out   with `cancelled`, when the deadline did it:
+///                             the minutes the run was given
 ///     <root>/<id>/rating.json the orchestrator's verdict on the delivery
 ///     <root>/<id>/audit       the id of the worker auditing this delivery
 ///     <root>/<id>/tree        an editing worker's own worktree, when it got one
@@ -37,6 +39,13 @@ public struct Orchestrator: Sendable {
     /// What a shell reports for a child killed by the signals `cancel` sends:
     /// 128 plus SIGTERM, and 128 plus SIGKILL.
     private static let cancelExitCodes: Set<Int32> = [128 + SIGTERM, 128 + SIGKILL]
+    /// How long a worker may run when the spawn did not say.
+    public static let defaultMinutes = 45
+    /// The exit code a run cancelled for outlasting its deadline is given,
+    /// the one coreutils' `timeout` uses. A timed-out run is a finished,
+    /// failed run, not a cancelled one: the Scoreboard counts it as a failure
+    /// and needs no new state for it.
+    public static let timeoutExitCode: Int32 = 124
 
     private let root: URL
     private let memoryRoot: URL
@@ -188,15 +197,17 @@ public struct Orchestrator: Sendable {
         }
 
         do {
+            let started = Date()
             let record = RunRecord(
                 spec: spec,
-                started: Date(),
+                started: started,
                 pid: pid,
                 leaderStarted: Self.processStart(pid),
                 repository: worktree?.top,
                 worktree: worktree?.tree,
                 branch: worktree?.branch,
-                baseCommit: worktree?.base
+                baseCommit: worktree?.base,
+                deadline: started.addingTimeInterval(TimeInterval(spec.minutes ?? Self.defaultMinutes) * 60)
             )
             try JSONEncoder().encode(record).write(to: directory.appendingPathComponent("run.json"), options: .atomic)
         } catch {
@@ -475,8 +486,15 @@ public struct Orchestrator: Sendable {
     /// The answer comes back whole. Pass `fullText: false` to get it cut at
     /// `RunSummary.textLimit` characters, which is what `recent` does, and
     /// costs no read of stdout once the run has been seen finished.
+    ///
+    /// A run still going past its deadline is cancelled here, and reported as
+    /// timed out. Only `status` (so `wait` too) does this: `recent` is read by
+    /// the UI and must not block for the seconds a kill can take.
     public func status(_ id: String, fullText: Bool = true) throws(OrchestratorError) -> Run {
         guard let record = record(id) else { throw .unknownRun(id) }
+        if let deadline = record.deadline, Date() >= deadline {
+            stop(id, record, timedOutAfter: record.spec.minutes ?? Self.defaultMinutes)
+        }
         return run(id, record, fullText: fullText)
     }
 
@@ -570,11 +588,21 @@ public struct Orchestrator: Sendable {
     /// call it off the cooperative pool.
     public func cancel(_ id: String) throws(OrchestratorError) {
         guard let record = record(id) else { throw .unknownRun(id) }
+        stop(id, record, timedOutAfter: nil)
+    }
+
+    /// `cancel`, and the deadline's cancel: `timedOutAfter` says which.
+    private func stop(_ id: String, _ record: RunRecord, timedOutAfter minutes: Int?) {
         guard state(id, record) == .running else { return }
 
-        // The marker goes down first: once the group is signalled the shell
+        // The markers go down first: once the group is signalled the shell
         // dies without writing an exit code, and the marker is what tells that
-        // apart from a run that was lost.
+        // apart from a run that was lost. The timeout's goes before the
+        // cancel's, so no reader sees a run cancelled that is about to be a
+        // timeout.
+        if let minutes {
+            try? Data(String(minutes).utf8).write(to: file(id, "timed-out"))
+        }
         FileManager.default.createFile(atPath: file(id, "cancelled").path, contents: nil)
         kill(-record.pid, SIGTERM)
 
@@ -626,8 +654,10 @@ public struct Orchestrator: Sendable {
         let output: WorkerOutput?
         let commitError: String?
         let worktreeSkipped: [String]
+        var timedOutAfter: Int?
 
         if case let .finished(exitCode) = state {
+            if exitCode == Self.timeoutExitCode { timedOutAfter = timedOutMinutes(id) }
             let settled = summary ?? makeSummary(id, record, exitCode: exitCode)
             ended = settled.ended
             errorTail = settled.errorTail
@@ -659,12 +689,40 @@ public struct Orchestrator: Sendable {
             baseCommit: record.baseCommit,
             commitError: commitError,
             rating: rating(id),
-            worktreeSkipped: worktreeSkipped
+            worktreeSkipped: worktreeSkipped,
+            silentFor: state == .running ? silence(id, since: record.started) : nil,
+            timedOutAfter: timedOutAfter
         )
+    }
+
+    /// How long neither stdout nor stderr has been written, by their dates.
+    private func silence(_ id: String, since started: Date) -> TimeInterval {
+        let last = [modified(file(id, "stdout")), modified(file(id, "stderr"))].compactMap { $0 }.max() ?? started
+        return max(Date().timeIntervalSince(last), 0)
+    }
+
+    /// The minutes a run was given, when it was cancelled for outlasting them.
+    private func timedOutMinutes(_ id: String) -> Int? {
+        (try? String(contentsOf: file(id, "timed-out"), encoding: .utf8))
+            .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
+    /// Whether an editing worker left commits on its branch: false for a run
+    /// that has no branch at all. Nil when it has one and git cannot say, as
+    /// when the branch was merged and removed long ago.
+    private func hasCommits(_ record: RunRecord) -> Bool? {
+        guard record.spec.access == .edit,
+              let repository = record.repository, let branch = record.branch, let base = record.baseCommit
+        else { return false }
+        guard let count = Git.output(["rev-list", "--count", "\(base)..\(branch)"], in: repository) else { return nil }
+        return Int(count.trimmingCharacters(in: .whitespacesAndNewlines)).map { $0 > 0 }
     }
 
     /// What the worker reported, from everything it printed.
     private func parsedOutput(_ id: String, _ record: RunRecord, exitCode: Int32, errorTail: String?) -> WorkerOutput {
+        if exitCode == Self.timeoutExitCode, let minutes = timedOutMinutes(id) {
+            return WorkerOutput(text: "timed out after \(minutes) min", isError: true)
+        }
         // Decoded leniently: a worker killed mid-character, or one that
         // printed bytes that are not text, still has an answer worth reading.
         let stdout = String(decoding: (try? Data(contentsOf: file(id, "stdout"))) ?? Data(), as: UTF8.self)
@@ -677,7 +735,18 @@ public struct Orchestrator: Sendable {
             : WorkerOutput.parse(stdout, cli: record.spec.cli)
         // Either signal is enough: a CLI can exit zero having reported a
         // failure, and can die non-zero having printed half an answer.
-        return exitCode == 0 ? parsed : parsed.failed(fallbackText: errorTail)
+        guard exitCode == 0 else { return parsed.failed(fallbackText: errorTail) }
+
+        // Exiting 0 with nothing to say is not a delivery. An editing worker
+        // whose branch holds commits is the exception: its work is the answer.
+        // (When git cannot say, the run is left as it was reported: its
+        // branch is gone because somebody merged or discarded it.)
+        guard !parsed.isError, parsed.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return parsed }
+        switch hasCommits(record) {
+        case true?: return parsed.replacing(text: "no answer; see the changes", isError: false)
+        case nil: return parsed
+        case false?: return parsed.replacing(text: "finished without an answer", isError: true)
+        }
     }
 
     /// Reads a finished run once and writes down what came of it.
@@ -688,7 +757,8 @@ public struct Orchestrator: Sendable {
         let errorTail = tail(file(id, "stderr"))
         let summary = RunSummary(
             exitCode: exitCode,
-            ended: modified(file(id, "exit")),
+            // A run cancelled for its deadline may never write an exit code.
+            ended: modified(file(id, "exit")) ?? modified(file(id, "timed-out")),
             errorTail: errorTail,
             commitError: commitError(id),
             worktreeSkipped: worktreeSkipped(id),
@@ -751,10 +821,12 @@ public struct Orchestrator: Sendable {
         // outlive the worker by long enough to write down that the worker died
         // of the signal. That is a cancelled run, not a failed one.
         let wasCancelled = FileManager.default.fileExists(atPath: file(id, "cancelled").path)
+        // Cancelled for the deadline, it is a failed run that timed out.
+        var cancelled: Run.State { timedOutMinutes(id) == nil ? .cancelled : .finished(exitCode: Self.timeoutExitCode) }
         if let code = knownExit ?? exitCode(id) {
-            return wasCancelled && Self.cancelExitCodes.contains(code) ? .cancelled : .finished(exitCode: code)
+            return wasCancelled && Self.cancelExitCodes.contains(code) ? cancelled : .finished(exitCode: code)
         }
-        if wasCancelled { return .cancelled }
+        if wasCancelled { return cancelled }
         if Self.isGroupAlive(record) { return .running }
         // The worker can finish between the two checks above; look once more
         // before calling it lost.

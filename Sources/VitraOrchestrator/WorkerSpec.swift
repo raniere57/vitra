@@ -86,6 +86,9 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
     /// gate off. Optional so a record written before the gate existed still
     /// loads, and so the common case leaves nothing extra in run.json.
     public let audit: Bool?
+    /// How long the run may last before it is cancelled as hung, 1...180.
+    /// Nil is `Orchestrator.defaultMinutes`.
+    public let minutes: Int?
 
     public init(
         cli: WorkerCLI,
@@ -98,7 +101,8 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
         effort: String? = nil,
         project: String? = nil,
         commands: [String] = [],
-        audit: Bool? = nil
+        audit: Bool? = nil,
+        minutes: Int? = nil
     ) {
         self.cli = cli
         self.model = model
@@ -111,12 +115,13 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
         self.project = project
         self.commands = commands
         self.audit = audit
+        self.minutes = minutes
     }
 
     // Runs recorded before a field existed must still load, and a field that
     // was never set must not be written as a pile of nulls and empty lists.
     private enum CodingKeys: String, CodingKey {
-        case cli, model, prompt, directory, access, label, kind, effort, project, commands, audit
+        case cli, model, prompt, directory, access, label, kind, effort, project, commands, audit, minutes
     }
 
     public init(from decoder: Decoder) throws {
@@ -132,9 +137,11 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
         project = try values.decodeIfPresent(String.self, forKey: .project)
         commands = try values.decodeIfPresent([String].self, forKey: .commands) ?? []
         audit = try values.decodeIfPresent(Bool.self, forKey: .audit)
+        minutes = try values.decodeIfPresent(Int.self, forKey: .minutes)
     }
 
     static let mostCommands = 8
+    static let allowedMinutes = 1...180
 
     /// The git commands every editing claude worker may run.
     ///
@@ -275,6 +282,9 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
             // files that would apply to every run at once. Headless, there is
             // nobody to ask, so they get none.
             throw .invalidSpec("\(cli.rawValue) workers cannot be allowed commands: use claude for a piece that must run them")
+        }
+        if let minutes, !Self.allowedMinutes.contains(minutes) {
+            throw .invalidSpec("minutes must be a whole number from 1 to 180")
         }
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw .invalidSpec("the prompt is empty")

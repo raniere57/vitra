@@ -11,7 +11,9 @@ import Foundation
 /// needs it whole asks `Orchestrator.status`, which goes back to stdout when
 /// `isTextCut` says there was more.
 struct RunSummary: Codable, Equatable, Sendable {
-    static let version = 1
+    /// 2: an empty answer and a timeout are failures, so a summary written
+    /// before that says "finished" for runs that are no longer.
+    static let version = 2
     static let textLimit = 4000
 
     var version = RunSummary.version

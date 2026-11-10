@@ -9,7 +9,7 @@ private struct Fixture {
     let orchestrator: Orchestrator
     let executor: AgentToolExecutor
 
-    init(claude script: String, opencode: String? = nil) throws {
+    init(claude script: String, opencode: String? = nil, lockTimeout: TimeInterval = RepositoryLock.defaultTimeout) throws {
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-agents-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         root = scratch
@@ -25,7 +25,28 @@ private struct Fixture {
         }
         let executables = Executables(paths: paths)
         orchestrator = Orchestrator(root: scratch.appendingPathComponent("runs"), executables: executables)
-        executor = AgentToolExecutor(orchestrator: orchestrator, executables: executables)
+        executor = AgentToolExecutor(orchestrator: orchestrator, executables: executables, lockTimeout: lockTimeout)
+    }
+
+    /// Moves a run's deadline to the past, as if its time had run out.
+    func expire(_ id: String) throws {
+        let record = root.appendingPathComponent("runs/\(id)/run.json")
+        var fields = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: record)) as? [String: Any])
+        fields["deadline"] = Date().addingTimeInterval(-5).timeIntervalSinceReferenceDate
+        try JSONSerialization.data(withJSONObject: fields).write(to: record)
+    }
+
+    /// The seconds a run was given, from its record.
+    func allowedSeconds(_ id: String) throws -> Int {
+        let record = try #require(try JSONSerialization.jsonObject(
+            with: Data(contentsOf: root.appendingPathComponent("runs/\(id)/run.json"))
+        ) as? [String: Any])
+        return Int(((try #require(record["deadline"] as? Double)) - (try #require(record["started"] as? Double))).rounded())
+    }
+
+    /// Makes a file look as if it was last written `seconds` ago.
+    func backdate(_ path: String, by seconds: TimeInterval) throws {
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-seconds)], ofItemAtPath: path)
     }
 
     func cleanUp() { try? FileManager.default.removeItem(at: root) }
@@ -895,4 +916,262 @@ echo '{"result":"done","is_error":false}'
 
     #expect(report.contains("gate: no audit — a small change (1 line); review it yourself."))
     #expect(reviewRuns(in: fixture.orchestrator).isEmpty)
+}
+
+// MARK: - Deadlines, stale claims, the merge lock, the file list
+
+@Test func aWorkerPastItsDeadlineIsReportedAsFailedNotAsCancelledByYou() async throws {
+    let fixture = try Fixture(claude: "cat >/dev/null; sleep 60")
+    defer { fixture.cleanUp() }
+
+    let id = try await fixture.spawn(["minutes": 1])
+    #expect(try fixture.allowedSeconds(id) == 60)
+    #expect(try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0]).hasPrefix("[\(id)] running · "))
+
+    try fixture.expire(id)
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+
+    #expect(report.hasPrefix("[\(id)] FAILED (timed out) · "))
+    #expect(report.contains("timed out after 1 min"))
+    #expect(!report.contains("cancelled"))
+    #expect(try await fixture.call("agent_list").hasPrefix("[\(id)] FAILED (timed out) · "))
+    // Cancelling it afterwards changes nothing.
+    #expect(try await fixture.call("agent_cancel", ["id": .string(id)]).hasPrefix("[\(id)] FAILED (timed out) · "))
+}
+
+@Test func minutesMustBeAWholeNumberFromOneTo180() async throws {
+    let fixture = try Fixture(claude: answers)
+    defer { fixture.cleanUp() }
+    let refusal = ToolError("minutes must be a whole number from 1 to 180")
+
+    await #expect(throws: refusal) { try await fixture.spawn(["minutes": 0]) }
+    await #expect(throws: refusal) { try await fixture.spawn(["minutes": 181]) }
+    await #expect(throws: refusal) { try await fixture.spawn(["minutes": .number(2.5)]) }
+    await #expect(throws: refusal) { try await fixture.spawn(["minutes": "ten"]) }
+    let id = try await fixture.spawn(["minutes": 180])
+    #expect(try fixture.allowedSeconds(id) == 180 * 60)
+}
+
+@Test func aRunningAgentThatHasWrittenNothingForMinutesSaysSo() async throws {
+    let fixture = try Fixture(claude: "cat >/dev/null; sleep 60")
+    defer { fixture.cleanUp() }
+
+    let id = try await fixture.spawn()
+    let fresh = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+    #expect(!fresh.contains("silent for"))
+
+    // The shell makes the two files as it starts.
+    let stderr = fixture.root.appendingPathComponent("runs/\(id)/stderr")
+    for _ in 0..<200 where !FileManager.default.fileExists(atPath: stderr.path) {
+        try await Task.sleep(for: .milliseconds(25))
+    }
+    for name in ["stdout", "stderr"] {
+        try fixture.backdate(fixture.root.appendingPathComponent("runs/\(id)/\(name)").path, by: 300)
+    }
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+    #expect(report.hasPrefix("[\(id)] running · "))
+    #expect(report.contains(" · silent for 30"))
+
+    // One stream written to is enough to be heard.
+    try fixture.backdate(fixture.root.appendingPathComponent("runs/\(id)/stderr").path, by: 5)
+    #expect(try await !fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0]).contains("silent for"))
+    _ = try await fixture.call("agent_cancel", ["id": .string(id)])
+}
+
+/// Spawns an editing worker that leaves a file, waits for it to finish
+/// without going through agent_wait (which would start the audit), and
+/// returns its id along with the audit claim's path.
+private func finishedDelivery(_ fixture: Fixture, in repository: URL) async throws -> (id: String, claim: URL) {
+    let id = try await fixture.spawn(["access": "edit", "audit": true, "directory": .string(repository.path)])
+    _ = try await fixture.orchestrator.wait(ids: [id], timeout: 10)
+    return (id, fixture.root.appendingPathComponent("runs/\(id)/audit"))
+}
+
+@Test func aPendingClaimOlderThanAMinuteIsAbandonedAndTheNextWaitAuditsAgain() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: audits)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let (id, claim) = try await finishedDelivery(fixture, in: repository)
+
+    // A helper died between the claim and the auditor's id.
+    try "pending".write(to: claim, atomically: true, encoding: .utf8)
+    try fixture.backdate(claim.path, by: 61)
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+
+    #expect(report.contains("gate: audit "))
+    #expect(report.contains(" started — agent_wait on it"))
+    #expect(!report.contains("audit starting"))
+    let started = reviewRuns(in: fixture.orchestrator)
+    #expect(started.count == 1)
+    #expect(try String(contentsOf: claim, encoding: .utf8) == started.first?.id)
+    // The automatic auditor gets 8 minutes, not 45.
+    #expect(try fixture.allowedSeconds(try #require(started.first?.id)) == 8 * 60)
+}
+
+@Test func aFreshPendingClaimStillMeansAnAuditIsStarting() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: audits)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let (id, claim) = try await finishedDelivery(fixture, in: repository)
+
+    try "pending".write(to: claim, atomically: true, encoding: .utf8)
+    try fixture.backdate(claim.path, by: 30)
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+
+    #expect(report.hasSuffix("gate: audit starting"))
+    #expect(reviewRuns(in: fixture.orchestrator).isEmpty)
+}
+
+@Test func anAbandonedPendingClaimDoesNotBlockTheMerge() async throws {
+    let fixture = try Fixture(claude: leavesAFile)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let (id, claim) = try await finishedDelivery(fixture, in: repository)
+
+    try "pending".write(to: claim, atomically: true, encoding: .utf8)
+    try fixture.backdate(claim.path, by: 61)
+    let result = try await fixture.call("agent_merge", ["id": .string(id)])
+
+    #expect(result.contains("Merged vitra/\(id) into the checkout at "))
+}
+
+@Test func aTimedOutAuditSaysSoBlocksNothingAndTheMergeGoesThrough() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: keepsReading)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let id = try await fixture.spawn(["access": "edit", "audit": true, "directory": .string(repository.path)])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let auditID = try String(contentsOf: fixture.root.appendingPathComponent("runs/\(id)/audit"), encoding: .utf8)
+
+    // Still reading: the merge is refused.
+    await #expect(throws: ToolError("the audit \(auditID) is still reading this worktree; agent_wait on it first")) {
+        try await fixture.call("agent_merge", ["id": .string(id)])
+    }
+
+    try fixture.expire(auditID)
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+    #expect(report.hasSuffix("gate: audit \(auditID) timed out — review this delivery yourself."))
+    #expect(report.contains("merge: agent_merge \(id)"))
+    #expect(try await fixture.call("agent_merge", ["id": .string(id)]).contains("Merged vitra/\(id) into the checkout at "))
+}
+
+@Test func aTimedOutAuditIsNotAnObstacleEvenWhenTheMergeIsTheFirstToSeeIt() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: keepsReading)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let id = try await fixture.spawn(["access": "edit", "audit": true, "directory": .string(repository.path)])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let auditID = try String(contentsOf: fixture.root.appendingPathComponent("runs/\(id)/audit"), encoding: .utf8)
+
+    try fixture.expire(auditID)
+    #expect(try await fixture.call("agent_merge", ["id": .string(id)]).contains("Merged vitra/\(id) into the checkout at "))
+}
+
+@Test func anAuditThatWasCancelledBlocksNothingEither() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: keepsReading)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let id = try await fixture.spawn(["access": "edit", "audit": true, "directory": .string(repository.path)])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let auditID = try String(contentsOf: fixture.root.appendingPathComponent("runs/\(id)/audit"), encoding: .utf8)
+
+    _ = try await fixture.call("agent_cancel", ["id": .string(auditID)])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+    #expect(report.hasSuffix(" cancelled — review this delivery yourself."))
+    #expect(try await fixture.call("agent_merge", ["id": .string(id)]).contains("Merged vitra/\(id)"))
+}
+
+/// Holds the repository's merge lock the way another helper process would.
+private func holdLock(_ repository: URL) throws -> Int32 {
+    let path = try #require(RepositoryLock.lockPath(repository.path))
+    let descriptor = open(path, O_RDWR | O_CREAT, 0o600)
+    try #require(descriptor >= 0)
+    try #require(flock(descriptor, LOCK_EX | LOCK_NB) == 0)
+    return descriptor
+}
+
+private func release(_ descriptor: Int32) {
+    flock(descriptor, LOCK_UN)
+    close(descriptor)
+}
+
+@Test func aMergeWhileAnotherHoldsTheRepositoryLockReportsBusyThenGoesThroughOnceItIsFree() async throws {
+    // Waiting for the lock is bounded: a merge stuck behind a slow hook must
+    // not hang every other call, so the answer is "busy, try again".
+    let fixture = try Fixture(claude: leavesAFile, lockTimeout: 0.3)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let id = try await fixture.spawn(["access": "edit", "audit": false, "directory": .string(repository.path)])
+    _ = try await fixture.orchestrator.wait(ids: [id], timeout: 10)
+
+    let held = try holdLock(repository)
+    do {
+        _ = try await fixture.call("agent_merge", ["id": .string(id)])
+        Issue.record("a merge should not run while the lock is held")
+    } catch let error as ToolError {
+        #expect(error.message.hasPrefix("another agent_merge or audit start is in progress in "))
+    }
+    // Nothing was touched.
+    #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("runs/\(id)/tree").path))
+    release(held)
+
+    #expect(try await fixture.call("agent_merge", ["id": .string(id)]).contains("Merged vitra/\(id)"))
+}
+
+@Test func theAuditStartWaitsOnTheSameLockAndIsRetriedByTheNextWait() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: audits, lockTimeout: 0.3)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let (id, claim) = try await finishedDelivery(fixture, in: repository)
+
+    let held = try holdLock(repository)
+    let busy = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+    #expect(busy.hasSuffix("gate: audit not started, the repository is busy — agent_wait again to start it."))
+    #expect(!FileManager.default.fileExists(atPath: claim.path))
+    #expect(reviewRuns(in: fixture.orchestrator).isEmpty)
+    release(held)
+
+    let started = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+    #expect(started.contains(" started — agent_wait on it"))
+    #expect(reviewRuns(in: fixture.orchestrator).count == 1)
+}
+
+@Test func theReportListsTheChangedFilesAndCapsThemAtEight() async throws {
+    let fixture = try Fixture(
+        claude: #"cat >/dev/null; for i in 0 1 2 3 4 5 6 7 8 9; do echo x > f$i.txt; done; echo '{"result":"done","is_error":false}'"#
+    )
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn(["access": "edit", "audit": false, "directory": .string(repository.path)])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+
+    let lines = report.split(separator: "\n").map(String.init)
+    let branch = try #require(lines.firstIndex { $0.hasPrefix("changes on branch vitra/\(id) ") })
+    #expect(lines[branch].hasSuffix("10 files changed, 10 insertions(+)"))
+    #expect(Array(lines[(branch + 1)...(branch + 8)]) == (0..<8).map { "  f\($0).txt | +1 -0" })
+    #expect(lines[branch + 9] == "  and 2 more")
+    #expect(lines[branch + 10] == "merge: agent_merge \(id)")
+}
+
+@Test func aSmallBranchListsEveryFileAndNoMoreLine() async throws {
+    let fixture = try Fixture(claude: leavesAFile)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn(["access": "edit", "audit": false, "directory": .string(repository.path)])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+
+    #expect(report.contains("\n  from-worker.txt | +1 -0\nmerge: agent_merge \(id)"))
+    #expect(!report.contains(" more"))
 }

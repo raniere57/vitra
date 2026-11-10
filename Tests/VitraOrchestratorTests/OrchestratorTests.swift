@@ -967,6 +967,141 @@ esac
     #expect(waited.first?.output?.text.count == 10000)
 }
 
+// MARK: - Deadlines and empty answers
+
+/// Moves a run's deadline to the past, as if its time had run out.
+private func expire(_ id: String, in sandbox: Sandbox) throws {
+    let record = sandbox.root.appendingPathComponent("runs/\(id)/run.json")
+    var fields = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: record)) as? [String: Any])
+    fields["deadline"] = Date().addingTimeInterval(-5).timeIntervalSinceReferenceDate
+    try JSONSerialization.data(withJSONObject: fields).write(to: record)
+}
+
+/// The seconds between a record's `started` and `deadline`.
+private func allowedSeconds(_ id: String, in sandbox: Sandbox) throws -> Int {
+    let record = try #require(try JSONSerialization.jsonObject(
+        with: Data(contentsOf: sandbox.root.appendingPathComponent("runs/\(id)/run.json"))
+    ) as? [String: Any])
+    let deadline = try #require(record["deadline"] as? Double)
+    let started = try #require(record["started"] as? Double)
+    return Int((deadline - started).rounded())
+}
+
+@Test func aRunPastItsDeadlineIsCancelledAndReportedAsATimeoutThatCountsAsFailed() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    let orchestrator = try sandbox.orchestrator(claude: startsAChild)
+    let id = try orchestrator.spawn(sandbox.spec(label: "hung"))
+    let worker = try await pid(in: sandbox.project.appendingPathComponent("worker.pid"))
+
+    // The default is 45 minutes, written into the record at spawn.
+    #expect(try allowedSeconds(id, in: sandbox) == Orchestrator.defaultMinutes * 60)
+    #expect(try orchestrator.status(id).state == .running)
+
+    try expire(id, in: sandbox)
+    let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)
+
+    #expect(run.state == .finished(exitCode: Orchestrator.timeoutExitCode))
+    #expect(run.output?.isError == true)
+    #expect(run.output?.text == "timed out after 45 min")
+    #expect(run.timedOutAfter == 45)
+    #expect(try await isGone(worker))
+
+    // The same on every later look, from the cached summary too.
+    #expect(try orchestrator.status(id).output?.text == "timed out after 45 min")
+    #expect(orchestrator.recent(limit: 5).first?.output?.text == "timed out after 45 min")
+    let score = try #require(Scoreboard.scores([run]).first)
+    #expect(score.runs == 1)
+    #expect(score.failures == 1)
+}
+
+@Test func theMinutesOfASpawnSetItsDeadlineAndMustBeFromOneTo180() throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    let orchestrator = try sandbox.orchestrator(claude: answersDone)
+
+    for bad in [0, 181, -3] {
+        let spec = WorkerSpec(cli: .claude, model: "haiku", prompt: "go", directory: sandbox.project.path, effort: "low", minutes: bad)
+        #expect(throws: OrchestratorError.invalidSpec("minutes must be a whole number from 1 to 180")) {
+            try orchestrator.spawn(spec)
+        }
+    }
+    let spec = WorkerSpec(cli: .claude, model: "haiku", prompt: "go", directory: sandbox.project.path, effort: "low", minutes: 3)
+    let id = try orchestrator.spawn(spec)
+    #expect(try allowedSeconds(id, in: sandbox) == 180)
+}
+
+@Test func aRunThatFinishedBeforeItsDeadlineIsNotTouchedByIt() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    let orchestrator = try sandbox.orchestrator(claude: answersDone)
+    let id = try orchestrator.spawn(sandbox.spec())
+    _ = try await orchestrator.wait(ids: [id], timeout: 10)
+
+    try expire(id, in: sandbox)
+    let run = try orchestrator.status(id)
+    #expect(run.state == .finished(exitCode: 0))
+    #expect(run.output?.text == "done")
+    #expect(run.timedOutAfter == nil)
+}
+
+@Test func aRunningRunSaysHowLongItsStreamsHaveBeenSilent() throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    let orchestrator = try sandbox.orchestrator(claude: "cat >/dev/null; sleep 30")
+    let id = try orchestrator.spawn(sandbox.spec())
+    defer { try? orchestrator.cancel(id) }
+
+    // The shell makes the two files as it starts.
+    for _ in 0..<200 where !FileManager.default.fileExists(atPath: sandbox.root.appendingPathComponent("runs/\(id)/stderr").path) {
+        usleep(25_000)
+    }
+    let fresh = try #require(try orchestrator.status(id).silentFor)
+    #expect(fresh < 60)
+    let longAgo = Date().addingTimeInterval(-300)
+    for name in ["stdout", "stderr"] {
+        try FileManager.default.setAttributes(
+            [.modificationDate: longAgo], ofItemAtPath: sandbox.root.appendingPathComponent("runs/\(id)/\(name)").path
+        )
+    }
+    let silent = try #require(try orchestrator.status(id).silentFor)
+    #expect(silent >= 299 && silent < 330)
+}
+
+@Test func anEmptyAnswerFromACleanExitIsAFailure() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    let orchestrator = try sandbox.orchestrator(claude: #"cat >/dev/null; echo '{"result":"   ","is_error":false}'"#)
+
+    let id = try orchestrator.spawn(sandbox.spec())
+    let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)
+
+    #expect(run.state == .finished(exitCode: 0))
+    #expect(run.output?.isError == true)
+    #expect(run.output?.text == "finished without an answer")
+    #expect(try #require(Scoreboard.scores([run]).first).failures == 1)
+}
+
+@Test func anEmptyAnswerFromAnEditingWorkerWithCommitsIsStillADelivery() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    try sandbox.makeRepository()
+    let silentEditor = #"cat >/dev/null; printf 'changed\n' > from-worker.txt; echo '{"result":"","is_error":false}'"#
+    let orchestrator = try sandbox.orchestrator(claude: silentEditor)
+
+    let id = try orchestrator.spawn(sandbox.spec(access: .edit))
+    let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)
+    #expect(run.output?.isError == false)
+    #expect(run.output?.text == "no answer; see the changes")
+
+    // An editing worker that changed nothing has no delivery to show.
+    let idle = try sandbox.orchestrator(claude: #"cat >/dev/null; echo '{"result":"","is_error":false}'"#)
+    let nothing = try idle.spawn(sandbox.spec(access: .edit))
+    let empty = try #require(try await idle.wait(ids: [nothing], timeout: 10).first)
+    #expect(empty.output?.isError == true)
+    #expect(empty.output?.text == "finished without an answer")
+}
+
 private extension URL {
     /// The same URL, with its folder made, for writing a file into it.
     func createDirectoryIfNeeded() -> URL {
