@@ -11,6 +11,7 @@ import Foundation
 ///     <root>/<id>/exit        the exit code, once the worker is done
 ///     <root>/<id>/cancelled   present when the run was cancelled
 ///     <root>/<id>/rating.json the orchestrator's verdict on the delivery
+///     <root>/<id>/tree        an editing worker's own worktree, when it got one
 ///
 /// There is no daemon. The process that spawns a worker is `vitra mcp`, which
 /// lives only as long as the session that started it, so nothing in memory can
@@ -64,52 +65,154 @@ public struct Orchestrator: Sendable {
             throw .spawnFailed("\(error.localizedDescription)")
         }
 
-        // The shell is there for two things the worker cannot do for itself:
-        // point its three streams at files, and write its exit code down once
-        // it is gone. The code is written to a temporary name and moved into
-        // place so a reader never sees a half-written file.
+        // An editing worker is given a tree of its own before it starts, so
+        // that two of them in one checkout cannot overwrite each other.
+        let worktree: Worktree?
+        do {
+            worktree = try makeWorktree(id: id, for: spec, run: directory)
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
+
+        // The shell is there for three things the worker cannot do for itself:
+        // point its three streams at files, put whatever it left uncommitted
+        // on its branch, and write its exit code down once it is gone. The
+        // code is written to a temporary name and moved into place so a
+        // reader never sees a half-written file.
         //
         // The prompt reaches the worker on stdin where the CLI reads it there,
         // and otherwise as one last argument. Either way it comes out of a
         // file: it is never spliced into this script, so nothing in it is
         // expanded or run by the shell.
+        //
+        // The commit message is a label from a model, so it reaches git the
+        // same way, through the environment, never as part of this text. The
+        // worker's own exit code is taken before the commit and written after
+        // it: whether its work could be committed is not its answer.
         let run = spec.cli.takesPromptOnStdin
             ? #""$@" <"$VITRA_RUN/prompt""#
             : #""$@" "$VITRA_PROMPT_FLAG$(cat "$VITRA_RUN/prompt")" </dev/null"#
         let script = """
         \(run) >"$VITRA_RUN/stdout" 2>"$VITRA_RUN/stderr"
-        echo $? >"$VITRA_RUN/exit.tmp" && mv "$VITRA_RUN/exit.tmp" "$VITRA_RUN/exit"
+        vitra_exit=$?
+        if [ -n "$VITRA_WORKTREE" ]; then
+            git -C "$VITRA_WORKTREE" add -A >/dev/null 2>&1
+            if ! git -C "$VITRA_WORKTREE" diff --cached --quiet >/dev/null 2>&1; then
+                GIT_AUTHOR_NAME='Vitra worker' GIT_AUTHOR_EMAIL='worker@vitra.local' \\
+                GIT_COMMITTER_NAME='Vitra worker' GIT_COMMITTER_EMAIL='worker@vitra.local' \\
+                git -C "$VITRA_WORKTREE" commit -q -m "$VITRA_COMMIT_MESSAGE" >/dev/null 2>&1
+            fi
+        fi
+        echo "$vitra_exit" >"$VITRA_RUN/exit.tmp" && mv "$VITRA_RUN/exit.tmp" "$VITRA_RUN/exit"
         """
+        var variables = [
+            "VITRA_RUN": directory.path, "VITRA_AGENT": id, "VITRA_PROMPT_FLAG": spec.cli.promptFlag ?? "",
+        ]
+        if let worktree {
+            variables["VITRA_WORKTREE"] = worktree.tree
+            let label = spec.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            variables["VITRA_COMMIT_MESSAGE"] = "vitra \(id): " + (label.isEmpty ? spec.worker : label)
+        }
         let environment = Self.workerEnvironment(from: ProcessInfo.processInfo.environment)
             // VITRA_AGENT is who the worker is to Vitra's browser: the tab it
             // opens there is filed under its run.
-            .merging([
-                "VITRA_RUN": directory.path, "VITRA_AGENT": id, "VITRA_PROMPT_FLAG": spec.cli.promptFlag ?? "",
-            ]) { _, new in new }
+            .merging(variables) { _, new in new }
 
         let pid: pid_t
         do {
             pid = try Self.launch(
                 ["/bin/sh", "-c", script, "vitra-worker", executable] + spec.arguments(browserConfig: browserConfig),
                 environment: environment,
-                directory: spec.directory
+                directory: worktree?.directory.path ?? spec.directory
             )
         } catch {
             try? FileManager.default.removeItem(at: directory)
+            if let worktree { _ = Git.run(["worktree", "prune"], in: worktree.top) }
             throw error
         }
 
         do {
-            let record = RunRecord(spec: spec, started: Date(), pid: pid, leaderStarted: Self.processStart(pid))
+            let record = RunRecord(
+                spec: spec,
+                started: Date(),
+                pid: pid,
+                leaderStarted: Self.processStart(pid),
+                repository: worktree?.top,
+                worktree: worktree?.tree,
+                branch: worktree?.branch,
+                baseCommit: worktree?.base
+            )
             try JSONEncoder().encode(record).write(to: directory.appendingPathComponent("run.json"), options: .atomic)
         } catch {
             // A worker with no record could never be found or cancelled again,
             // and it may be one that edits. It does not get to run.
             kill(-pid, SIGKILL)
             try? FileManager.default.removeItem(at: directory)
+            if let worktree { _ = Git.run(["worktree", "prune"], in: worktree.top) }
             throw .spawnFailed("\(error.localizedDescription)")
         }
         return id
+    }
+
+    /// The worktree an editing worker was given, and the branch its work goes
+    /// to.
+    private struct Worktree {
+        /// The top level of the repository it was made from.
+        let top: String
+        /// The worktree's own root, which is also what git commits from.
+        let tree: String
+        let branch: String
+        let base: String
+        /// Where the worker runs: the tree, or the same subfolder of the
+        /// repository it was sent to.
+        let directory: URL
+    }
+
+    /// Gives an editing worker a branch and a worktree of its own.
+    ///
+    /// Two editing workers in one checkout overwrite each other's files, so
+    /// each gets its own tree on its own branch, made from the repository's
+    /// current HEAD. A read worker writes nothing, and a directory outside a
+    /// repository has no worktree to be given: both run where they were sent,
+    /// as they always have.
+    private func makeWorktree(
+        id: String,
+        for spec: WorkerSpec,
+        run: URL
+    ) throws(OrchestratorError) -> Worktree? {
+        guard spec.access == .edit else { return nil }
+        let topLevel = (Git.output(["rev-parse", "--show-toplevel"], in: spec.directory) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !topLevel.isEmpty else { return nil }
+
+        // Where the directory sits inside the repository, so the worker is
+        // sent to the same place in its worktree. git answers this itself,
+        // which keeps symlinks out of a comparison of two paths.
+        let prefix = (Git.output(["rev-parse", "--show-prefix"], in: spec.directory) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // The base is read before the branch exists: the branch is made from
+        // it, and the report measures the worker's work against it.
+        let head = Git.run(["rev-parse", "HEAD"], in: topLevel)
+        guard head.succeeded else {
+            throw .spawnFailed(head.output.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        let base = head.output.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let tree = run.appendingPathComponent("tree")
+        let branch = "vitra/\(id)"
+        let added = Git.run(["worktree", "add", "-b", branch, tree.path, "HEAD"], in: topLevel)
+        guard added.succeeded else {
+            throw .spawnFailed(added.output.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
+        let directory = prefix.isEmpty ? tree : tree.appendingPathComponent(prefix)
+        // A directory that exists only on disk is not in the repository, so
+        // the checkout has no counterpart: make it, rather than sending the
+        // worker to a path that is not there.
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return Worktree(top: topLevel, tree: tree.path, branch: branch, base: base, directory: directory)
     }
 
     /// Creates the directory of a new run and returns it with its id.
@@ -336,6 +439,10 @@ public struct Orchestrator: Sendable {
             ended: ended,
             output: output,
             errorTail: errorTail,
+            repository: record.repository,
+            worktree: record.worktree,
+            branch: record.branch,
+            baseCommit: record.baseCommit,
             rating: (try? Data(contentsOf: file(id, "rating.json")))
                 .flatMap { try? JSONDecoder().decode(Rating.self, from: $0) }
         )
@@ -411,5 +518,43 @@ public struct Orchestrator: Sendable {
         let text = String(decoding: (try? handle.readToEnd()) ?? Data(), as: UTF8.self)
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+/// Runs git for the orchestrator and for the report it hands back.
+public enum Git {
+    /// Runs `git` with `arguments` in `directory`, and answers whether it
+    /// succeeded along with everything it printed.
+    ///
+    /// Both streams come back together: git says why a command failed on
+    /// stderr, and that reason is what a caller has to show. The directory is
+    /// where the command stands rather than one of its arguments, so a caller
+    /// names only the command and the revisions it works on.
+    static func run(_ arguments: [String], in directory: String) -> (succeeded: Bool, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git"] + arguments
+        process.currentDirectoryURL = URL(fileURLWithPath: directory)
+        var environment = ProcessInfo.processInfo.environment
+        // A read-only command such as the diff in a report must not take the
+        // index lock out from under the user's own git in the same repository.
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
+        process.environment = environment
+        process.standardInput = FileHandle.nullDevice
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        guard (try? process.run()) != nil else {
+            return (false, "git is not installed or could not be run")
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus == 0, String(decoding: data, as: UTF8.self))
+    }
+
+    /// What git printed, or nil when it failed.
+    public static func output(_ arguments: [String], in directory: String) -> String? {
+        let result = run(arguments, in: directory)
+        return result.succeeded ? result.output : nil
     }
 }

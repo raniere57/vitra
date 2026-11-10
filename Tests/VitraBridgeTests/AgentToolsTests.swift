@@ -197,6 +197,32 @@ private let answers = #"cat >/dev/null; echo '{"result":"the answer","is_error":
     #expect(!report.contains("a warning nobody needs"))
 }
 
+@Test func theReportOfAWorkedBranchSaysWhereItsWorkIsAndHowToMergeIt() {
+    let run = Run(
+        id: "0123abcd",
+        spec: WorkerSpec(cli: .claude, model: "haiku", prompt: "go", directory: "/work/vitra", access: .edit),
+        state: .finished(exitCode: 0),
+        pid: 1,
+        started: Date(timeIntervalSince1970: 0),
+        ended: Date(timeIntervalSince1970: 12),
+        output: WorkerOutput(text: "done", isError: false),
+        errorTail: nil,
+        repository: "/work/vitra",
+        worktree: "/Users/me/.vitra/runs/0123abcd/tree",
+        branch: "vitra/0123abcd",
+        baseCommit: "abcdef1234567890"
+    )
+
+    let report = AgentReport.full(run)
+    // A directory that is not a repository has nothing to diff: the branch
+    // holds no changes the report can see.
+    #expect(report.hasSuffix(
+        "\nchanges on branch vitra/0123abcd (base abcdef1): no changes"
+        + "\nmerge: git -C /work/vitra merge vitra/0123abcd — then clean up: "
+        + "git -C /work/vitra worktree remove /Users/me/.vitra/runs/0123abcd/tree && git -C /work/vitra branch -d vitra/0123abcd"
+    ))
+}
+
 @Test func agentToolsRunLocallyAndPanelToolsGoToTheWindow() async throws {
     struct Named: ToolExecutor {
         let name: String

@@ -38,8 +38,60 @@ private struct Sandbox {
         )
     }
 
-    func spec(prompt: String = "say done", access: WorkerAccess = .read) -> WorkerSpec {
-        WorkerSpec(cli: .claude, model: "haiku", prompt: prompt, directory: project.path, access: access, effort: "low")
+    func spec(
+        prompt: String = "say done",
+        access: WorkerAccess = .read,
+        directory: URL? = nil,
+        label: String? = nil
+    ) -> WorkerSpec {
+        WorkerSpec(
+            cli: .claude,
+            model: "haiku",
+            prompt: prompt,
+            directory: (directory ?? project).path,
+            access: access,
+            label: label,
+            effort: "low"
+        )
+    }
+
+    /// Makes the project a git repository holding one commit, which is what a
+    /// worktree has to be made from.
+    func makeRepository() throws {
+        try git(["init", "-q"])
+        try "initial\n".write(to: project.appendingPathComponent("README"), atomically: true, encoding: .utf8)
+        try git(["add", "-A"])
+        try git(["commit", "-q", "-m", "initial"])
+    }
+
+    /// Runs git in the project, or in `directory`, and returns what it printed.
+    ///
+    /// The identity is fixed here because the test machine may have no git
+    /// user configured, and a commit without one is refused.
+    @discardableResult
+    func git(_ arguments: [String], in directory: URL? = nil) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git"] + arguments
+        process.currentDirectoryURL = directory ?? project
+        var environment = ProcessInfo.processInfo.environment
+        environment["GIT_AUTHOR_NAME"] = "Vitra test"
+        environment["GIT_AUTHOR_EMAIL"] = "test@vitra.local"
+        environment["GIT_COMMITTER_NAME"] = "Vitra test"
+        environment["GIT_COMMITTER_EMAIL"] = "test@vitra.local"
+        process.environment = environment
+        process.standardInput = FileHandle.nullDevice
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let output = String(decoding: data, as: UTF8.self)
+        guard process.terminationStatus == 0 else {
+            throw OrchestratorError.spawnFailed("git \(arguments.joined(separator: " ")): \(output)")
+        }
+        return output
     }
 }
 
@@ -476,3 +528,139 @@ wait
     let withApp = Executables.discover(searchPath: bin.path, openCodeApp: app.path + "/opencode-cli")
     #expect(withApp.paths[.opencode] == app.path + "/opencode-cli")
 }
+
+/// A worker that writes a file and commits nothing: the shell around it is
+/// what is supposed to put the work on the branch.
+private let leavesAFile = #"""
+cat >/dev/null
+printf 'changed\n' > from-worker.txt
+echo '{"result":"done","is_error":false}'
+"""#
+
+@Test func anEditingWorkerGetsAWorktreeAndABranchOfItsOwn() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    try sandbox.makeRepository()
+    let base = try sandbox.git(["rev-parse", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)
+    let orchestrator = try sandbox.orchestrator(claude: leavesAFile)
+
+    let id = try orchestrator.spawn(sandbox.spec(access: .edit, label: "writing"))
+    let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)
+
+    #expect(run.state == .finished(exitCode: 0))
+    #expect(run.repository == sandbox.project.path)
+    #expect(run.worktree == sandbox.root.appendingPathComponent("runs/\(id)/tree").path)
+    #expect(run.branch == "vitra/\(id)")
+    #expect(run.baseCommit == base)
+
+    // The branch holds what the worker wrote, under one commit of the fixed
+    // identity, and the message names the run by its label.
+    #expect(try sandbox.git(["show", "vitra/\(id):from-worker.txt"]) == "changed\n")
+    #expect(try sandbox.git(["log", "-1", "--format=%s", "vitra/\(id)"]).trimmingCharacters(in: .whitespacesAndNewlines) == "vitra \(id): writing")
+    #expect(try sandbox.git(["log", "-1", "--format=%an <%ae>", "vitra/\(id)"]).trimmingCharacters(in: .whitespacesAndNewlines) == "Vitra worker <worker@vitra.local>")
+
+    // The checkout the worker was sent to is exactly as it was: nothing was
+    // written there, and the worktree lives under the run directory instead.
+    #expect(!FileManager.default.fileExists(atPath: sandbox.project.appendingPathComponent("from-worker.txt").path))
+    #expect(try sandbox.git(["status", "--porcelain"]).isEmpty)
+}
+
+@Test func anEditingWorkerThatFailsStillHasItsWorkCommittedAndItsOwnExitCode() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    try sandbox.makeRepository()
+    let orchestrator = try sandbox.orchestrator(claude: #"""
+    cat >/dev/null
+    printf 'half done\n' > part.txt
+    exit 7
+    """#)
+
+    let id = try orchestrator.spawn(sandbox.spec(access: .edit))
+    let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)
+
+    // Whatever the worker left is committed, but the shell still answers with
+    // the worker's own code: whether its work could be committed is not its
+    // answer.
+    #expect(run.state == .finished(exitCode: 7))
+    #expect(try sandbox.git(["show", "vitra/\(id):part.txt"]) == "half done\n")
+}
+
+@Test func anEditWorkerSentToASubfolderRunsInThatSubfolderOfItsWorktree() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    let subfolder = sandbox.project.appendingPathComponent("Packages/Core")
+    try FileManager.default.createDirectory(at: subfolder, withIntermediateDirectories: true)
+    try "let answer = 42\n".write(to: subfolder.appendingPathComponent("Source.swift"), atomically: true, encoding: .utf8)
+    try sandbox.makeRepository()
+    // Writes down where it ran; the shell then commits that file, which is
+    // what proves the whole path the worker was sent to.
+    let orchestrator = try sandbox.orchestrator(claude: #"""
+    cat >/dev/null
+    pwd > got-pwd.txt
+    echo '{"result":"done","is_error":false}'
+    """#)
+
+    let id = try orchestrator.spawn(sandbox.spec(access: .edit, directory: subfolder))
+    let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)
+    let tree = try #require(run.worktree)
+
+    #expect(run.state == .finished(exitCode: 0))
+    #expect(try sandbox.git(["show", "vitra/\(id):Packages/Core/got-pwd.txt"]) == tree + "/Packages/Core\n")
+    #expect(!FileManager.default.fileExists(atPath: subfolder.appendingPathComponent("got-pwd.txt").path))
+}
+
+@Test func readWorkersAndDirectoriesOutsideARepositoryRunInPlaceWithNoWorktree() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    try sandbox.makeRepository()
+    let orchestrator = try sandbox.orchestrator(claude: answersDone)
+
+    // A read worker writes nothing, so two of them cannot collide: it is not
+    // given a worktree, and runs in the directory it was sent to.
+    let readID = try orchestrator.spawn(sandbox.spec())
+    let read = try #require(try await orchestrator.wait(ids: [readID], timeout: 10).first)
+    #expect(try String(contentsOf: sandbox.project.appendingPathComponent("got-pwd.txt"), encoding: .utf8) == sandbox.project.path + "\n")
+    #expect(read.repository == nil)
+    #expect(read.worktree == nil)
+    #expect(read.branch == nil)
+    #expect(read.baseCommit == nil)
+
+    // An editing worker somewhere that is not a repository has no worktree to
+    // be given, and runs in place as it always did.
+    let plain = sandbox.root.appendingPathComponent("plain")
+    try FileManager.default.createDirectory(at: plain, withIntermediateDirectories: true)
+    let editID = try orchestrator.spawn(sandbox.spec(access: .edit, directory: plain))
+    let edit = try #require(try await orchestrator.wait(ids: [editID], timeout: 10).first)
+    #expect(try String(contentsOf: plain.appendingPathComponent("got-pwd.txt"), encoding: .utf8) == plain.path + "\n")
+    #expect(edit.repository == nil)
+    #expect(edit.worktree == nil)
+    #expect(edit.branch == nil)
+}
+
+@Test func aRunRecordWrittenWithoutTheWorktreeFieldsStillLoads() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    try sandbox.makeRepository()
+    let orchestrator = try sandbox.orchestrator(claude: leavesAFile)
+
+    let id = try orchestrator.spawn(sandbox.spec(access: .edit))
+    _ = try await orchestrator.wait(ids: [id], timeout: 10)
+
+    // A run written by an earlier version: the file has none of the fields
+    // added for worktrees, and must still be a run that can be read.
+    let record = sandbox.root.appendingPathComponent("runs/\(id)/run.json")
+    var fields = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: record)) as? [String: Any])
+    #expect(fields["branch"] != nil)
+    for name in ["repository", "worktree", "branch", "baseCommit"] {
+        fields.removeValue(forKey: name)
+    }
+    try JSONSerialization.data(withJSONObject: fields).write(to: record)
+
+    let loaded = try orchestrator.status(id)
+    #expect(loaded.state == .finished(exitCode: 0))
+    #expect(loaded.repository == nil)
+    #expect(loaded.worktree == nil)
+    #expect(loaded.branch == nil)
+    #expect(loaded.baseCommit == nil)
+}
+

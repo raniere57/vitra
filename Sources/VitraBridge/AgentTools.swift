@@ -16,7 +16,8 @@ public enum AgentTools {
             Use the cheapest model that does this kind of task well — agent_models lists what is available and agent_scores how each has done so far. \
             The worker sees nothing of this conversation, so the prompt must stand on its own: the goal, the files or area, and what done looks like. \
             Spawn several and then agent_wait on all of them to run work in parallel. \
-            Workers that edit at the same time need a directory each, such as a git worktree; two editing the same checkout will overwrite one another.
+            In a git repository each editing worker is given a worktree and a branch of its own automatically, so several can edit at once; its report says how to merge the branch. \
+            Outside a repository, give workers that edit at the same time a directory each: two editing the same checkout will overwrite one another.
             """,
             properties: [
                 "cli": [
@@ -339,7 +340,29 @@ enum AgentReport {
             // (When stderr was all the worker said, it is already the answer above.)
             lines.append("stderr: " + errorTail)
         }
+        lines.append(contentsOf: branchLines(run))
         return lines.joined(separator: "\n")
+    }
+
+    /// Where an editing worker's work is and how to take it.
+    ///
+    /// The worker was given a worktree and a branch of its own, so the
+    /// orchestrator never has to hunt for the files: these two lines say how
+    /// much the branch holds against the commit it was made from, and the
+    /// commands that put it on the branch the maestro is working on and then
+    /// take the worktree away.
+    private static func branchLines(_ run: Run) -> [String] {
+        guard let branch = run.branch, let base = run.baseCommit,
+              let top = run.repository, let tree = run.worktree
+        else { return [] }
+        let stat = Git.output(["diff", "--shortstat", "\(base)..\(branch)"], in: top)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return [
+            "changes on branch \(branch) (base \(base.prefix(7))): "
+                + (stat.map { $0.isEmpty ? "no changes" : $0 } ?? "no changes"),
+            "merge: git -C \(top) merge \(branch) — then clean up: "
+                + "git -C \(top) worktree remove \(tree) && git -C \(top) branch -d \(branch)",
+        ]
     }
 }
 
