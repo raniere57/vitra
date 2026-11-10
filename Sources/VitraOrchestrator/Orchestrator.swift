@@ -31,6 +31,9 @@ public struct Orchestrator: Sendable {
     /// How long a cancelled worker is given to stop before it is killed outright.
     private static let terminationGrace: TimeInterval = 2
     private static let idAttempts = 5
+    /// How much later than its directory's creation a run's `started` can be:
+    /// the worktree is made in between.
+    private static let startSkew: TimeInterval = 600
     /// What a shell reports for a child killed by the signals `cancel` sends:
     /// 128 plus SIGTERM, and 128 plus SIGKILL.
     private static let cancelExitCodes: Set<Int32> = [128 + SIGTERM, 128 + SIGKILL]
@@ -41,6 +44,9 @@ public struct Orchestrator: Sendable {
     private let browserConfig: String?
     /// The `vitra` binary a worker's own MCP configuration starts.
     private let vitraBinary: String?
+    /// What was already read about runs, so a finished run's stdout is parsed
+    /// once however often it is listed.
+    private let cache = RunCache()
 
     /// `browserConfig` is the MCP configuration that hands workers Vitra's
     /// browser. Left out, it is the one the app installed — for the real run
@@ -465,9 +471,13 @@ public struct Orchestrator: Sendable {
     // MARK: - Reading
 
     /// Where the run stands right now.
-    public func status(_ id: String) throws(OrchestratorError) -> Run {
+    ///
+    /// The answer comes back whole. Pass `fullText: false` to get it cut at
+    /// `RunSummary.textLimit` characters, which is what `recent` does, and
+    /// costs no read of stdout once the run has been seen finished.
+    public func status(_ id: String, fullText: Bool = true) throws(OrchestratorError) -> Run {
         guard let record = record(id) else { throw .unknownRun(id) }
-        return run(id, record)
+        return run(id, record, fullText: fullText)
     }
 
     /// Waits until every run has stopped or `timeout` seconds have passed, and
@@ -495,15 +505,36 @@ public struct Orchestrator: Sendable {
     }
 
     /// The most recently started runs, newest first.
+    ///
+    /// A finished run's answer is cut at `RunSummary.textLimit` characters
+    /// here; `status` has it whole.
+    ///
+    /// Only the newest are opened. The run directories are ordered by when
+    /// they were made, which is a moment before `started`: two spawns racing
+    /// can swap places, so everything made within `startSkew` of the last one
+    /// kept is opened as well, and the result is ordered by `started`.
     public func recent(limit: Int) -> [Run] {
-        // ponytail: decodes every run on disk and nothing ever prunes them.
-        // Fine for hundreds; add an index or an expiry when it is thousands.
-        let ids = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
-        return ids
-            .compactMap { id in record(id).map { (id, $0) } }
-            .sorted { $0.1.started > $1.1.started }
-            .prefix(max(limit, 0))
-            .map { run($0.0, $0.1) }
+        let wanted = max(limit, 0)
+        guard wanted > 0 else { return [] }
+        let keys: [URLResourceKey] = [.creationDateKey]
+        let urls = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: keys)) ?? []
+        // No date sorts as the newest: it is opened rather than skipped.
+        let newestFirst = urls
+            .map { ($0.lastPathComponent, (try? $0.resourceValues(forKeys: Set(keys)))?.creationDate ?? .distantFuture) }
+            .sorted { $0.1 > $1.1 }
+
+        var found: [(id: String, record: RunRecord)] = []
+        var cutoff = Date.distantPast
+        for (id, created) in newestFirst {
+            if created < cutoff { break }
+            guard let record = record(id) else { continue }
+            found.append((id, record))
+            if found.count == wanted { cutoff = created.addingTimeInterval(-Self.startSkew) }
+        }
+        return found
+            .sorted { $0.record.started > $1.record.started }
+            .prefix(wanted)
+            .map { run($0.id, $0.record, fullText: false) }
     }
 
     // MARK: - Rating
@@ -572,37 +603,45 @@ public struct Orchestrator: Sendable {
     /// run.
     private func record(_ id: String) -> RunRecord? {
         guard id.range(of: "^[0-9a-f]{8}$", options: .regularExpression) != nil,
-              let data = try? Data(contentsOf: file(id, "run.json")),
-              let record = try? JSONDecoder().decode(RunRecord.self, from: data),
-              record.pid > 1
+              let modified = modified(file(id, "run.json"))
         else { return nil }
+        // run.json is written once, but whoever replaces it is believed: the
+        // copy in memory is good only while the file's date is the one it was
+        // read at.
+        if let known = cache.record(id, modified: modified) { return known }
+        let record = (try? Data(contentsOf: file(id, "run.json")))
+            .flatMap { try? JSONDecoder().decode(RunRecord.self, from: $0) }
+            .flatMap { $0.pid > 1 ? $0 : nil }
+        cache.store(record: record, id, modified: modified)
         return record
     }
 
-    private func run(_ id: String, _ record: RunRecord) -> Run {
-        let state = state(id, record)
-        let ended: Date? = switch state {
-        case .finished: modified(file(id, "exit"))
-        case .cancelled: modified(file(id, "cancelled"))
-        case .running, .lost: nil
-        }
-        let errorTail = state == .running ? nil : tail(file(id, "stderr"))
+    private func run(_ id: String, _ record: RunRecord, fullText: Bool) -> Run {
+        // A run seen finished does not change again: its exit code is written
+        // once, so what it said is read from the summary, not from stdout.
+        let summary = cache.summary(id) ?? loadSummary(id)
+        let state = state(id, record, knownExit: summary?.exitCode)
+        let ended: Date?
+        let errorTail: String?
+        let output: WorkerOutput?
+        let commitError: String?
+        let worktreeSkipped: [String]
 
-        var output: WorkerOutput?
         if case let .finished(exitCode) = state {
-            // Decoded leniently: a worker killed mid-character, or one that
-            // printed bytes that are not text, still has an answer worth reading.
-            let stdout = String(decoding: (try? Data(contentsOf: file(id, "stdout"))) ?? Data(), as: UTF8.self)
-            // A CLI that dies before it starts — signed out, say — prints its
-            // reason on stderr and nothing at all on stdout. That reason is
-            // the answer then, not "printed nothing".
-            let isSilent = stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let parsed = isSilent && exitCode != 0 && errorTail != nil
-                ? WorkerOutput(text: errorTail ?? "", isError: true)
-                : WorkerOutput.parse(stdout, cli: record.spec.cli)
-            // Either signal is enough: a CLI can exit zero having reported a
-            // failure, and can die non-zero having printed half an answer.
-            output = exitCode == 0 ? parsed : parsed.failed(fallbackText: errorTail)
+            let settled = summary ?? makeSummary(id, record, exitCode: exitCode)
+            ended = settled.ended
+            errorTail = settled.errorTail
+            commitError = settled.commitError
+            worktreeSkipped = settled.worktreeSkipped
+            output = fullText && settled.isTextCut
+                ? parsedOutput(id, record, exitCode: exitCode, errorTail: settled.errorTail)
+                : settled.output
+        } else {
+            ended = state == .cancelled ? modified(file(id, "cancelled")) : nil
+            errorTail = state == .running ? nil : tail(file(id, "stderr"))
+            output = nil
+            commitError = self.commitError(id)
+            worktreeSkipped = self.worktreeSkipped(id)
         }
 
         return Run(
@@ -618,11 +657,68 @@ public struct Orchestrator: Sendable {
             worktree: record.worktree,
             branch: record.branch,
             baseCommit: record.baseCommit,
-            commitError: commitError(id),
-            rating: (try? Data(contentsOf: file(id, "rating.json")))
-                .flatMap { try? JSONDecoder().decode(Rating.self, from: $0) },
-            worktreeSkipped: worktreeSkipped(id)
+            commitError: commitError,
+            rating: rating(id),
+            worktreeSkipped: worktreeSkipped
         )
+    }
+
+    /// What the worker reported, from everything it printed.
+    private func parsedOutput(_ id: String, _ record: RunRecord, exitCode: Int32, errorTail: String?) -> WorkerOutput {
+        // Decoded leniently: a worker killed mid-character, or one that
+        // printed bytes that are not text, still has an answer worth reading.
+        let stdout = String(decoding: (try? Data(contentsOf: file(id, "stdout"))) ?? Data(), as: UTF8.self)
+        // A CLI that dies before it starts — signed out, say — prints its
+        // reason on stderr and nothing at all on stdout. That reason is
+        // the answer then, not "printed nothing".
+        let isSilent = stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let parsed = isSilent && exitCode != 0 && errorTail != nil
+            ? WorkerOutput(text: errorTail ?? "", isError: true)
+            : WorkerOutput.parse(stdout, cli: record.spec.cli)
+        // Either signal is enough: a CLI can exit zero having reported a
+        // failure, and can die non-zero having printed half an answer.
+        return exitCode == 0 ? parsed : parsed.failed(fallbackText: errorTail)
+    }
+
+    /// Reads a finished run once and writes down what came of it.
+    ///
+    /// The shell writes the exit code after stdout, stderr and the commit
+    /// error are final, so once there is a code none of them moves again.
+    private func makeSummary(_ id: String, _ record: RunRecord, exitCode: Int32) -> RunSummary {
+        let errorTail = tail(file(id, "stderr"))
+        let summary = RunSummary(
+            exitCode: exitCode,
+            ended: modified(file(id, "exit")),
+            errorTail: errorTail,
+            commitError: commitError(id),
+            worktreeSkipped: worktreeSkipped(id),
+            output: parsedOutput(id, record, exitCode: exitCode, errorTail: errorTail)
+        )
+        // A failed write only means the next look parses again.
+        if let data = try? JSONEncoder().encode(summary) {
+            try? data.write(to: file(id, "summary.json"), options: .atomic)
+        }
+        cache.store(summary: summary, id)
+        return summary
+    }
+
+    private func loadSummary(_ id: String) -> RunSummary? {
+        guard let data = try? Data(contentsOf: file(id, "summary.json")),
+              let summary = try? JSONDecoder().decode(RunSummary.self, from: data),
+              summary.version == RunSummary.version
+        else { return nil }
+        cache.store(summary: summary, id)
+        return summary
+    }
+
+    private func rating(_ id: String) -> Rating? {
+        let url = file(id, "rating.json")
+        let modified = modified(url)
+        if let known = cache.rating(id, modified: modified) { return known }
+        let rating = modified.flatMap { _ in try? Data(contentsOf: url) }
+            .flatMap { try? JSONDecoder().decode(Rating.self, from: $0) }
+        cache.store(rating: rating, id, modified: modified)
+        return rating
     }
 
     /// The lines of `.vitra/worktree` that could not be applied to the run's
@@ -642,7 +738,9 @@ public struct Orchestrator: Sendable {
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func state(_ id: String, _ record: RunRecord) -> Run.State {
+    /// `knownExit` is the exit code of a run already seen finished; the code
+    /// is written once, so the file need not be read again.
+    private func state(_ id: String, _ record: RunRecord, knownExit: Int32? = nil) -> Run.State {
         // An exit code outranks the cancelled marker. A cancelled worker is
         // killed before it can write one, so both being there means the worker
         // finished in the instant before the cancel reached it: its answer is
@@ -653,7 +751,7 @@ public struct Orchestrator: Sendable {
         // outlive the worker by long enough to write down that the worker died
         // of the signal. That is a cancelled run, not a failed one.
         let wasCancelled = FileManager.default.fileExists(atPath: file(id, "cancelled").path)
-        if let code = exitCode(id) {
+        if let code = knownExit ?? exitCode(id) {
             return wasCancelled && Self.cancelExitCodes.contains(code) ? .cancelled : .finished(exitCode: code)
         }
         if wasCancelled { return .cancelled }
