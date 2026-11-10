@@ -18,7 +18,8 @@ public enum AgentTools {
             The worker sees nothing of this conversation, so the prompt must stand on its own: the goal, the files or area, and what done looks like. \
             Spawn several and then agent_wait on all of them to run work in parallel. \
             In a git repository each editing worker is given a worktree and a branch of its own automatically, so several can edit at once; its report says how to merge the branch. \
-            Outside a repository, give workers that edit at the same time a directory each: two editing the same checkout will overwrite one another.
+            Outside a repository, give workers that edit at the same time a directory each: two editing the same checkout will overwrite one another. \
+            A finished editing delivery with commits is audited first by a cheap read-only worker from another provider: agent_wait starts it and says its id. Pass audit false for a change too small to be worth that gate.
             """,
             properties: [
                 "cli": [
@@ -53,6 +54,10 @@ public enum AgentTools {
                     "type": "string",
                     "enum": .array(TaskKind.allCases.map { .string($0.rawValue) }),
                     "description": "What kind of task this is, so the model is judged against others on the same kind: explore (read, search, map code), review (judge existing work), implement (write or change code, fixes included), test (write or run tests), docs, deploy (ship reviewed work to production and watch it land), or other.",
+                ],
+                "audit": [
+                    "type": "boolean",
+                    "description": "Default true: a finished editing delivery whose branch has commits is first audited by a cheap read-only worker from another provider, and agent_wait gives the audit's id. false skips that gate for this run, for a change too small to be worth it.",
                 ],
             ],
             required: ["cli", "model", "prompt", "directory"]
@@ -216,7 +221,10 @@ public struct AgentToolExecutor: ToolExecutor {
             kind: try kind(in: arguments),
             effort: arguments["effort"]?.stringValue,
             project: project,
-            commands: try commands(in: arguments)
+            commands: try commands(in: arguments),
+            // Only an explicit false turns the gate off: a missing argument
+            // is the default, which is on.
+            audit: arguments["audit"]?.boolValue == false ? false : nil
         )
         // Held to the trial and the effort ladder, unless the maestro says
         // why it cannot be: the record is only worth choosing by if it was
@@ -275,7 +283,92 @@ public struct AgentToolExecutor: ToolExecutor {
         let timeout = min(max(requested, 0), Self.longestTimeout)
 
         let runs = try await orchestrator.wait(ids: ids, timeout: TimeInterval(timeout))
-        return runs.map(AgentReport.full).joined(separator: "\n\n")
+        var gates: [String: String] = [:]
+        for run in runs {
+            // Reading the history and starting an auditor both touch the disk
+            // and one of them starts a process: keep them off the pool, as
+            // agent_spawn does.
+            if let gate = try? await Self.offThePool({ [self] in self.gate(for: run) }) {
+                gates[run.id] = gate
+            }
+        }
+        return runs.map { run in
+            let report = AgentReport.full(run)
+            guard let gate = gates[run.id] else { return report }
+            return report + "\n" + gate
+        }.joined(separator: "\n\n")
+    }
+
+    /// The quality gate on a finished editing delivery: starts a cheap
+    /// read-only auditor from another provider once, and reports the audit
+    /// that already exists on every later wait.
+    ///
+    /// Nil means there is nothing to gate: the run did not finish cleanly, did
+    /// not edit, has no branch or no commit on it, or its spawn said `audit:
+    /// false`. A gate that cannot be started is said in the report rather than
+    /// failing the wait: the delivery is still the orchestrator's to review.
+    private func gate(for run: Run) -> String? {
+        guard case .finished(exitCode: 0) = run.state,
+              run.output?.isError != true,
+              run.spec.access == .edit,
+              let branch = run.branch,
+              let base = run.baseCommit,
+              let repository = run.repository,
+              let worktree = run.worktree,
+              let directory = orchestrator.directory(of: run.id)
+        else { return nil }
+
+        let record = directory.appendingPathComponent("audit")
+        if let existing = (try? String(contentsOf: record, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !existing.isEmpty {
+            return (try? orchestrator.status(existing)).map(AgentReport.gate)
+                ?? "gate: audit \(existing) — its record is gone; review this delivery yourself."
+        }
+        guard run.spec.audit != false else { return nil }
+
+        // No commit means no diff to audit; the report already says the edits
+        // are still uncommitted in the worktree.
+        let counted = Git.output(["rev-list", "--count", "\(base)..\(branch)"], in: repository)
+        guard let commits = counted.flatMap({ Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }),
+              commits > 0
+        else { return nil }
+
+        let history = orchestrator.recent(limit: Self.scoredRuns)
+        guard let choice = Audit.chooseAuditor(
+            implementer: run.spec,
+            history: history,
+            installed: Set(executables.paths.keys)
+        ) else {
+            return "gate: no auditor from another provider is available — review this delivery yourself."
+        }
+
+        let diff = Git.output(["diff", "\(base)..\(branch)"], in: repository) ?? ""
+        let label = run.spec.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let spec = WorkerSpec(
+            cli: choice.cli,
+            model: choice.model,
+            prompt: Audit.prompt(task: run.spec.prompt, diff: diff, label: run.spec.label),
+            directory: worktree,
+            access: .read,
+            label: "auditoria: " + (label.isEmpty ? run.id : label),
+            kind: .review,
+            effort: choice.effort,
+            project: run.spec.project
+        )
+        do {
+            let id = try orchestrator.spawn(spec)
+            do {
+                try Data(id.utf8).write(to: record, options: .atomic)
+            } catch {
+                // An audit nobody can find again would be started twice and
+                // paid for twice: stop it rather than leave it unrecorded.
+                try? orchestrator.cancel(id)
+                return "gate: could not record the audit — review this delivery yourself."
+            }
+            return "gate: audit \(id) by \(spec.worker) started — agent_wait on it and read its verdict before reviewing yourself."
+        } catch {
+            return "gate: could not start an auditor: \(error) — review this delivery yourself."
+        }
     }
 
     /// Runs blocking work on a thread of its own.
@@ -352,6 +445,20 @@ enum AgentReport {
         }
         lines.append(contentsOf: branchLines(run))
         return lines.joined(separator: "\n")
+    }
+
+    /// The gate line for an audit that already exists: who is auditing and
+    /// where it stands, so a second wait reports it instead of starting another.
+    static func gate(_ audit: Run) -> String {
+        let state: String
+        switch audit.state {
+        case .running: state = "running"
+        case .cancelled: state = "cancelled"
+        case .lost: state = "LOST"
+        case let .finished(exitCode):
+            state = audit.output?.isError == true || exitCode != 0 ? "FAILED (exit \(exitCode))" : "finished"
+        }
+        return "gate: audit \(audit.id) by \(audit.spec.worker) \(state) — read its verdict before reviewing yourself."
     }
 
     /// Where an editing worker's work is and how to take it.

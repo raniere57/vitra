@@ -13,6 +13,7 @@ import Foundation
 ///                             worker's work, when it could not
 ///     <root>/<id>/cancelled   present when the run was cancelled
 ///     <root>/<id>/rating.json the orchestrator's verdict on the delivery
+///     <root>/<id>/audit       the id of the worker auditing this delivery
 ///     <root>/<id>/tree        an editing worker's own worktree, when it got one
 ///
 /// There is no daemon. The process that spawns a worker is `vitra mcp`, which
@@ -364,6 +365,16 @@ public struct Orchestrator: Sendable {
             // would wake sooner, and would matter with hundreds of workers.
             try await Task.sleep(for: Self.pollInterval)
         }
+    }
+
+    /// Where a run keeps its files, or nil when there is no such run.
+    ///
+    /// The caller that starts an audit writes the auditor's id beside the run
+    /// it belongs to, so a later `agent_wait` finds it instead of starting a
+    /// second audit.
+    public func directory(of id: String) -> URL? {
+        guard record(id) != nil else { return nil }
+        return root.appendingPathComponent(id)
     }
 
     /// The most recently started runs, newest first.

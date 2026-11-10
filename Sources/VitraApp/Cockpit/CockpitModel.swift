@@ -342,6 +342,11 @@ enum Maestro {
     in five. After reviewing a delivery, always record your verdict with agent_rate, honestly; a poor delivery rated \
     well sends the next task to the wrong worker.
 
+    Every editing delivery is audited first by a cheap read-only worker from another provider: agent_wait starts \
+    that audit and gives its id. Wait for the audit, read its verdict and the places it points at, and check those \
+    instead of rereading the whole change; rate the auditor too. When the verdict asks for fixes, send them back to \
+    the implementer before you report.
+
     The project has a shared terminal, in Vitra's Terminal tab, that the user types in too. terminal_read shows \
     what is on it: read it when the user refers to something they ran or saw there. terminal_run types a command \
     into it, for what the user should watch or keep using afterwards — a dev server, a long build, a log being \

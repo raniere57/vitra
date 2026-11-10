@@ -80,6 +80,12 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
     /// the start of a command line: `bun test` allows `bun test src/x.test.ts`.
     /// A worker that can edit but not run its tests cannot check its own work.
     public let commands: [String]
+    /// Whether a finished editing delivery is sent to an auditor first.
+    ///
+    /// Nil is the default and means yes; only an explicit false turns the
+    /// gate off. Optional so a record written before the gate existed still
+    /// loads, and so the common case leaves nothing extra in run.json.
+    public let audit: Bool?
 
     public init(
         cli: WorkerCLI,
@@ -91,7 +97,8 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
         kind: TaskKind? = nil,
         effort: String? = nil,
         project: String? = nil,
-        commands: [String] = []
+        commands: [String] = [],
+        audit: Bool? = nil
     ) {
         self.cli = cli
         self.model = model
@@ -103,12 +110,13 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
         self.effort = effort
         self.project = project
         self.commands = commands
+        self.audit = audit
     }
 
     // Runs recorded before a field existed must still load, and a field that
     // was never set must not be written as a pile of nulls and empty lists.
     private enum CodingKeys: String, CodingKey {
-        case cli, model, prompt, directory, access, label, kind, effort, project, commands
+        case cli, model, prompt, directory, access, label, kind, effort, project, commands, audit
     }
 
     public init(from decoder: Decoder) throws {
@@ -123,6 +131,7 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
         effort = try values.decodeIfPresent(String.self, forKey: .effort)
         project = try values.decodeIfPresent(String.self, forKey: .project)
         commands = try values.decodeIfPresent([String].self, forKey: .commands) ?? []
+        audit = try values.decodeIfPresent(Bool.self, forKey: .audit)
     }
 
     static let mostCommands = 8

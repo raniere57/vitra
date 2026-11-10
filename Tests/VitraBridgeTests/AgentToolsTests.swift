@@ -6,20 +6,26 @@ import Testing
 /// An executor over a scratch runs directory whose `claude` is a shell script.
 private struct Fixture {
     let root: URL
+    let orchestrator: Orchestrator
     let executor: AgentToolExecutor
 
-    init(claude script: String) throws {
+    init(claude script: String, opencode: String? = nil) throws {
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-agents-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         root = scratch
         let fake = scratch.appendingPathComponent("fake-claude")
         try ("#!/bin/sh\n" + script + "\n").write(to: fake, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
-        let executables = Executables(paths: [.claude: fake.path])
-        executor = AgentToolExecutor(
-            orchestrator: Orchestrator(root: scratch.appendingPathComponent("runs"), executables: executables),
-            executables: executables
-        )
+        var paths: [WorkerCLI: String] = [.claude: fake.path]
+        if let opencode {
+            let fakeOpenCode = scratch.appendingPathComponent("fake-opencode")
+            try ("#!/bin/sh\n" + opencode + "\n").write(to: fakeOpenCode, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeOpenCode.path)
+            paths[.opencode] = fakeOpenCode.path
+        }
+        let executables = Executables(paths: paths)
+        orchestrator = Orchestrator(root: scratch.appendingPathComponent("runs"), executables: executables)
+        executor = AgentToolExecutor(orchestrator: orchestrator, executables: executables)
     }
 
     func cleanUp() { try? FileManager.default.removeItem(at: root) }
@@ -336,6 +342,99 @@ echo '{"result":"done","is_error":false}'
     #expect(report.contains("the edits are still uncommitted in \(tree.path)"))
     #expect(FileManager.default.fileExists(atPath: tree.appendingPathComponent("from-worker.txt").path))
     #expect(try !git(["status", "--porcelain"], in: tree).isEmpty)
+}
+
+/// An auditor: a read-only worker whose answer is a verdict.
+private let audits = #"cat >/dev/null; echo '{"type":"text","part":{"text":"ship"}}'"#
+
+/// The audits started so far, which are the runs tagged for review.
+private func reviewRuns(in orchestrator: Orchestrator) -> [Run] {
+    orchestrator.recent(limit: 100).filter { $0.spec.kind == .review }
+}
+
+@Test func aFinishedEditingDeliveryStartsExactlyOneAudit() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: audits)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn([
+        "access": "edit", "directory": .string(repository.path), "label": "add logout",
+    ])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let gate = try #require(report.split(separator: "\n").map(String.init).last)
+    #expect(gate.hasPrefix("gate: audit "))
+    #expect(gate.contains(
+        " by opencode opencode/glm-5.3-flash-free started — agent_wait on it and read its verdict before reviewing yourself."
+    ))
+
+    let auditFile = fixture.root.appendingPathComponent("runs/\(id)/audit")
+    let auditID = try String(contentsOf: auditFile, encoding: .utf8)
+    #expect(auditID.count == 8)
+    let started = reviewRuns(in: fixture.orchestrator)
+    #expect(started.count == 1)
+    #expect(started.first?.id == auditID)
+    #expect(started.first?.spec.access == .read)
+    #expect(started.first?.spec.label == "auditoria: add logout")
+    // The auditor reads the implementer's own worktree, where its commit is.
+    #expect(started.first?.spec.directory == fixture.root.appendingPathComponent("runs/\(id)/tree").path)
+
+    // Waiting again reports the audit that exists; it does not start another.
+    let again = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+    let againGate = try #require(again.split(separator: "\n").map(String.init).last)
+    #expect(againGate.hasPrefix("gate: audit \(auditID) by opencode opencode/glm-5.3-flash-free "))
+    #expect(reviewRuns(in: fixture.orchestrator).count == 1)
+}
+
+@Test func aDeliveryWithNoCommitsStartsNoAudit() async throws {
+    // The worker ran and exited clean, but its branch is the base it started
+    // from: there is no change for anyone to read.
+    let fixture = try Fixture(claude: answers, opencode: audits)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+
+    #expect(report.contains("no changes"))
+    #expect(!report.contains("gate:"))
+    #expect(reviewRuns(in: fixture.orchestrator).isEmpty)
+    #expect(!FileManager.default.fileExists(
+        atPath: fixture.root.appendingPathComponent("runs/\(id)/audit").path
+    ))
+}
+
+@Test func aRunSpawnedWithAuditFalseIsNotAudited() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: audits)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn([
+        "access": "edit", "directory": .string(repository.path), "audit": false,
+    ])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+
+    #expect(report.contains("changes on branch"))
+    #expect(!report.contains("gate:"))
+    #expect(reviewRuns(in: fixture.orchestrator).isEmpty)
+}
+
+@Test func aDeliveryWithNoAuditorAvailableIsSaidInTheReportNotAsAFailure() async throws {
+    // Only the implementer's own CLI is installed, and it may not audit itself.
+    let fixture = try Fixture(claude: leavesAFile)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+
+    #expect(report.hasPrefix("[\(id)] finished · "))
+    #expect(report.hasSuffix(
+        "gate: no auditor from another provider is available — review this delivery yourself."
+    ))
 }
 
 @Test func agentToolsRunLocallyAndPanelToolsGoToTheWindow() async throws {

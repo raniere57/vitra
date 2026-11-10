@@ -326,6 +326,10 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     // What a failure is, and what to do about each kind of it.
     #expect(brief.contains("did not do what was asked"))
     #expect(brief.contains("another provider"))
+    // The audit gate: another provider reads the change first, and the
+    // maestro's own review starts from its verdict.
+    #expect(brief.contains("audited first"))
+    #expect(brief.contains("rate the auditor"))
     #expect(brief.contains("agent_spawn"))
     #expect(brief.contains("agent_wait"))
 
