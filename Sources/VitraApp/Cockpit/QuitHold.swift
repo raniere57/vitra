@@ -61,7 +61,7 @@ final class QuitHold {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { notice?.removeFromSuperview() }
     }
 
-    private func show(in window: NSWindow?) {
+    func show(in window: NSWindow?) {
         guard notice == nil, let content = window?.contentView else { return }
         let label = NSTextField.label("Segure ⌘Q para encerrar o Vitra", font: CockpitStyle.ui(13, .medium), color: CockpitStyle.text)
         let pill = NSView.filled(CockpitStyle.raised, cornerRadius: 12)

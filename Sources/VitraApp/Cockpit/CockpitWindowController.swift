@@ -6,6 +6,8 @@ import VitraPanel
 
 /// The cockpit's one window: a tab per project, and the project shown under them.
 final class CockpitWindowController: NSWindowController, NSWindowDelegate {
+    static let minSize = NSSize(width: 980, height: 600)
+
     private let kit: TerminalKit
     private let feed: RunFeed
     private let store: URL
@@ -42,7 +44,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         window.titlebarAppearsTransparent = true
         window.backgroundColor = CockpitStyle.ground
         window.appearance = NSAppearance(named: .darkAqua)
-        window.minSize = NSSize(width: 980, height: 600)
+        window.minSize = Self.minSize
         window.setFrameAutosaveName("VitraCockpit")
         if window.frame.origin == .zero { window.center() }
         super.init(window: window)

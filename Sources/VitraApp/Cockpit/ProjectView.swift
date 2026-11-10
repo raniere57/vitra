@@ -121,16 +121,23 @@ final class ProjectView: NSView {
         return NSView.pill([icon, branch])
     }()
 
-    init(project: CockpitProject, kit: TerminalKit) {
+    /// `startsTerminal: false` builds the view without a shell, a timer or an
+    /// event monitor; the UI snapshot tool uses it to lay the project out
+    /// offscreen. The app always starts the terminal.
+    init(project: CockpitProject, kit: TerminalKit, startsTerminal: Bool = true) {
         self.project = project
         self.kit = kit
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = CockpitStyle.ground.cgColor
         build()
+        guard startsTerminal else { return }
         startHousekeeping()
         startTerminal(launchingMaestro: true)
     }
+
+    /// Where the maestro's terminal goes, for the snapshot tool to fill.
+    var terminalArea: NSView { terminalSlot }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }

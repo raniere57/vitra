@@ -43,6 +43,41 @@ public struct Run: Equatable, Sendable {
     /// to the worktree, each with why. Empty when all applied or there was none.
     public var worktreeSkipped: [String] = []
 
+    /// Public so the UI snapshot tool can build runs without reading any on disk.
+    public init(
+        id: String,
+        spec: WorkerSpec,
+        state: State,
+        pid: Int32?,
+        started: Date,
+        ended: Date?,
+        output: WorkerOutput?,
+        errorTail: String?,
+        repository: String? = nil,
+        worktree: String? = nil,
+        branch: String? = nil,
+        baseCommit: String? = nil,
+        commitError: String? = nil,
+        rating: Rating? = nil,
+        worktreeSkipped: [String] = []
+    ) {
+        self.id = id
+        self.spec = spec
+        self.state = state
+        self.pid = pid
+        self.started = started
+        self.ended = ended
+        self.output = output
+        self.errorTail = errorTail
+        self.repository = repository
+        self.worktree = worktree
+        self.branch = branch
+        self.baseCommit = baseCommit
+        self.commitError = commitError
+        self.rating = rating
+        self.worktreeSkipped = worktreeSkipped
+    }
+
     /// How long the run took, or has taken so far.
     public var duration: TimeInterval {
         (ended ?? Date()).timeIntervalSince(started)
