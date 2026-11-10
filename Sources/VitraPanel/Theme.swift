@@ -77,6 +77,10 @@ public enum Theme {
     public static var caption: NSFont { ui(11) }
     /// Numbers, paths, hashes, times: monospaced.
     public static var meta: NSFont { mono(11) }
+    /// A file's text, read at length: a size up from `meta`.
+    public static var source: NSFont { mono(12) }
+    /// A heading inside a file's text.
+    public static var sourceHeading: NSFont { mono(12, .semibold) }
     /// A column header or section title, set in capitals.
     public static var micro: NSFont { mono(10, .medium) }
 
@@ -88,10 +92,6 @@ public enum Theme {
         .monospacedSystemFont(ofSize: size, weight: weight)
     }
 
-    /// Monospaced digits in the UI face, for figures that must line up.
-    public static func figures(_ size: CGFloat, _ weight: NSFont.Weight = .regular) -> NSFont {
-        .monospacedDigitSystemFont(ofSize: size, weight: weight)
-    }
 
     // MARK: Heights and widths
 

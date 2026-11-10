@@ -54,6 +54,9 @@ final class WorkersPanel: NSView {
         for (index, row) in shown.enumerated() {
             let view = rowViews[row.id] ?? makeRow(row.id)
             view.show(row, isOpen: openRow == row.id)
+            // The last row ends on the footer's rule: two lines there would
+            // read as a seam.
+            view.showsSeparator = index < shown.count - 1
             if rows.arrangedSubviews.firstIndex(of: view) != index {
                 rows.removeArrangedSubview(view)
                 rows.insertArrangedSubview(view, at: index)
@@ -182,6 +185,10 @@ final class WorkerRowView: NSView {
     private let answer = NSTextField(wrappingLabelWithString: "")
     private let answerBox = NSView.filled(CockpitStyle.bar, cornerRadius: CockpitStyle.Radius.card)
     private let hairline = NSView.rule(CockpitStyle.softLine)
+    /// Whether the row draws the hairline under it.
+    var showsSeparator = true {
+        didSet { hairline.isHidden = !showsSeparator }
+    }
     private var isOpen = false
     private var hasAnswer = false
     private var isHovered = false

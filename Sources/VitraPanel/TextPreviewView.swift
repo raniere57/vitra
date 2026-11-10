@@ -24,13 +24,13 @@ final class TextPreviewView: NSScrollView, PreviewContentView {
             ?? ""
 
         let body = NSMutableAttributedString(string: contents, attributes: [
-            .font: PanelStyle.monospaced(11.5),
+            .font: Theme.source,
             .foregroundColor: PanelStyle.primaryText,
         ])
         SyntaxHighlighter.highlight(body)
         if data.count == Self.byteLimit {
             body.append(NSAttributedString(string: "\n\n… truncated at 2 MB\n", attributes: [
-                .font: PanelStyle.monospaced(11.5, weight: .semibold),
+                .font: Theme.sourceHeading,
                 .foregroundColor: PanelStyle.secondaryText,
             ]))
         }
