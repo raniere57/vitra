@@ -1,12 +1,14 @@
 import Darwin
 import Foundation
+import VitraOrchestrator
 
 /// Who the helper serves: the worker run it belongs to, the project, and the pane.
 ///
-/// A CLI may start its MCP servers with a clean environment, so the variables
-/// its parent set are not always in the helper's own. Then the helper walks up
-/// to the nearest ancestor that carries them. That is the worker's wrapper
-/// shell, which the orchestrator started with the variables set.
+/// Three sources, in order. The helper's own environment, which a worker's own
+/// MCP configuration sets. Then the working directory, for an editing worker
+/// whose tree sits inside its run directory. Then the nearest ancestor whose
+/// environment carries the variables: the worker's wrapper shell, for a CLI
+/// that started the helper with a clean environment.
 struct AgentIdentity: Equatable, Sendable {
     /// The worker's run id, or nil for the maestro.
     let agent: String?
@@ -16,24 +18,29 @@ struct AgentIdentity: Equatable, Sendable {
     let pane: String?
 
     /// Resolved once per helper process, the first time anything asks.
-    static let current = resolve(own: ProcessInfo.processInfo.environment, startingAt: getpid())
+    static let current = resolve(
+        own: ProcessInfo.processInfo.environment,
+        cwd: FileManager.default.currentDirectoryPath,
+        startingAt: getpid()
+    )
 
     /// Keys the parent sets. `VITRA_RUN` is the run directory; its last path
     /// component is the run id.
-    static let agentKey = "VITRA_AGENT"
-    static let runKey = "VITRA_RUN"
-    static let projectKey = "VITRA_PROJECT"
+    static let agentKey = VitraMCPConfig.agentKey
+    static let runKey = VitraMCPConfig.runKey
+    static let projectKey = VitraMCPConfig.projectKey
     static let paneKey = "VITRA_PANE"
 
     /// How many parents to climb before giving up. A worker's wrapper is a few
     /// steps up; anything deeper is not one of ours.
     static let maxAncestorSteps = 32
 
-    /// Resolves the identity of a process whose own environment is `own` and
-    /// whose ancestors start at `pid`'s parent.
-    static func resolve(own: [String: String], startingAt pid: pid_t) -> AgentIdentity {
+    /// Resolves the identity of a process whose own environment is `own`, whose
+    /// working directory is `cwd`, and whose ancestors start at `pid`'s parent.
+    static func resolve(own: [String: String], cwd: String? = nil, startingAt pid: pid_t) -> AgentIdentity {
         resolve(
             own: own,
+            cwd: cwd,
             nearestAncestor: { nearestAncestorEnvironment(of: pid) },
             runProject: { runDirectory in
                 projectFromRunRecord(at: URL(fileURLWithPath: runDirectory).appendingPathComponent("run.json"))
@@ -43,16 +50,26 @@ struct AgentIdentity: Equatable, Sendable {
 
     /// The precedence, with the lookups injected so each rule is testable.
     ///
-    /// The source is the helper's own environment when it names a worker or a
-    /// run; otherwise the nearest ancestor that does. Each field is taken from
-    /// the helper's own environment first, then from the source, and the
-    /// project finally from the run record.
+    /// When the helper's own environment names a worker or a run, that is the
+    /// source. Failing that, a working directory inside a run's directory names
+    /// the run. Failing that, the nearest ancestor that names one is the source.
+    /// Each field is taken from the helper's own environment first, then from
+    /// the source, and the project finally from the run record.
     static func resolve(
         own: [String: String],
+        cwd: String? = nil,
+        runsRoot: URL = Orchestrator.defaultRoot,
         nearestAncestor: () -> [String: String]?,
         runProject: (String) -> String?
     ) -> AgentIdentity {
         let ownNamesWorker = own.nonEmpty(agentKey) != nil || own.nonEmpty(runKey) != nil
+        if !ownNamesWorker, let run = runDirectory(containing: cwd, under: runsRoot) {
+            return AgentIdentity(
+                agent: run.lastPathComponent,
+                project: own.nonEmpty(projectKey) ?? runProject(run.path),
+                pane: own.nonEmpty(paneKey)
+            )
+        }
         let source = ownNamesWorker ? own : (nearestAncestor() ?? [:])
 
         let agent = source.nonEmpty(agentKey)
@@ -62,6 +79,34 @@ struct AgentIdentity: Equatable, Sendable {
             ?? source.nonEmpty(runKey).flatMap(runProject)
         let pane = own.nonEmpty(paneKey) ?? source.nonEmpty(paneKey)
         return AgentIdentity(agent: agent, project: project, pane: pane)
+    }
+
+    /// The run directory `cwd` sits in, when it is inside `runsRoot`: the first
+    /// path component below the root is the run id. Both sides are resolved
+    /// through symlinks, so `/var` and `/private/var` compare equal.
+    static func runDirectory(containing cwd: String?, under runsRoot: URL) -> URL? {
+        guard let cwd, !cwd.isEmpty else { return nil }
+        let root = runsRoot.resolvingSymlinksInPath().standardizedFileURL
+        let here = URL(fileURLWithPath: cwd).resolvingSymlinksInPath().standardizedFileURL.pathComponents
+        let base = root.pathComponents
+        guard here.count > base.count, Array(here.prefix(base.count)) == base else { return nil }
+        let id = here[base.count]
+        guard !id.isEmpty, id != "/" else { return nil }
+        return root.appendingPathComponent(id, isDirectory: true)
+    }
+
+    /// Which tool set the helper serves. The maestro's only when its own
+    /// environment says so and names no worker or run. Everything else gets
+    /// the worker's set: a worker whose variables were dropped, or a caller
+    /// that is not known at all.
+    enum ServedRole: Equatable, Sendable {
+        case maestro
+        case worker
+
+        static func decide(own: [String: String]) -> ServedRole {
+            let names = own.nonEmpty(agentKey) != nil || own.nonEmpty(runKey) != nil
+            return own[VitraMCPConfig.roleKey] == VitraMCPConfig.maestroRole && !names ? .maestro : .worker
+        }
     }
 
     /// The environment of the nearest ancestor that sets `VITRA_RUN` or

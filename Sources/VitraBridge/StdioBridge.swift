@@ -9,25 +9,26 @@ import Foundation
 /// agent tools need no window and run in this process.
 public enum StdioBridge {
     public static func run() {
-        // A worker the orchestrator started is told so in its environment. It
-        // gets the browser and the preview, and nothing to delegate with: the
+        // The worker set is the default: a helper serves the maestro's tools
+        // only when the maestro said so in its own environment. A worker gets
+        // the browser and the preview, and nothing to delegate with: the
         // maestro hands work out, a worker does it.
-        let isWorker = AgentIdentity.current.agent != nil
+        let role = AgentIdentity.ServedRole.decide(own: ProcessInfo.processInfo.environment)
         // The notes are served here for both, so a worker reads what the
         // maestro and earlier workers left, and adds to it the same way.
         let memory = MemoryToolExecutor()
-        let server = isWorker
+        let server = role == .maestro
             ? MCPServer(
-                executor: LocalToolRouter(names: MemoryTools.names, local: memory, otherwise: RemoteExecutor()),
-                tools: MCPTools.worker
-            )
-            : MCPServer(
                 executor: LocalToolRouter(
                     names: MemoryTools.names,
                     local: memory,
                     otherwise: RoutingExecutor(agents: AgentToolExecutor(), panel: RemoteExecutor())
                 ),
                 tools: MCPTools.all
+            )
+            : MCPServer(
+                executor: LocalToolRouter(names: MemoryTools.names, local: memory, otherwise: RemoteExecutor()),
+                tools: MCPTools.worker
             )
         let out = OutputQueue()
         let group = DispatchGroup()

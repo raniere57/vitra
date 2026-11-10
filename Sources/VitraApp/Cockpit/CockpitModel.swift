@@ -376,10 +376,9 @@ enum Maestro {
     /// Passed on the command line rather than written into the user's own
     /// Claude settings: the tools exist for sessions the cockpit starts, and
     /// nothing is left behind in a file the user did not ask to have changed.
+    /// The role in its environment is what gives the helper the maestro's tools.
     static func mcpConfig(binary: String) -> String {
-        let config: [String: Any] = ["mcpServers": ["vitra": ["command": binary, "args": ["mcp"]]]]
-        let data = (try? JSONSerialization.data(withJSONObject: config, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data()
-        return String(decoding: data, as: UTF8.self)
+        VitraMCPConfig.claudeConfig(binary: binary, environment: VitraMCPConfig.maestroEnvironment())
     }
 
     /// Writes the maestro's MCP configuration and brief into `directory` and
