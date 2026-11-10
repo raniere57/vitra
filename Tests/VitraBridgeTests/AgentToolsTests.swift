@@ -378,7 +378,11 @@ echo '{"result":"done","is_error":false}'
 }
 
 /// An auditor: a read-only worker whose answer is a verdict.
-private let audits = #"cat >/dev/null; echo '{"type":"text","part":{"text":"ship"}}'"#
+/// What a fake opencode prints when asked for its models: one free model, so
+/// the picker has an auditor to offer.
+private let listsAFreeModel = #"[ "$1" = models ] && { echo opencode/glm-5.3-flash-free; exit 0; }; "#
+
+private let audits = listsAFreeModel + #"cat >/dev/null; echo '{"type":"text","part":{"text":"ship"}}'"#
 
 /// The audits started so far, which are the runs tagged for review.
 private func reviewRuns(in orchestrator: Orchestrator) -> [Run] {
@@ -443,7 +447,7 @@ private func reviewRuns(in orchestrator: Orchestrator) -> [Run] {
 
 /// An auditor that keeps reading: enough to see the report while it holds the
 /// worktree.
-private let keepsReading = #"cat >/dev/null; sleep 30"#
+private let keepsReading = listsAFreeModel + #"cat >/dev/null; sleep 30"#
 
 @Test func theReportDoesNotOfferToRemoveTheWorktreeWhileTheAuditReadsIt() async throws {
     let fixture = try Fixture(claude: leavesAFile, opencode: keepsReading)
