@@ -396,7 +396,7 @@ private func reviewRuns(in orchestrator: Orchestrator) -> [Run] {
     try makeRepository(at: repository)
 
     let id = try await fixture.spawn([
-        "access": "edit", "directory": .string(repository.path), "label": "add logout",
+        "access": "edit", "audit": true, "directory": .string(repository.path), "label": "add logout",
     ])
     let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
     let gate = try #require(report.split(separator: "\n").map(String.init).last)
@@ -429,7 +429,7 @@ private func reviewRuns(in orchestrator: Orchestrator) -> [Run] {
     let repository = fixture.root.appendingPathComponent("repo")
     try makeRepository(at: repository)
 
-    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    let id = try await fixture.spawn(["access": "edit", "audit": true, "directory": .string(repository.path)])
     // Both waits see the same finished delivery at the same time. Only the one
     // that takes the audit claim may spawn an auditor: the other finds it.
     async let first = fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
@@ -455,7 +455,7 @@ private let keepsReading = listsAFreeModel + #"cat >/dev/null; sleep 30"#
     let repository = fixture.root.appendingPathComponent("repo")
     try makeRepository(at: repository)
 
-    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    let id = try await fixture.spawn(["access": "edit", "audit": true, "directory": .string(repository.path)])
     let started = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
     let auditID = try String(
         contentsOf: fixture.root.appendingPathComponent("runs/\(id)/audit"), encoding: .utf8
@@ -483,7 +483,7 @@ private let keepsReading = listsAFreeModel + #"cat >/dev/null; sleep 30"#
     // branch and its commit are still readable.
     try git(["config", "diff.external", "/no/such/vitra-diff"], in: repository)
 
-    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    let id = try await fixture.spawn(["access": "edit", "audit": true, "directory": .string(repository.path)])
     let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
 
     #expect(report.contains("gate: no audit — could not read the diff: "))
@@ -539,7 +539,7 @@ private let keepsReading = listsAFreeModel + #"cat >/dev/null; sleep 30"#
     let repository = fixture.root.appendingPathComponent("repo")
     try makeRepository(at: repository)
 
-    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    let id = try await fixture.spawn(["access": "edit", "audit": true, "directory": .string(repository.path)])
     let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
 
     #expect(report.hasPrefix("[\(id)] finished · "))
@@ -665,7 +665,7 @@ echo '{"result":"done","is_error":false}'
     defer { fixture.cleanUp() }
     let repository = fixture.root.appendingPathComponent("repo")
     try makeRepository(at: repository)
-    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    let id = try await fixture.spawn(["access": "edit", "audit": true, "directory": .string(repository.path)])
     _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
     let auditID = try String(
         contentsOf: fixture.root.appendingPathComponent("runs/\(id)/audit"), encoding: .utf8
@@ -882,4 +882,17 @@ echo '{"result":"done","is_error":false}'
     let summary = ModelCatalog.summary(ModelCatalog.Listing(claude: false, openCode: nil, gemini: nil, cursor: parsed))
     #expect(summary.contains("cursor-grok-4.5-low, cursor-grok-4.6-low-fast, grok-4.7-low-fast"))
     #expect(ModelCatalog.isGrok("cursor-grok-4.6-low-fast"))
+}
+
+@Test func aSmallDeliveryIsNotAuditedUnlessAsked() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: audits)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+
+    #expect(report.contains("gate: no audit — a small change (1 line); review it yourself."))
+    #expect(reviewRuns(in: fixture.orchestrator).isEmpty)
 }

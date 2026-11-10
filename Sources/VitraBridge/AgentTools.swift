@@ -19,7 +19,7 @@ public enum AgentTools {
             Spawn several and then agent_wait on all of them to run work in parallel. \
             In a git repository each editing worker is given a worktree and a branch of its own automatically, so several can edit at once; when its delivery is done and its audit read, agent_merge with its id puts the branch on your checkout and cleans up, and agent_merge with discard drops it instead. \
             Outside a repository, give workers that edit at the same time a directory each: two editing the same checkout will overwrite one another. \
-            A finished editing delivery with commits is audited first by a cheap read-only worker from another provider: agent_wait starts it and says its id. Pass audit false for a change too small to be worth that gate.
+            A finished editing delivery of 40 changed lines or more is audited by a cheap read-only worker from another provider: agent_wait starts it and says its id. Pass audit true to have a smaller change audited too, false to skip the gate.
             """,
             properties: [
                 "cli": [
@@ -53,7 +53,7 @@ public enum AgentTools {
                 ],
                 "audit": [
                     "type": "boolean",
-                    "description": "Default true: a finished editing delivery whose branch has commits is first audited by a cheap read-only worker from another provider, and agent_wait gives the audit's id. false skips that gate for this run, for a change too small to be worth it.",
+                    "description": "Left out: a finished editing delivery is audited by a cheap read-only worker from another provider when it changed 40 lines or more, and agent_wait gives the audit's id. true audits it whatever its size; false skips the gate.",
                 ],
             ],
             required: ["prompt", "directory"]
@@ -154,6 +154,20 @@ public struct AgentToolExecutor: ToolExecutor {
     private static let historyLimit = 2000
     /// How far back the scoreboard looks.
     private static let scoredRuns = 2000
+
+    /// Changed lines, added plus removed, from which a delivery is audited
+    /// without being asked. Below it the orchestrator's own read is the review.
+    static let auditFromLines = 40
+
+    /// Lines added plus removed between two commits, or nil when git cannot
+    /// say. Binary files count as nothing.
+    static func changedLines(from base: String, to branch: String, in repository: String) -> Int? {
+        guard let stat = Git.output(["diff", "--numstat", "\(base)..\(branch)"], in: repository) else { return nil }
+        return stat.split(whereSeparator: \.isNewline).reduce(0) { total, line in
+            let fields = line.split(separator: "\t")
+            return total + (fields.first.flatMap { Int($0) } ?? 0) + (fields.dropFirst().first.flatMap { Int($0) } ?? 0)
+        }
+    }
 
     private let orchestrator: Orchestrator
     private let executables: Executables
@@ -563,6 +577,15 @@ public struct AgentToolExecutor: ToolExecutor {
         guard let commits = counted.flatMap({ Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }),
               commits > 0
         else { return Gate() }
+
+        // A small change is quicker for the orchestrator to read than for an
+        // auditor to start on: the gate is for changes big enough to hide
+        // something, unless the spawn asked for it by name.
+        if run.spec.audit != true,
+           let lines = Self.changedLines(from: base, to: branch, in: repository),
+           lines < Self.auditFromLines {
+            return Gate(line: "gate: no audit — a small change (\(lines) \(lines == 1 ? "line" : "lines")); review it yourself.")
+        }
 
         let history = orchestrator.recent(limit: Self.scoredRuns)
         guard let choice = Audit.chooseAuditor(

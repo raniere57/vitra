@@ -321,7 +321,7 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     let brief = try String(contentsOf: directory.appendingPathComponent("brief.md"), encoding: .utf8)
     // Delegation is the rule, with the exceptions named rather than left to
     // the maestro's sense of what counts as small.
-    #expect(brief.contains("Delegate by default"))
+    #expect(brief.contains("Do the small things yourself"))
     // Vitra picks the worker; the maestro tags the kind and passes commands.
     #expect(brief.contains("Vitra picks the worker from the record"))
     #expect(brief.contains("two deliveries"))
@@ -338,7 +338,7 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(brief.contains("another provider"))
     // The audit gate: another provider reads the change first, and the
     // maestro's own review starts from its verdict.
-    #expect(brief.contains("audited first"))
+    #expect(brief.contains("forty lines or more is audited"))
     #expect(brief.contains("rate the auditor"))
     #expect(brief.contains("agent_spawn"))
     #expect(brief.contains("agent_wait"))
