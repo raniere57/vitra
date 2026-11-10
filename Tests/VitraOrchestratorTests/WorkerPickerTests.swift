@@ -103,7 +103,7 @@ private func pick(
 }
 
 @Test func twoDeliveriesEndLearning() {
-    #expect(pick([glm], runs(glm, 1, score: 5))?.reason == "learning, 1 of 2 runs on review")
+    #expect(pick([glm], runs(glm, 1))?.reason == "learning, 1 of 2 runs on review")
     // A failed run is not a delivery.
     #expect(pick([glm], runs(glm, 1) + runs(glm, 1, failed: true, at: start.addingTimeInterval(5)))?.reason
         == "learning, 1 of 2 runs on review")
@@ -222,4 +222,22 @@ private func pick(
     #expect(pick([glm, grokLow], installed: [.opencode])?.offer == glm)
     #expect(pick([glm, grokLow], installed: [.claude]) == nil)
     #expect(pick([], installed: installed) == nil)
+}
+
+@Test func aProvenWorkerDoesTheWorkAndLearningIsOnlyEveryFifthPiece() {
+    // glm is rated on review; the Groks are untried. Learning them is a turn.
+    let offers = [glm, grokLow, grokHigh]
+    #expect(pick(offers, runs(glm, 2, score: 5))?.offer == glm)
+    #expect(pick(offers, runs(glm, 3, score: 5))?.offer == glm)
+    let fifth = pick(offers, runs(glm, 4, score: 5))
+    #expect(fifth?.offer == grokLow)
+    #expect(fifth?.reason == "learning, 0 of 2 runs on review")
+}
+
+@Test func twoRunsWithNothingDeliveredRuleAWorkerOut() {
+    let broken = runs(geminiLow, 2, failed: true)
+    #expect(pick([geminiLow, glm], broken)?.offer == glm)
+    // One failure is not a verdict yet.
+    #expect(pick([geminiLow], runs(geminiLow, 1, failed: true))?.offer == geminiLow)
+    #expect(pick([geminiLow], broken) == nil)
 }

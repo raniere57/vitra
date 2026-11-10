@@ -6,12 +6,13 @@ import Foundation
 /// A worker is a CLI, a model and an effort: haiku at low and haiku at high
 /// are two workers with separate records. The order is:
 ///
-/// 1. Learning: cheap workers with fewer than two deliveries on the kind,
-///    cheapest first, so each earns a record. A higher effort of a model
-///    waits until a lower one has run.
-/// 2. Exploitation: workers rated 4 or more on the kind, the fastest first;
-///    but every fifth piece of a kind goes to the least used worker.
-/// 3. Otherwise the cheapest worker that may run.
+/// 1. Workers rated 4 or more on the kind, the fastest first.
+/// 2. Every fifth piece of a kind is a learning turn instead: the cheapest
+///    worker with fewer than two deliveries on the kind, so each earns a
+///    record without holding the work up. A higher effort of a model waits
+///    until a lower one has run. With nobody left to learn, the least used.
+/// 3. While nobody is rated 4 or more on the kind, learning comes first.
+/// 4. Otherwise the cheapest worker that may run.
 ///
 /// Pure: the choice is a function of its inputs, so it can be tested without
 /// spawning anything.
@@ -69,6 +70,9 @@ public enum WorkerPicker {
         }
             // Known bad on this kind, at this effort: never picked on its own.
             .filter { $0.average.map { $0 >= Double(Rating.satisfactory) } ?? true }
+            // Nor one that has run twice here and delivered nothing: unrated
+            // failures are a record too.
+            .filter { $0.runs.count < deliveriesToLearn || $0.delivered > 0 }
 
         func cliRuns(_ candidate: Candidate) -> Int {
             ofKind.filter { $0.spec.cli == candidate.offer.cli }.count
@@ -76,27 +80,32 @@ public enum WorkerPicker {
 
         let learning = candidates.filter {
             $0.delivered < deliveriesToLearn && lowerEffortTried($0.offer, offers: offers, ofKind: ofKind)
-        }
-        if let first = learning.min(by: {
+        }.min(by: {
             ($0.costRank, cliRuns($0), $0.order) < ($1.costRank, cliRuns($1), $1.order)
-        }) {
-            return Choice(
+        })
+        func learn(_ first: Candidate) -> Choice {
+            Choice(
                 offer: first.offer,
                 reason: "learning, \(first.delivered) of \(deliveriesToLearn) runs on \(kind.rawValue)"
             )
         }
 
+        // Proven workers do the work; trying the others is a turn, not a
+        // toll. With dozens of untried workers on offer, learning them all
+        // first would put every slow or broken one ahead of the good ones.
         let good = candidates.filter { ($0.average ?? 0) >= Double(Rating.satisfactory) }
         if !good.isEmpty {
-            if ofKind.count % explorationEvery == explorationEvery - 1,
-               let least = candidates.min(by: {
-                   ($0.runs.count, $0.costRank, $0.order) < ($1.runs.count, $1.costRank, $1.order)
-               }) {
-                return Choice(
-                    offer: least.offer,
-                    reason: "every fifth piece goes to the least used worker: "
-                        + "\(least.runs.count) \(least.runs.count == 1 ? "run" : "runs") on \(kind.rawValue)"
-                )
+            if ofKind.count % explorationEvery == explorationEvery - 1 {
+                if let learning { return learn(learning) }
+                if let least = candidates.min(by: {
+                    ($0.runs.count, $0.costRank, $0.order) < ($1.runs.count, $1.costRank, $1.order)
+                }) {
+                    return Choice(
+                        offer: least.offer,
+                        reason: "every fifth piece goes to the least used worker: "
+                            + "\(least.runs.count) \(least.runs.count == 1 ? "run" : "runs") on \(kind.rawValue)"
+                    )
+                }
             }
             if let best = good.min(by: {
                 ($0.medianSeconds, $0.medianCost, $0.order) < ($1.medianSeconds, $1.medianCost, $1.order)
@@ -104,6 +113,9 @@ public enum WorkerPicker {
                 return Choice(offer: best.offer, reason: best.fastestReason(kind))
             }
         }
+
+        // Nobody has earned the kind yet: the cheap untried ones go first.
+        if let learning { return learn(learning) }
 
         return candidates.min { ($0.costRank, $0.order) < ($1.costRank, $1.order) }.map {
             Choice(offer: $0.offer, reason: "cheapest that may run; none is rated \(Rating.satisfactory) or more on \(kind.rawValue)")

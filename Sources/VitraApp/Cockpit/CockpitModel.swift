@@ -330,8 +330,8 @@ enum Maestro {
     something failed, and how long it took. The best and fastest becomes the one who deploys.
 
     Tag every agent_spawn with its kind of task and pass the commands the piece needs. Leave cli and model out and \
-    Vitra picks the worker from the record: untried cheap workers first, until each has two deliveries; then the \
-    fastest of those rated 4 or more; then the cheaper. Name a worker yourself only when the piece truly needs that \
+    Vitra picks the worker from the record: the fastest of those rated 4 or more on that kind, then the cheaper; \
+    one piece in five goes to an untried cheap worker, until each has two deliveries. Name a worker yourself only when the piece truly needs that \
     model, and say why in the label. After reviewing a delivery, always record your verdict with agent_rate, honestly; a poor delivery rated \
     well sends the next task to the wrong worker.
 
