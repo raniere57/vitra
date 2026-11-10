@@ -215,7 +215,14 @@ public struct AgentToolExecutor: ToolExecutor {
             case "agent_scores":
                 let kind = try Self.kind(in: arguments)
                 let runs = orchestrator.recent(limit: Self.scoredRuns)
-                return Scoreboard.summary(Scoreboard.scores(runs, kind: kind), kind: kind)
+                // The listing takes seconds per CLI; it is cached, and it is
+                // dropped from the text when it cannot be had.
+                return try await Self.offThePool { [executables] in
+                    let offers = ModelCatalog.offers(ModelCatalog.cachedListing(executables))
+                    return Scoreboard.summary(
+                        Scoreboard.scores(runs, kind: kind), kind: kind, offers: offers, history: runs
+                    )
+                }
             case "agent_models":
                 return try await Self.offThePool { [executables] in
                     ModelCatalog.summary(ModelCatalog.listing(executables))

@@ -82,14 +82,55 @@ private func implementer(_ cli: WorkerCLI) -> WorkerSpec {
     )
 }
 
+/// `count` delivered reviews of one worker, started a second apart from `step`.
+private func reviews(
+    _ cli: WorkerCLI,
+    _ model: String,
+    count: Int = 2,
+    score: Int? = nil,
+    step: Double = 0
+) -> [Run] {
+    (0..<count).map { offset in
+        review(cli, model, score: score, at: start.addingTimeInterval(step + Double(offset)))
+    }
+}
+
+@Test func aCheapAuditorWithFewerThanTwoReviewsIsTriedBeforeTheRanking() {
+    // grok-4.7 is top rated, but grok-4.6 has no review yet: the audit goes
+    // to 4.6 so the cheap auditors each get a record.
+    let history = reviews(.cursor, "grok-4.7-low-fast", score: 5)
+    let chosen = Audit.chooseAuditor(
+        implementer: implementer(.claude),
+        history: history,
+        installed: [.claude, .cursor]
+    )
+    #expect(chosen?.model == "cursor-grok-4.6-low-fast")
+}
+
+@Test func onceEveryCheapAuditorHasTwoReviewsTheRankingDecides() {
+    // Each cheap auditor has two delivered reviews, so the order goes back to
+    // the scoreboard: the top rated grok-4.7 audits, not the cheap list's first.
+    let history = reviews(.cursor, "grok-4.7-low-fast", score: 5)
+        + reviews(.opencode, "opencode/glm-5.3-flash-free", score: 4, step: 10)
+        + reviews(.cursor, "cursor-grok-4.6-low-fast", score: 3, step: 20)
+        + reviews(.cursor, "cursor-grok-4.5-low-fast", score: 3, step: 30)
+    let chosen = Audit.chooseAuditor(
+        implementer: implementer(.claude),
+        history: history,
+        installed: [.claude, .opencode, .cursor]
+    )
+    #expect(chosen?.model == "grok-4.7-low-fast")
+}
+
 @Test func theBestRatedReviewerFromAnotherProviderAudits() {
-    // Three providers have a review record, so the trial is over and the
-    // scoreboard's order decides: the highest rated first.
-    let history = [
-        review(.cursor, "grok-4.7-low-fast", score: 5),
-        review(.opencode, "opencode/a-free", score: 4),
-        review(.gemini, "gemini-3.8-flash-low", score: 3),
-    ]
+    // Each cheap auditor already has two reviews, so the trial is over and
+    // the scoreboard's order decides: the highest rated first.
+    let history = reviews(.cursor, "grok-4.7-low-fast", score: 5)
+        + reviews(.opencode, "opencode/a-free", score: 4, step: 10)
+        + reviews(.gemini, "gemini-3.8-flash-low", score: 3, step: 20)
+        + reviews(.opencode, "opencode/glm-5.3-flash-free", step: 30)
+        + reviews(.cursor, "cursor-grok-4.6-low-fast", step: 40)
+        + reviews(.cursor, "cursor-grok-4.5-low-fast", step: 50)
     let chosen = Audit.chooseAuditor(
         implementer: implementer(.claude),
         history: history,

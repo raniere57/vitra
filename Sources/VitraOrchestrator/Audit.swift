@@ -32,16 +32,23 @@ public enum Audit {
         (.claude, "haiku", "low"),
     ]
 
+    /// Delivered reviews a cheap auditor needs before the ranking decides
+    /// again. Until then it is tried first, so audits spread over the cheap
+    /// list instead of always going to the top of the ranking.
+    static let auditsBeforeRanking = 2
+
     /// The worker that should audit `implementer`'s delivery, or nil when no
     /// worker may.
     ///
-    /// Reviewers that have earned a record at review come first, in the order
-    /// `Scoreboard` puts them; then the fixed cheap list. Both are filtered by
-    /// what can actually run now: the CLI must be installed, must not be the
-    /// implementer's own, and must not be refused by the trial rules for a
-    /// review. gemini is skipped wherever it appears: headless, agy reaches
-    /// for shell commands it is not allowed and the audit fails. Pure, so the
-    /// choice can be tested without spawning anything.
+    /// Cheap auditors with fewer than `auditsBeforeRanking` delivered reviews
+    /// come first, in the cheap list's order; then reviewers that have earned
+    /// a record at review, in the order `Scoreboard` puts them; then the fixed
+    /// cheap list. Every candidate is filtered by what can actually run now:
+    /// the CLI must be installed, must not be the implementer's own, and must
+    /// not be refused by the trial rules for a review. gemini is skipped
+    /// wherever it appears: headless, agy reaches for shell commands it is not
+    /// allowed and the audit fails. Pure, so the choice can be tested without
+    /// spawning anything.
     public static func chooseAuditor(
         implementer: WorkerSpec,
         history: [Run],
@@ -50,7 +57,10 @@ public enum Audit {
         let ranked = Scoreboard.scores(history, kind: .review).map {
             (cli: $0.cli, model: $0.model, effort: $0.effort)
         }
-        let candidates = (ranked + cheapAuditors).filter { candidate in
+        let underused = cheapAuditors.filter {
+            deliveredReviews(of: $0, in: history) < auditsBeforeRanking
+        }
+        let candidates = (underused + ranked + cheapAuditors).filter { candidate in
             candidate.cli != implementer.cli && candidate.cli != .gemini && installed.contains(candidate.cli)
         }
         if let open = candidates.first(where: {
@@ -65,6 +75,23 @@ public enum Audit {
                 with: auditSpec($0), history: history, providers: installed.count, includeExploration: false
             ) == nil
         })
+    }
+
+    /// How many reviews `candidate` has delivered in `history`: finished, and
+    /// not failed. Counts runs, not ratings, since maestros often do not rate
+    /// auditors.
+    private static func deliveredReviews(
+        of candidate: (cli: WorkerCLI, model: String, effort: String?),
+        in history: [Run]
+    ) -> Int {
+        history.filter { run in
+            (run.spec.kind ?? .other) == .review
+                && run.spec.cli == candidate.cli
+                && run.spec.model == candidate.model
+                && run.state != .running
+                && run.state != .cancelled
+                && !Scoreboard.hasFailed(run)
+        }.count
     }
 
     /// The review a candidate would be asked to do, as the trial rules see it.

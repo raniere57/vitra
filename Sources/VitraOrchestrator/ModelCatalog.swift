@@ -79,7 +79,63 @@ public enum ModelCatalog {
     }
 
 
+    /// One worker the catalogue offers: a CLI, a model, and the effort it runs at.
+    public struct Offer: Hashable, Sendable {
+        public let cli: WorkerCLI
+        public let model: String
+        public let effort: String?
+
+        public init(cli: WorkerCLI, model: String, effort: String?) {
+            self.cli = cli
+            self.model = model
+            self.effort = effort
+        }
+
+        /// The worker as the orchestrating model names it, such as `claude haiku (high)`.
+        public var name: String {
+            "\(cli.rawValue) \(model)" + (effort.map { " (\($0))" } ?? "")
+        }
+    }
+
+    /// Every worker `listing` offers, on the same terms `summary` states them.
+    public static func offers(_ listing: Listing) -> [Offer] {
+        var offers: [Offer] = []
+        if listing.claude {
+            offers += claudeWorkers.flatMap { worker in
+                worker.efforts.map { Offer(cli: .claude, model: worker.model, effort: $0) }
+            }
+        }
+        offers += (listing.openCode ?? []).filter(isFreeOpenCodeModel).map { Offer(cli: .opencode, model: $0, effort: nil) }
+        offers += geminiIds(listing.gemini ?? []).map { Offer(cli: .gemini, model: $0, effort: nil) }
+        offers += cursorGroks(listing.cursor ?? []).map { Offer(cli: .cursor, model: $0, effort: nil) }
+        return offers
+    }
+
     private static let listingTimeout: TimeInterval = 20
+    /// How long a listing is reused before the CLIs are asked again.
+    static let cacheLifetime: TimeInterval = 600
+
+    /// The last listing, kept so a tool that needs it often does not wait
+    /// several seconds per call. Reused only for the same executables.
+    private final class ListingCache: @unchecked Sendable {
+        let lock = NSLock()
+        var entry: (paths: [WorkerCLI: String], at: Date, listing: Listing)?
+    }
+    private static let listingCache = ListingCache()
+
+    /// `listing`, reused for `cacheLifetime` seconds when the executables are
+    /// the same. Blocks like `listing`: call it off the cooperative pool.
+    public static func cachedListing(_ executables: Executables, now: Date = Date()) -> Listing {
+        listingCache.lock.lock()
+        defer { listingCache.lock.unlock() }
+        if let entry = listingCache.entry, entry.paths == executables.paths,
+           now.timeIntervalSince(entry.at) < cacheLifetime {
+            return entry.listing
+        }
+        let fresh = listing(executables)
+        listingCache.entry = (executables.paths, now, fresh)
+        return fresh
+    }
 
     /// Whether opencode may be asked for `model`.
     ///
@@ -156,6 +212,22 @@ public enum ModelCatalog {
         return String(decoding: (try? Data(contentsOf: listing)) ?? Data(), as: UTF8.self)
     }
 
+    /// The gemini model ids in a listing. Each line is "id<tab>Name"; the id is
+    /// what the CLI takes.
+    static func geminiIds(_ lines: [String]) -> [String] {
+        lines
+            .map { $0.components(separatedBy: "\t").first ?? $0 }
+            .filter { $0.hasPrefix("gemini-") && !$0.contains(" ") }
+    }
+
+    /// The Grok ids in a cursor listing. Each line is "id - Name"; the id is
+    /// what the CLI takes.
+    static func cursorGroks(_ lines: [String]) -> [String] {
+        lines
+            .map { $0.components(separatedBy: " - ").first ?? $0 }
+            .filter { isGrok($0) && !$0.contains(" ") }
+    }
+
     /// The catalogue as text for the orchestrating model.
     public static func summary(_ listing: Listing) -> String {
         var lines: [String] = []
@@ -174,10 +246,7 @@ public enum ModelCatalog {
         }
 
         if let gemini = listing.gemini {
-            // Each line is "id<tab>Name"; the id is what the CLI takes.
-            let ids = gemini
-                .map { $0.components(separatedBy: "\t").first ?? $0 }
-                .filter { $0.hasPrefix("gemini-") && !$0.contains(" ") }
+            let ids = geminiIds(gemini)
             lines.append(ids.isEmpty
                 ? "cli \"gemini\": installed, but it listed no Gemini models. Sign in by running agy once."
                 : "cli \"gemini\" (Google AI subscription, through Antigravity; the effort is part of the id, so pass none; no commands): \(ids.joined(separator: ", "))")
@@ -186,10 +255,7 @@ public enum ModelCatalog {
         }
 
         if let cursor = listing.cursor {
-            // Each line is "id - Name"; the id is what the CLI takes.
-            let groks = cursor
-                .map { $0.components(separatedBy: " - ").first ?? $0 }
-                .filter { isGrok($0) && !$0.contains(" ") }
+            let groks = cursorGroks(cursor)
             lines.append(groks.isEmpty
                 ? "cli \"cursor\": installed, but it listed no Grok models. Sign in with: cursor-agent login"
                 : "cli \"cursor\" (Grok models only; the effort is part of the id, so pass none): \(groks.joined(separator: ", "))")

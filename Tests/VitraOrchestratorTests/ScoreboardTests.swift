@@ -202,3 +202,43 @@ private func run(
     ])
     #expect(scores.map(\.model) == ["haiku", "opencode/a-free", "sonnet"])
 }
+
+@Test func theUntriedLineNamesTheOfferedWorkersWithNoRunOnThatKind() {
+    let offers = [
+        ModelCatalog.Offer(cli: .cursor, model: "cursor-grok-4.5-low-fast", effort: nil),
+        ModelCatalog.Offer(cli: .cursor, model: "cursor-grok-4.6-medium-fast", effort: nil),
+        ModelCatalog.Offer(cli: .claude, model: "haiku", effort: "high"),
+    ]
+    let history = [
+        run(.cursor, "cursor-grok-4.6-medium-fast", kind: .review),
+        // A run of another kind is no try at review.
+        run(.claude, "haiku", kind: .explore, effort: "high"),
+    ]
+
+    #expect(Scoreboard.untriedLine(offers, history: history, kind: .review)
+        == "  not tried yet: cursor cursor-grok-4.5-low-fast, claude haiku (high)")
+    #expect(Scoreboard.untriedLine(offers, history: history, kind: .explore)
+        == "  not tried yet: cursor cursor-grok-4.5-low-fast, cursor cursor-grok-4.6-medium-fast, claude haiku (high)")
+    #expect(Scoreboard.untriedLine([], history: history, kind: .review) == nil)
+}
+
+@Test func theUntriedLineCapsItsNamesAndCountsTheRest() {
+    let offers = (1...17).map { ModelCatalog.Offer(cli: .cursor, model: "grok-\($0)", effort: nil) }
+    let line = Scoreboard.untriedLine(offers, history: [], kind: .review)
+
+    #expect(line?.hasSuffix(", grok-15, and 2 more") == true)
+    #expect(line?.contains("grok-16") == false)
+}
+
+@Test func theSummaryPlacesTheUntriedLineUnderItsKind() {
+    let history = [run(.claude, "haiku", score: 5, kind: .review, effort: "low")]
+    let offers = [ModelCatalog.Offer(cli: .opencode, model: "opencode/glm-5.3-flash-free", effort: nil)]
+    let text = Scoreboard.summary(Scoreboard.scores(history, kind: .review), kind: .review, offers: offers, history: history)
+
+    #expect(text == """
+    Worker models by kind of task, best first (score is the average of your agent_rate ratings, 1 to 5):
+    review
+      claude haiku (low) — 5.0/5 over 1 rated · 1 run · 0 failed · median 10s · $0.00
+      not tried yet: opencode opencode/glm-5.3-flash-free
+    """)
+}

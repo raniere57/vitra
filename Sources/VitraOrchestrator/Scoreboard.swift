@@ -189,7 +189,12 @@ public enum Scoreboard {
     }
 
     /// The ranking as text for the orchestrating model.
-    public static func summary(_ scores: [ModelScore], kind: TaskKind? = nil) -> String {
+    public static func summary(
+        _ scores: [ModelScore],
+        kind: TaskKind? = nil,
+        offers: [ModelCatalog.Offer] = [],
+        history: [Run] = []
+    ) -> String {
         guard !scores.isEmpty else {
             let what = kind.map { "a \($0.rawValue) task" } ?? "a run"
             return "No worker has finished \(what) yet, so there is nothing to compare."
@@ -201,8 +206,28 @@ public enum Scoreboard {
             guard !ofKind.isEmpty else { continue }
             lines.append(kind.rawValue)
             lines.append(contentsOf: ofKind.map { "  " + line($0) })
+            if let untried = untriedLine(offers, history: history, kind: kind) {
+                lines.append(untried)
+            }
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// How many untried workers are named before the rest are counted.
+    static let untriedNamed = 15
+
+    /// The offered workers with no run of `kind` in `history`, as one line
+    /// for that kind; nil when there are none or nothing is offered.
+    public static func untriedLine(_ offers: [ModelCatalog.Offer], history: [Run], kind: TaskKind) -> String? {
+        let tried = Set(history.filter { ($0.spec.kind ?? .other) == kind }.map {
+            ModelCatalog.Offer(cli: $0.spec.cli, model: $0.spec.model, effort: $0.spec.effort)
+        })
+        let untried = offers.filter { !tried.contains($0) }
+        guard !untried.isEmpty else { return nil }
+        let named = untried.prefix(untriedNamed).map(\.name)
+        let rest = untried.count - named.count
+        let tail = rest > 0 ? ", and \(rest) more" : ""
+        return "  not tried yet: " + named.joined(separator: ", ") + tail
     }
 
     private static func line(_ score: ModelScore) -> String {
@@ -219,7 +244,8 @@ public enum Scoreboard {
         return "\(score.cli.rawValue) \(score.model)\(effort) — " + fields.joined(separator: " · ")
     }
 
-    private static func hasFailed(_ run: Run) -> Bool {
+    /// Whether a run did not deliver: it was lost, or its result is an error.
+    static func hasFailed(_ run: Run) -> Bool {
         run.state == .lost || run.output?.isError == true
     }
 
