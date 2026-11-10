@@ -56,7 +56,7 @@ private func request(_ method: String, _ params: JSONValue? = nil, id: JSONValue
     let response = await server.handle(request("tools/list"))
     let tools = try? #require(response?.result?["tools"]?.arrayValue)
 
-    #expect(tools?.count == 10)
+    #expect(tools?.count == 20)
     for tool in tools ?? [] {
         #expect(tool["name"]?.stringValue?.isEmpty == false)
         // A description is what the agent picks the tool by; an empty one is a bug.
@@ -125,4 +125,38 @@ private func request(_ method: String, _ params: JSONValue? = nil, id: JSONValue
     #expect(decoded.id == .string("abc"))
     #expect(decoded.params?["arguments"]?["submit"]?.boolValue == true)
     #expect(decoded.params?["arguments"]?["text"]?.stringValue == "hi")
+}
+
+// MARK: - Workers and the browser
+
+@Test func aWorkerIsServedTheBrowserAndThePreviewAndNothingToDelegateWith() async {
+    // A worker reaches the browser through the same helper as the maestro,
+    // but a worker does not hand work on: the agent tools are not there.
+    let server = MCPServer(executor: StubExecutor(), tools: MCPTools.worker)
+    let listed = await server.handle(request("tools/list"))?.result?["tools"]?.arrayValue ?? []
+    let names = listed.compactMap { $0["name"]?.stringValue }
+    #expect(names.contains("browser_open"))
+    #expect(names.contains("browser_tabs"))
+    #expect(!names.contains { $0.hasPrefix("agent_") })
+    // It may read the shared terminal, and may not type in it: that would be
+    // a way round the commands it was allowed.
+    #expect(names.contains("terminal_read"))
+    #expect(!names.contains("terminal_run"))
+    let refused = await server.handle(request("tools/call", ["name": "agent_spawn", "arguments": [:]]))
+    #expect(refused?.error?.message == "unknown tool: agent_spawn")
+}
+
+@Test func whoIsCallingIsSaidByTheHelperNeverByTheModel() {
+    // The tab an agent may drive is its own. Which agent it is comes from the
+    // environment the orchestrator started it in, and a name the model wrote
+    // into the arguments itself is thrown away.
+    let forged: JSONValue = ["url": "https://a.com", "_agent": "someone-else"]
+    #expect(RemoteExecutor.arguments(forged, agent: "ab12cd34") == ["url": "https://a.com", "_agent": "ab12cd34"])
+    #expect(RemoteExecutor.arguments(forged, agent: nil) == ["url": "https://a.com"])
+    #expect(RemoteExecutor.arguments(forged, agent: "") == ["url": "https://a.com"])
+}
+
+@Test func lookingAtAnotherAgentsTabIsOfferedOnlyByTheToolsThatOnlyLook() {
+    let takesTab = MCPTools.panel.filter { $0["inputSchema"]?["properties"]?["tab"] != nil }.compactMap { $0["name"]?.stringValue }
+    #expect(takesTab.sorted() == ["browser_console", "browser_screenshot", "browser_snapshot"])
 }

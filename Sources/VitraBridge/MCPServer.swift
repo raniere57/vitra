@@ -26,9 +26,13 @@ public struct MCPServer: Sendable {
     public static let defaultProtocolVersion = "2024-11-05"
 
     private let executor: any ToolExecutor
+    private let tools: [JSONValue]
 
-    public init(executor: any ToolExecutor) {
+    /// `tools` is what this server offers: everything for a maestro, and for
+    /// a worker only the panel's.
+    public init(executor: any ToolExecutor, tools: [JSONValue] = MCPTools.all) {
         self.executor = executor
+        self.tools = tools
     }
 
     /// Handles one request. Returns nil for notifications, which take no reply.
@@ -48,7 +52,7 @@ public struct MCPServer: Sendable {
             return JSONRPC.Response(id: request.id, result: [:])
 
         case "tools/list":
-            return JSONRPC.Response(id: request.id, result: ["tools": .array(MCPTools.all)])
+            return JSONRPC.Response(id: request.id, result: ["tools": .array(tools)])
 
         case "tools/call":
             return await callTool(request)
@@ -66,7 +70,7 @@ public struct MCPServer: Sendable {
         guard let name = request.params?["name"]?.stringValue else {
             return JSONRPC.Response(id: request.id, code: .invalidParams, message: "missing tool name")
         }
-        guard MCPTools.names.contains(name) else {
+        guard tools.contains(where: { $0["name"]?.stringValue == name }) else {
             return JSONRPC.Response(id: request.id, code: .invalidParams, message: "unknown tool: \(name)")
         }
 

@@ -3,12 +3,19 @@ import Foundation
 /// `vitra mcp`: JSON-RPC on stdio in front, the GUI's socket behind.
 ///
 /// The agent's MCP client spawns this process; it is not the window. Everything
-/// that needs the window — every `tools/call` — is forwarded over the socket,
-/// while `initialize` and `tools/list` are answered here so that adding the
-/// server to an agent works whether or not Vitra happens to be open.
+/// that needs the window — every panel `tools/call` — is forwarded over the
+/// socket, while `initialize` and `tools/list` are answered here so that adding
+/// the server to an agent works whether or not Vitra happens to be open. The
+/// agent tools need no window and run in this process.
 public enum StdioBridge {
     public static func run() {
-        let server = MCPServer(executor: RemoteExecutor())
+        // A worker the orchestrator started is told so in its environment. It
+        // gets the browser and the preview, and nothing to delegate with: the
+        // maestro hands work out, a worker does it.
+        let isWorker = !(ProcessInfo.processInfo.environment["VITRA_AGENT"] ?? "").isEmpty
+        let server = isWorker
+            ? MCPServer(executor: RemoteExecutor(), tools: MCPTools.worker)
+            : MCPServer(executor: RoutingExecutor(agents: AgentToolExecutor(), panel: RemoteExecutor()))
         let out = OutputQueue()
         let group = DispatchGroup()
 
@@ -81,10 +88,22 @@ struct RemoteExecutor: ToolExecutor {
         }
     }
 
+    /// The arguments as the app receives them: with the worker that is
+    /// calling named under `_agent`, or with no such key for the maestro.
+    ///
+    /// Which tab an agent may drive hangs on this, so the name is only ever
+    /// the one from the environment; one the model wrote itself is dropped.
+    static func arguments(_ arguments: JSONValue, agent: String?) -> JSONValue {
+        guard case var .object(fields) = arguments else { return arguments }
+        fields["_agent"] = (agent?.isEmpty == false) ? agent.map(JSONValue.string) : nil
+        return .object(fields)
+    }
+
     func run(tool: String, arguments: JSONValue, pane: String?) async throws -> String {
         // The agent spawned this helper from inside a pane, and the pane put
         // its name in the environment on the way: that is the whole routing.
-        var params: [String: JSONValue] = ["name": .string(tool), "arguments": arguments]
+        let agent = ProcessInfo.processInfo.environment["VITRA_AGENT"]
+        var params: [String: JSONValue] = ["name": .string(tool), "arguments": Self.arguments(arguments, agent: agent)]
         if let id = ProcessInfo.processInfo.environment["VITRA_PANE"], !id.isEmpty {
             params["pane"] = .string(id)
         }
