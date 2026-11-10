@@ -751,16 +751,12 @@ echo '{"result":"done","is_error":false}'
     defer { sandbox.cleanUp() }
     try "vendor/\n".write(to: sandbox.project.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
     try "archive\n".write(to: sandbox.project.appendingPathComponent("vendor/lib/a.a").createDirectoryIfNeeded(), atomically: true, encoding: .utf8)
-    try "link vendor/lib\n".write(
-        to: sandbox.project.appendingPathComponent(".vitra/worktree").createDirectoryIfNeeded(),
-        atomically: true,
-        encoding: .utf8
-    )
     try sandbox.makeRepository()
 
     // The directory the fix is sent to is itself a worktree of the project, and
     // its ignored `vendor/lib` is a symlink into the main checkout, as a
-    // previous worker's tree is.
+    // previous worker's tree is. The list is committed on that worktree's
+    // branch only; the main checkout has none.
     let side = sandbox.root.appendingPathComponent("side")
     try sandbox.git(["worktree", "add", "-q", "-b", "side", side.path, "HEAD"])
     try FileManager.default.createDirectory(at: side.appendingPathComponent("vendor"), withIntermediateDirectories: true)
@@ -768,6 +764,14 @@ echo '{"result":"done","is_error":false}'
         at: side.appendingPathComponent("vendor/lib"),
         withDestinationURL: sandbox.project.appendingPathComponent("vendor/lib")
     )
+    try "link vendor/lib\n".write(
+        to: side.appendingPathComponent(".vitra/worktree").createDirectoryIfNeeded(),
+        atomically: true,
+        encoding: .utf8
+    )
+    try sandbox.git(["add", "-A"], in: side)
+    try sandbox.git(["commit", "-q", "-m", "list"], in: side)
+    #expect(!FileManager.default.fileExists(atPath: sandbox.project.appendingPathComponent(".vitra/worktree").path))
 
     let orchestrator = try sandbox.orchestrator(claude: #"""
     cat >/dev/null
@@ -781,6 +785,50 @@ echo '{"result":"done","is_error":false}'
     #expect(run.state == .finished(exitCode: 0))
     #expect(try sandbox.git(["show", "vitra/\(id):found.txt"]) == "found\n")
     #expect(run.worktreeSkipped.isEmpty)
+}
+
+@Test func aWorktreeGetsTheListCommittedOnItsBranchNotTheMainCheckoutsOne() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    try "vendor/\n".write(to: sandbox.project.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+    try "archive\n".write(to: sandbox.project.appendingPathComponent("vendor/lib/a.a").createDirectoryIfNeeded(), atomically: true, encoding: .utf8)
+    try "archive\n".write(to: sandbox.project.appendingPathComponent("vendor/old/b.a").createDirectoryIfNeeded(), atomically: true, encoding: .utf8)
+    // The main checkout asks for `vendor/old`; the branch changes the line to
+    // `vendor/lib`, and that is the list the worker must get.
+    try "link vendor/old\n".write(
+        to: sandbox.project.appendingPathComponent(".vitra/worktree").createDirectoryIfNeeded(),
+        atomically: true,
+        encoding: .utf8
+    )
+    try sandbox.makeRepository()
+    try "link vendor/lib\n".write(
+        to: sandbox.project.appendingPathComponent(".vitra/worktree"),
+        atomically: true,
+        encoding: .utf8
+    )
+    try sandbox.git(["add", "-A"])
+    try sandbox.git(["commit", "-q", "-m", "change the list"])
+    // The main working tree keeps the old list, uncommitted; the branch HEAD has the new one.
+    try "link vendor/old\n".write(
+        to: sandbox.project.appendingPathComponent(".vitra/worktree"),
+        atomically: true,
+        encoding: .utf8
+    )
+    let orchestrator = try sandbox.orchestrator(claude: #"""
+    cat >/dev/null
+    if [ -f vendor/lib/a.a ]; then echo lib > lib.txt; fi
+    if [ -e vendor/old ]; then echo old > old.txt; fi
+    echo '{"result":"done","is_error":false}'
+    """#)
+
+    let id = try orchestrator.spawn(sandbox.spec(access: .edit))
+    let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)
+
+    #expect(run.state == .finished(exitCode: 0))
+    #expect(try sandbox.git(["show", "vitra/\(id):lib.txt"]) == "lib\n")
+    #expect(run.worktreeSkipped.isEmpty)
+    // The main checkout's `vendor/old` line was not applied.
+    #expect((try? sandbox.git(["show", "vitra/\(id):old.txt"])) == nil)
 }
 
 @Test func aLinkedOrCopiedPathIsNotCommittedEvenWhenTheProjectIgnoresADirectoryOfThatName() async throws {

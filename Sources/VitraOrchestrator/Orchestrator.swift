@@ -258,11 +258,16 @@ public struct Orchestrator: Sendable {
 
         // What the project keeps out of git but the worker needs. Whatever
         // could not be applied is written beside the run for the report.
-        // The sources come from the main working tree, not from `topLevel`: when
-        // the directory is itself a worktree, its ignored folders are symlinks
-        // into the main checkout, which the setup would refuse as outside the
-        // repository. The common git dir is `<main>/.git` for every worktree.
-        let setup = WorktreeSetup.apply(repository: URL(fileURLWithPath: mainWorkingTree(from: topLevel)), to: tree)
+        // The list is read from the new tree, where it is committed as of the
+        // base. The sources come from the main working tree, not from `topLevel`:
+        // when the directory is itself a worktree, its ignored folders are
+        // symlinks into the main checkout, which the setup would refuse as
+        // outside the repository.
+        let setup = WorktreeSetup.apply(
+            listIn: tree,
+            sourcesIn: URL(fileURLWithPath: mainWorkingTree(from: topLevel)),
+            to: tree
+        )
         if !setup.skipped.isEmpty {
             try? Data((setup.skipped.joined(separator: "\n") + "\n").utf8)
                 .write(to: run.appendingPathComponent("worktree-setup"))
@@ -280,13 +285,17 @@ public struct Orchestrator: Sendable {
         return Worktree(top: topLevel, tree: tree.path, branch: branch, base: base, directory: directory)
     }
 
-    /// The top of the main working tree, which holds the common git dir. Falls
-    /// back to `topLevel` when git cannot say, so a normal checkout is unchanged.
+    /// The top of the main working tree: the first `worktree` entry git lists,
+    /// which is the main checkout in a normal repository and in a submodule
+    /// alike. Falls back to `topLevel` when git cannot say.
     private func mainWorkingTree(from topLevel: String) -> String {
-        let common = (Git.output(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: topLevel) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !common.isEmpty else { return topLevel }
-        return URL(fileURLWithPath: common).deletingLastPathComponent().path
+        let listing = Git.output(["worktree", "list", "--porcelain"], in: topLevel) ?? ""
+        let first = listing
+            .split(whereSeparator: \.isNewline)
+            .first { $0.hasPrefix("worktree ") }
+            .map { $0.dropFirst("worktree ".count).trimmingCharacters(in: .whitespaces) }
+        guard let first, !first.isEmpty else { return topLevel }
+        return String(first)
     }
 
     /// Takes away a worktree and the branch a failed spawn made.

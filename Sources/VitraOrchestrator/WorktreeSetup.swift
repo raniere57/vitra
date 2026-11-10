@@ -69,7 +69,15 @@ enum WorktreeSetup {
     /// Makes what `.vitra/worktree` asks for appear in `tree`, from the
     /// repository at `repository`. Empty when there is no file.
     static func apply(repository: URL, to tree: URL) -> Outcome {
-        guard let text = try? String(contentsOf: repository.appendingPathComponent(fileName), encoding: .utf8) else {
+        apply(listIn: repository, sourcesIn: repository, to: tree)
+    }
+
+    /// Like `apply(repository:to:)`, but the list is read from `listRoot`, the
+    /// tree the worker was given, which holds the list as of its commit. Only
+    /// the sources are read from `repository`, the main working tree, where
+    /// the ignored files are.
+    static func apply(listIn listRoot: URL, sourcesIn repository: URL, to tree: URL) -> Outcome {
+        guard let text = try? String(contentsOf: listRoot.appendingPathComponent(fileName), encoding: .utf8) else {
             return Outcome()
         }
         let parsed = parse(text)
