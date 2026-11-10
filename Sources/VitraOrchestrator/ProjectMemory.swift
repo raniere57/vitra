@@ -17,6 +17,7 @@ public struct ProjectMemory: Sendable {
     /// grow without limit, and a stale note is worth less than a fresh one.
     static let maxLines = 200
     static let maxNoteLength = 300
+    static let maxAuthorLength = 40
     private static let hashLength = 16
 
     private let root: URL
@@ -41,19 +42,40 @@ public struct ProjectMemory: Sendable {
         guard !text.contains(where: \.isNewline) else { throw .multiline }
         guard text.count <= Self.maxNoteLength else { throw .tooLong(text.count) }
 
-        let entry = "- \(Self.day(now)) [\(author)] \(text)"
-        let kept = (lines(of: (try? String(contentsOf: file(for: project), encoding: .utf8)) ?? "") + [entry])
-            .suffix(Self.maxLines)
+        let entry = "- \(Self.day(now)) [\(Self.safeAuthor(author))] \(text)"
         do {
             try FileManager.default.createDirectory(
                 at: directory(for: project),
                 withIntermediateDirectories: true,
                 attributes: [.posixPermissions: 0o700]
             )
+            // The lock covers the whole read-modify-write, so two adds at once
+            // cannot both read the same file and lose one note.
+            let descriptor = open(lockFile(for: project).path, O_RDWR | O_CREAT, 0o600)
+            guard descriptor >= 0 else { throw CocoaError(.fileWriteUnknown) }
+            defer {
+                flock(descriptor, LOCK_UN)
+                close(descriptor)
+            }
+            guard flock(descriptor, LOCK_EX) == 0 else { throw CocoaError(.fileLocking) }
+
+            let existing = (try? String(contentsOf: file(for: project), encoding: .utf8)) ?? ""
+            let kept = (lines(of: existing) + [entry]).suffix(Self.maxLines)
             try Data((kept.joined(separator: "\n") + "\n").utf8).write(to: file(for: project), options: .atomic)
         } catch {
             throw .unwritable(error.localizedDescription)
         }
+    }
+
+    /// The author as one safe token: ASCII letters, digits, `-`, `_`, `.`, at
+    /// most `maxAuthorLength` characters. Anything else is dropped, so an author
+    /// cannot add a line or close the bracket. Empty becomes "agent".
+    public static func safeAuthor(_ author: String) -> String {
+        let kept = author.filter { character in
+            character.isASCII && (character.isLetter || character.isNumber || "-_.".contains(character))
+        }
+        let token = String(kept.prefix(maxAuthorLength))
+        return token.isEmpty ? "agent" : token
     }
 
     // MARK: - On disk
@@ -68,6 +90,10 @@ public struct ProjectMemory: Sendable {
         directory(for: project).appendingPathComponent("memory.md")
     }
 
+    private func lockFile(for project: String) -> URL {
+        directory(for: project).appendingPathComponent("memory.lock")
+    }
+
     /// The non-empty lines of a memory file.
     private func lines(of text: String) -> [String] {
         text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
@@ -78,10 +104,6 @@ public struct ProjectMemory: Sendable {
         let parts = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }
-
-    // ponytail: read-then-rewrite, so two agents adding at the same instant can
-    // drop one note. Fine while agents add a note now and then; take a flock on
-    // the file if they start writing in bulk.
 }
 
 /// Why a note was refused. The description is what the agent is shown.

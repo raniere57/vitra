@@ -93,6 +93,45 @@ private let noon: Date = {
     #expect(lines.last?.hasSuffix("note 205") == true)
 }
 
+@Test func notesAddedFromManyThreadsAtOnceAreNoneLost() {
+    let scratch = Scratch()
+    defer { scratch.cleanUp() }
+    let memory = scratch.memory
+    let writers = 8
+    let notesEach = 25
+
+    DispatchQueue.concurrentPerform(iterations: writers) { writer in
+        for index in 1...notesEach {
+            try? memory.add("writer \(writer) note \(index)", author: "maestro", project: "/work/busy", now: noon)
+        }
+    }
+
+    let lines = memory.read(project: "/work/busy").split(separator: "\n")
+    #expect(lines.count == writers * notesEach)
+    for writer in 0..<writers {
+        for index in 1...notesEach {
+            #expect(lines.contains { $0.hasSuffix("writer \(writer) note \(index)") })
+        }
+    }
+}
+
+@Test func anAuthorIsReducedToASafeToken() throws {
+    let scratch = Scratch()
+    defer { scratch.cleanUp() }
+
+    try scratch.memory.add("note", author: "evil] injected\n- 2026-01-01 [x", project: "/work/app", now: noon)
+    try scratch.memory.add("note", author: "  ", project: "/work/app", now: noon)
+    try scratch.memory.add("note", author: "ok-name_1.2", project: "/work/app", now: noon)
+    try scratch.memory.add("note", author: String(repeating: "a", count: 60), project: "/work/app", now: noon)
+
+    let lines = scratch.memory.read(project: "/work/app").split(separator: "\n")
+    #expect(lines.count == 4)
+    #expect(lines[0] == "- 2026-11-10 [evilinjected-2026-01-01x] note")
+    #expect(lines[1] == "- 2026-11-10 [agent] note")
+    #expect(lines[2] == "- 2026-11-10 [ok-name_1.2] note")
+    #expect(lines[3] == "- 2026-11-10 [\(String(repeating: "a", count: 40))] note")
+}
+
 @Test func eachProjectKeepsItsOwnNotes() throws {
     let scratch = Scratch()
     defer { scratch.cleanUp() }
