@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// What a project asks for when a worktree is made for one of its editing
@@ -34,6 +35,14 @@ enum WorktreeSetup {
         var skipped: [String] = []
     }
 
+    struct Outcome: Equatable {
+        /// Paths now in the tree, relative to the top of the repository. The
+        /// worker's shell leaves these out of its commits.
+        var applied: [String] = []
+        /// Each entry that was refused or could not be made, with why.
+        var skipped: [String] = []
+    }
+
     /// Pure: the text in, what it asks for out. Whether a source exists is
     /// only known to `apply`, which looks at the disk.
     static func parse(_ text: String) -> Parsed {
@@ -58,51 +67,103 @@ enum WorktreeSetup {
     }
 
     /// Makes what `.vitra/worktree` asks for appear in `tree`, from the
-    /// repository at `repository`. Returns the lines that were skipped, each
-    /// with why; empty when everything applied or there is no file.
+    /// repository at `repository`. Empty when there is no file.
+    static func apply(repository: URL, to tree: URL) -> Outcome {
+        guard let text = try? String(contentsOf: repository.appendingPathComponent(fileName), encoding: .utf8) else {
+            return Outcome()
+        }
+        let parsed = parse(text)
+        var outcome = apply(parsed.entries, repository: repository, to: tree)
+        outcome.skipped.insert(contentsOf: parsed.skipped, at: 0)
+        return outcome
+    }
+
+    /// Applies entries directly. Each one is checked again here, so a caller
+    /// that did not come through `parse` gets the same refusals.
     ///
     /// A path already in the tree is left alone: the worktree is the worker's,
     /// and whatever git checked out there is what the worker was given.
-    static func apply(repository: URL, to tree: URL) -> [String] {
-        guard let text = try? String(contentsOf: repository.appendingPathComponent(fileName), encoding: .utf8) else {
-            return []
-        }
-        let parsed = parse(text)
-        var skipped = parsed.skipped
-        let manager = FileManager.default
-        for entry in parsed.entries {
+    static func apply(_ entries: [Entry], repository: URL, to tree: URL) -> Outcome {
+        var outcome = Outcome()
+        for entry in entries {
+            if let problem = problem(with: entry, repository: repository, tree: tree) {
+                outcome.skipped.append("\(entry.line): \(problem)")
+                continue
+            }
             let source = repository.appendingPathComponent(entry.path)
             let target = tree.appendingPathComponent(entry.path)
-            guard manager.fileExists(atPath: source.path) else {
-                skipped.append("\(entry.line): missing in the checkout")
-                continue
-            }
-            // Checked with attributes, not `fileExists`, which is false for a
-            // symlink that points nowhere: that is still something in the way.
-            guard (try? manager.attributesOfItem(atPath: target.path)) == nil else {
-                skipped.append("\(entry.line): already in the worktree")
-                continue
-            }
             do {
-                try manager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
                 switch entry.kind {
-                case .link: try manager.createSymbolicLink(at: target, withDestinationURL: source)
-                // copyItem clones on APFS where it can, so a large tree is cheap.
-                case .copy: try manager.copyItem(at: source, to: target)
+                case .link: try FileManager.default.createSymbolicLink(at: target, withDestinationURL: source)
+                case .copy: try cloneOrCopy(source.resolvingSymlinksInPath().path, to: target.path)
                 }
+                outcome.applied.append(entry.path)
             } catch {
-                skipped.append("\(entry.line): \(error.localizedDescription)")
+                outcome.skipped.append("\(entry.line): \(error.localizedDescription)")
             }
         }
-        return skipped
+        return outcome
     }
 
     /// Why a path cannot be used, or nil when it can. The path is what
     /// follows the verb, so an empty one is a line with nothing to act on.
-    private static func refusal(for path: String) -> String? {
+    static func refusal(for path: String) -> String? {
         if path.isEmpty { return "no path" }
-        if path.hasPrefix("/") || path.hasPrefix("~") { return "path must be relative" }
-        if path.split(separator: "/").contains("..") { return "path must not contain .." }
+        if path.hasPrefix("/") { return "path must be relative" }
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        if parts.first?.hasPrefix("~") == true { return "path must not start with ~" }
+        if parts.contains("..") { return "path must not contain .." }
+        if parts.contains(".") { return "path must not contain ." }
         return nil
+    }
+
+    /// Why an entry cannot be applied to this tree, or nil when it can. The
+    /// source must resolve inside the repository, and no folder on the way to
+    /// the target may be a symlink, so nothing is written outside the tree.
+    private static func problem(with entry: Entry, repository: URL, tree: URL) -> String? {
+        if let refusal = refusal(for: entry.path) { return refusal }
+
+        let source = repository.appendingPathComponent(entry.path)
+        guard FileManager.default.fileExists(atPath: source.path) else { return "missing in the checkout" }
+        let root = repository.resolvingSymlinksInPath().path + "/"
+        guard source.resolvingSymlinksInPath().path.hasPrefix(root) else {
+            return "resolves outside the repository"
+        }
+
+        // Every folder between the tree and the target, checked with lstat:
+        // createDirectory would follow a symlink and write through it.
+        let parts = entry.path.split(separator: "/")
+        var folder = tree
+        for part in parts.dropLast() {
+            folder = folder.appendingPathComponent(String(part))
+            if isSymlink(folder.path) { return "passes through a symlink in the worktree" }
+        }
+
+        // Checked with lstat, not `fileExists`, which is false for a symlink
+        // that points nowhere: that is still something in the way.
+        if exists(tree.appendingPathComponent(entry.path).path) { return "already in the worktree" }
+        return nil
+    }
+
+    /// Clones `source` to `target` where the volume can (APFS: no disk is
+    /// used until either side changes), and copies it otherwise.
+    private static func cloneOrCopy(_ source: String, to target: String) throws {
+        let state = copyfile_state_alloc()
+        defer { copyfile_state_free(state) }
+        let flags = copyfile_flags_t(COPYFILE_ALL | COPYFILE_RECURSIVE | COPYFILE_CLONE)
+        guard copyfile(source, target, state, flags) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
+    private static func exists(_ path: String) -> Bool {
+        var info = stat()
+        return lstat(path, &info) == 0
+    }
+
+    private static func isSymlink(_ path: String) -> Bool {
+        var info = stat()
+        return lstat(path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFLNK
     }
 }

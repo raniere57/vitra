@@ -746,6 +746,32 @@ echo '{"result":"done","is_error":false}'
     #expect(run.worktreeSkipped == ["link vendor/absent: missing in the checkout"])
 }
 
+@Test func aLinkedOrCopiedPathIsNotCommittedEvenWhenTheProjectIgnoresADirectoryOfThatName() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    // `vendor/` does not match a symlink, so without the exclusion the shell
+    // would stage the link and commit it with the worker's own work.
+    try "vendor/\n".write(to: sandbox.project.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+    try "archive\n".write(to: sandbox.project.appendingPathComponent("vendor/lib/a.a").createDirectoryIfNeeded(), atomically: true, encoding: .utf8)
+    try "extra\n".write(to: sandbox.project.appendingPathComponent("vendor/extra.txt").createDirectoryIfNeeded(), atomically: true, encoding: .utf8)
+    try "link vendor/lib\ncopy vendor/extra.txt\n".write(
+        to: sandbox.project.appendingPathComponent(".vitra/worktree").createDirectoryIfNeeded(),
+        atomically: true,
+        encoding: .utf8
+    )
+    try sandbox.makeRepository()
+    let orchestrator = try sandbox.orchestrator(claude: leavesAFile)
+
+    let id = try orchestrator.spawn(sandbox.spec(access: .edit, label: "writing"))
+    let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)
+
+    #expect(run.state == .finished(exitCode: 0))
+    let committed = try sandbox.git(["ls-tree", "-r", "--name-only", "vitra/\(id)"])
+        .split(separator: "\n").map(String.init)
+    #expect(committed.contains("from-worker.txt"))
+    #expect(!committed.contains { $0.hasPrefix("vendor/") })
+}
+
 private extension URL {
     /// The same URL, with its folder made, for writing a file into it.
     func createDirectoryIfNeeded() -> URL {

@@ -106,7 +106,14 @@ public struct Orchestrator: Sendable {
         if [ -n "$VITRA_WORKTREE" ]; then
             vitra_commit_error="$VITRA_RUN/commit-error"
             rm -f "$vitra_commit_error"
-            if ! git -C "$VITRA_WORKTREE" add -A >/dev/null 2>"$vitra_commit_error"; then
+            # Everything in the tree except what the setup linked or copied
+            # in: those are the project's, not the worker's work. Literal
+            # pathspecs, so a name is never read as a glob.
+            set -- .
+            while IFS= read -r vitra_path; do
+                set -- "$@" ":(exclude,literal)$vitra_path"
+            done <"$VITRA_RUN/worktree-excludes"
+            if ! git -C "$VITRA_WORKTREE" add -A -- "$@" >/dev/null 2>"$vitra_commit_error"; then
                 : # git's reason is in the file; the worker's edits stay where they are
             elif git -C "$VITRA_WORKTREE" diff --cached --quiet >/dev/null 2>&1; then
                 rm -f "$vitra_commit_error"
@@ -125,6 +132,8 @@ public struct Orchestrator: Sendable {
         ]
         if let worktree {
             variables["VITRA_WORKTREE"] = worktree.tree
+            // Read by the shell after the worker: one path per line, never
+            // spliced into the script.
             let label = spec.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             variables["VITRA_COMMIT_MESSAGE"] = "vitra \(id): " + (label.isEmpty ? spec.worker : label)
         }
@@ -225,11 +234,15 @@ public struct Orchestrator: Sendable {
 
         // What the project keeps out of git but the worker needs. Whatever
         // could not be applied is written beside the run for the report.
-        let skipped = WorktreeSetup.apply(repository: URL(fileURLWithPath: topLevel), to: tree)
-        if !skipped.isEmpty {
-            try? Data((skipped.joined(separator: "\n") + "\n").utf8)
+        let setup = WorktreeSetup.apply(repository: URL(fileURLWithPath: topLevel), to: tree)
+        if !setup.skipped.isEmpty {
+            try? Data((setup.skipped.joined(separator: "\n") + "\n").utf8)
                 .write(to: run.appendingPathComponent("worktree-setup"))
         }
+        // What the setup put there is kept out of the worker's commits; the
+        // file is always written, so the shell can read it.
+        try? Data(setup.applied.map { $0 + "\n" }.joined().utf8)
+            .write(to: run.appendingPathComponent("worktree-excludes"))
 
         let directory = prefix.isEmpty ? tree : tree.appendingPathComponent(prefix)
         // A directory that exists only on disk is not in the repository, so

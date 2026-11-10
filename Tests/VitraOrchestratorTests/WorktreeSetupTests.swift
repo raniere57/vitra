@@ -56,6 +56,13 @@ private func write(_ text: String, to url: URL) throws {
     #expect(parsed.skipped.allSatisfy { $0.contains("..") })
 }
 
+@Test func aPathWithDotComponentsOrAHomeTildeIsRefused() {
+    let parsed = WorktreeSetup.parse("copy .\nlink vendor/./lib\ncopy ~/keys\ncopy ~other\n")
+
+    #expect(parsed.entries.isEmpty)
+    #expect(parsed.skipped.count == 4)
+}
+
 @Test func anUnknownVerbOrAMissingPathIsSkippedAndTheRestStillParses() {
     let parsed = WorktreeSetup.parse("move a b\nlink\ncopy keep\n")
 
@@ -84,7 +91,7 @@ private func write(_ text: String, to url: URL) throws {
     try write("archive", to: repository.appendingPathComponent("vendor/lib/a.a"))
     try write("header", to: repository.appendingPathComponent("include/h.h"))
 
-    let skipped = WorktreeSetup.apply(repository: repository, to: tree)
+    let outcome = WorktreeSetup.apply(repository: repository, to: tree)
 
     let linked = tree.appendingPathComponent("vendor/lib")
     #expect(try FileManager.default.destinationOfSymbolicLink(atPath: linked.path) == repository.appendingPathComponent("vendor/lib").path)
@@ -95,8 +102,9 @@ private func write(_ text: String, to url: URL) throws {
     #expect(attributes[.type] as? FileAttributeType == .typeRegular)
     #expect(try String(contentsOf: copied, encoding: .utf8) == "header")
 
-    #expect(skipped.count == 1)
-    #expect(skipped[0].contains("copy nothing/here"))
+    #expect(outcome.applied == ["vendor/lib", "include"])
+    #expect(outcome.skipped.count == 1)
+    #expect(outcome.skipped[0].contains("copy nothing/here"))
 }
 
 @Test func anExistingFileInTheTreeIsNotOverwritten() throws {
@@ -110,11 +118,12 @@ private func write(_ text: String, to url: URL) throws {
     try write("theirs", to: repository.appendingPathComponent("config.txt"))
     try write("mine", to: tree.appendingPathComponent("config.txt"))
 
-    let skipped = WorktreeSetup.apply(repository: repository, to: tree)
+    let outcome = WorktreeSetup.apply(repository: repository, to: tree)
 
     #expect(try String(contentsOf: tree.appendingPathComponent("config.txt"), encoding: .utf8) == "mine")
-    #expect(skipped.count == 1)
-    #expect(skipped[0].contains("already"))
+    #expect(outcome.applied.isEmpty)
+    #expect(outcome.skipped.count == 1)
+    #expect(outcome.skipped[0].contains("already"))
 }
 
 @Test func aRepositoryWithoutAWorktreeFileChangesNothing() throws {
@@ -126,6 +135,73 @@ private func write(_ text: String, to url: URL) throws {
     }
     try write("theirs", to: repository.appendingPathComponent("config.txt"))
 
-    #expect(WorktreeSetup.apply(repository: repository, to: tree).isEmpty)
+    #expect(WorktreeSetup.apply(repository: repository, to: tree) == WorktreeSetup.Outcome())
     #expect(try FileManager.default.contentsOfDirectory(atPath: tree.path).isEmpty)
+}
+
+@Test func applyRefusesDotDotTildeAndDotEntriesEvenWhenNotParsed() throws {
+    let repository = try scratchDirectory()
+    let tree = try scratchDirectory()
+    defer {
+        try? FileManager.default.removeItem(at: repository)
+        try? FileManager.default.removeItem(at: tree)
+    }
+    // A real file just outside the repository, which `../` would reach.
+    let name = "escape-\(UUID().uuidString)"
+    let escaped = repository.deletingLastPathComponent().appendingPathComponent(name)
+    defer { try? FileManager.default.removeItem(at: escaped) }
+    try write("outside", to: escaped)
+    try write("keys", to: repository.appendingPathComponent("~/keys"))
+
+    // Entries handed over directly, bypassing the parser.
+    let outcome = WorktreeSetup.apply([
+        WorktreeSetup.Entry(kind: .copy, path: "../\(name)"),
+        WorktreeSetup.Entry(kind: .link, path: "~/keys"),
+        WorktreeSetup.Entry(kind: .copy, path: "."),
+        WorktreeSetup.Entry(kind: .copy, path: ""),
+    ], repository: repository, to: tree)
+
+    #expect(outcome.applied.isEmpty)
+    #expect(outcome.skipped.count == 4)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: tree.path).isEmpty)
+    #expect(try String(contentsOf: escaped, encoding: .utf8) == "outside")
+}
+
+@Test func aSourceThatResolvesOutsideTheRepositoryIsRefused() throws {
+    let repository = try scratchDirectory()
+    let tree = try scratchDirectory()
+    let outside = try scratchDirectory()
+    defer {
+        for url in [repository, tree, outside] { try? FileManager.default.removeItem(at: url) }
+    }
+    try write("secret", to: outside.appendingPathComponent("key.txt"))
+    try FileManager.default.createSymbolicLink(at: repository.appendingPathComponent("vendor"), withDestinationURL: outside)
+    try write("link vendor/key.txt\ncopy vendor/key.txt\n", to: repository.appendingPathComponent(".vitra/worktree"))
+
+    let outcome = WorktreeSetup.apply(repository: repository, to: tree)
+
+    #expect(outcome.applied.isEmpty)
+    #expect(outcome.skipped.count == 2)
+    #expect(outcome.skipped.allSatisfy { $0.contains("outside the repository") })
+    #expect(try FileManager.default.contentsOfDirectory(atPath: tree.path).isEmpty)
+}
+
+@Test func aLinkOrCopyThroughASymlinkedFolderInTheTreeIsRefused() throws {
+    let repository = try scratchDirectory()
+    let tree = try scratchDirectory()
+    let outside = try scratchDirectory()
+    defer {
+        for url in [repository, tree, outside] { try? FileManager.default.removeItem(at: url) }
+    }
+    try write("inside", to: repository.appendingPathComponent("config/app.txt"))
+    // The worktree already has `config` as a symlink to a folder outside it.
+    try FileManager.default.createSymbolicLink(at: tree.appendingPathComponent("config"), withDestinationURL: outside)
+    try write("link config/app.txt\ncopy config/app.txt\n", to: repository.appendingPathComponent(".vitra/worktree"))
+
+    let outcome = WorktreeSetup.apply(repository: repository, to: tree)
+
+    #expect(outcome.applied.isEmpty)
+    #expect(outcome.skipped.count == 2)
+    #expect(outcome.skipped.allSatisfy { $0.contains("symlink") })
+    #expect(try FileManager.default.contentsOfDirectory(atPath: outside.path).isEmpty)
 }
