@@ -599,7 +599,7 @@ public enum Git {
     /// stderr, and that reason is what a caller has to show. The directory is
     /// where the command stands rather than one of its arguments, so a caller
     /// names only the command and the revisions it works on.
-    static func run(_ arguments: [String], in directory: String) -> (succeeded: Bool, output: String) {
+    public static func run(_ arguments: [String], in directory: String) -> (succeeded: Bool, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git"] + arguments

@@ -123,6 +123,13 @@ public enum AgentTools {
     public static let names: [String] = all.compactMap { $0["name"]?.stringValue }
 }
 
+/// The gate on one run: what to add to its report, and, while an auditor is
+/// reading, the audit's id (or "an auditor" while it is still being claimed).
+private struct Gate {
+    var line: String? = nil
+    var reading: String? = nil
+}
+
 /// Runs the agent tools against an orchestrator.
 public struct AgentToolExecutor: ToolExecutor {
     private static let defaultTimeout = 300
@@ -283,7 +290,7 @@ public struct AgentToolExecutor: ToolExecutor {
         let timeout = min(max(requested, 0), Self.longestTimeout)
 
         let runs = try await orchestrator.wait(ids: ids, timeout: TimeInterval(timeout))
-        var gates: [String: String] = [:]
+        var gates: [String: Gate] = [:]
         for run in runs {
             // Reading the history and starting an auditor both touch the disk
             // and one of them starts a process: keep them off the pool, as
@@ -293,9 +300,10 @@ public struct AgentToolExecutor: ToolExecutor {
             }
         }
         return runs.map { run in
-            let report = AgentReport.full(run)
-            guard let gate = gates[run.id] else { return report }
-            return report + "\n" + gate
+            let gate = gates[run.id]
+            let report = AgentReport.full(run, audit: gate?.reading)
+            guard let line = gate?.line else { return report }
+            return report + "\n" + line
         }.joined(separator: "\n\n")
     }
 
@@ -303,11 +311,12 @@ public struct AgentToolExecutor: ToolExecutor {
     /// read-only auditor from another provider once, and reports the audit
     /// that already exists on every later wait.
     ///
-    /// Nil means there is nothing to gate: the run did not finish cleanly, did
-    /// not edit, has no branch or no commit on it, or its spawn said `audit:
-    /// false`. A gate that cannot be started is said in the report rather than
-    /// failing the wait: the delivery is still the orchestrator's to review.
-    private func gate(for run: Run) -> String? {
+    /// An empty gate means there is nothing to gate: the run did not finish
+    /// cleanly, did not edit, has no branch or no commit on it, or its spawn
+    /// said `audit: false`. A gate that cannot be started is said in the
+    /// report rather than failing the wait: the delivery is still the
+    /// orchestrator's to review.
+    private func gate(for run: Run) -> Gate {
         guard case .finished(exitCode: 0) = run.state,
               run.output?.isError != true,
               run.spec.access == .edit,
@@ -316,22 +325,20 @@ public struct AgentToolExecutor: ToolExecutor {
               let repository = run.repository,
               let worktree = run.worktree,
               let directory = orchestrator.directory(of: run.id)
-        else { return nil }
+        else { return Gate() }
 
         let record = directory.appendingPathComponent("audit")
-        if let existing = (try? String(contentsOf: record, encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines), !existing.isEmpty {
-            return (try? orchestrator.status(existing)).map(AgentReport.gate)
-                ?? "gate: audit \(existing) — its record is gone; review this delivery yourself."
+        if FileManager.default.fileExists(atPath: record.path) {
+            return Self.existingGate(record, orchestrator: orchestrator)
         }
-        guard run.spec.audit != false else { return nil }
+        guard run.spec.audit != false else { return Gate() }
 
         // No commit means no diff to audit; the report already says the edits
         // are still uncommitted in the worktree.
         let counted = Git.output(["rev-list", "--count", "\(base)..\(branch)"], in: repository)
         guard let commits = counted.flatMap({ Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }),
               commits > 0
-        else { return nil }
+        else { return Gate() }
 
         let history = orchestrator.recent(limit: Self.scoredRuns)
         guard let choice = Audit.chooseAuditor(
@@ -339,15 +346,35 @@ public struct AgentToolExecutor: ToolExecutor {
             history: history,
             installed: Set(executables.paths.keys)
         ) else {
-            return "gate: no auditor from another provider is available — review this delivery yourself."
+            return Gate(line: "gate: no auditor from another provider is available — review this delivery yourself.")
         }
 
-        let diff = Git.output(["diff", "\(base)..\(branch)"], in: repository) ?? ""
+        // A diff that cannot be read is not an empty diff: an auditor started
+        // on it would judge nothing, and say `ship` about nothing.
+        let read = Git.run(["diff", "\(base)..\(branch)"], in: repository)
+        guard read.succeeded else {
+            let reason = read.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            return Gate(line: "gate: no audit — could not read the diff: "
+                + (reason.isEmpty ? "git gave no reason" : reason))
+        }
+
+        // The claim is taken before the spawn, not after: two waits finishing
+        // the same delivery at once would otherwise both read no record, both
+        // spawn an auditor, and both pay for it.
+        switch Self.claim(record) {
+        case .exists:
+            return Self.existingGate(record, orchestrator: orchestrator)
+        case let .failed(reason):
+            return Gate(line: "gate: could not start an auditor: \(reason) — review this delivery yourself.")
+        case .created:
+            break
+        }
+
         let label = run.spec.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let spec = WorkerSpec(
             cli: choice.cli,
             model: choice.model,
-            prompt: Audit.prompt(task: run.spec.prompt, diff: diff, label: run.spec.label),
+            prompt: Audit.prompt(task: run.spec.prompt, diff: read.output, label: run.spec.label),
             directory: worktree,
             access: .read,
             label: "auditoria: " + (label.isEmpty ? run.id : label),
@@ -358,17 +385,67 @@ public struct AgentToolExecutor: ToolExecutor {
         do {
             let id = try orchestrator.spawn(spec)
             do {
+                // Atomic replace of the claim: a reader sees `pending` or the
+                // id, never half of either.
                 try Data(id.utf8).write(to: record, options: .atomic)
             } catch {
                 // An audit nobody can find again would be started twice and
                 // paid for twice: stop it rather than leave it unrecorded.
                 try? orchestrator.cancel(id)
-                return "gate: could not record the audit — review this delivery yourself."
+                try? FileManager.default.removeItem(at: record)
+                return Gate(line: "gate: could not record the audit — review this delivery yourself.")
             }
-            return "gate: audit \(id) by \(spec.worker) started — agent_wait on it and read its verdict before reviewing yourself."
+            return Gate(
+                line: "gate: audit \(id) by \(spec.worker) started — agent_wait on it and read its verdict before reviewing yourself.",
+                reading: id
+            )
         } catch {
-            return "gate: could not start an auditor: \(error) — review this delivery yourself."
+            // The claim is the retry token: with no auditor behind it, a
+            // later wait has to be able to take it.
+            try? FileManager.default.removeItem(at: record)
+            return Gate(line: "gate: could not start an auditor: \(error) — review this delivery yourself.")
         }
+    }
+
+    /// What an existing `audit` file says.
+    ///
+    /// `pending` is a claim another wait has taken and is spawning behind:
+    /// report the audit as starting rather than start a second one. An id is
+    /// looked up so a running audit is known to be reading the worktree.
+    private static func existingGate(_ record: URL, orchestrator: Orchestrator) -> Gate {
+        let existing = ((try? String(contentsOf: record, encoding: .utf8)) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if existing.isEmpty || existing == "pending" {
+            return Gate(line: "gate: audit starting", reading: "an auditor")
+        }
+        guard let audit = try? orchestrator.status(existing) else {
+            return Gate(line: "gate: audit \(existing) — its record is gone; review this delivery yourself.")
+        }
+        return Gate(line: AgentReport.gate(audit), reading: audit.state == .running ? audit.id : nil)
+    }
+
+    /// Takes the audit slot for a run, creating the record only if nobody else
+    /// has: the one caller that creates it is the only one that may spawn.
+    private enum Claim {
+        case created
+        case exists
+        case failed(String)
+    }
+
+    private static func claim(_ record: URL) -> Claim {
+        let descriptor = open(record.path, O_CREAT | O_EXCL | O_WRONLY, 0o644)
+        guard descriptor >= 0 else {
+            return errno == EEXIST ? .exists : .failed(String(cString: strerror(errno)))
+        }
+        let pending = Data("pending".utf8)
+        let written = pending.withUnsafeBytes { write(descriptor, $0.baseAddress, $0.count) }
+        let reason = String(cString: strerror(errno))
+        close(descriptor)
+        guard written == pending.count else {
+            try? FileManager.default.removeItem(at: record)
+            return .failed(reason)
+        }
+        return .created
     }
 
     /// Runs blocking work on a thread of its own.
@@ -429,7 +506,11 @@ enum AgentReport {
     }
 
     /// The headline, then the worker's answer and anything it left on stderr.
-    static func full(_ run: Run) -> String {
+    ///
+    /// `audit` is the auditor reading the worktree, when one is: while it
+    /// runs, the report must not tell the orchestrator to take that worktree
+    /// away underneath it.
+    static func full(_ run: Run, audit: String? = nil) -> String {
         var lines = [headline(run)]
         if let text = run.output?.text, !text.isEmpty {
             lines.append(text.count > longestAnswer
@@ -443,7 +524,7 @@ enum AgentReport {
             // (When stderr was all the worker said, it is already the answer above.)
             lines.append("stderr: " + errorTail)
         }
-        lines.append(contentsOf: branchLines(run))
+        lines.append(contentsOf: branchLines(run, audit: audit))
         return lines.joined(separator: "\n")
     }
 
@@ -474,7 +555,7 @@ enum AgentReport {
     /// When the commit failed the first line says so instead of reporting "no
     /// changes", which would leave the worker's edits stranded and unmentioned
     /// in the worktree.
-    private static func branchLines(_ run: Run) -> [String] {
+    private static func branchLines(_ run: Run, audit: String?) -> [String] {
         guard let branch = run.branch, let base = run.baseCommit,
               let top = run.repository, let tree = run.worktree
         else { return [] }
@@ -492,11 +573,17 @@ enum AgentReport {
                     + (stat.map { $0.isEmpty ? "no changes" : $0 } ?? "no changes")
             )
         }
-        lines.append(
-            "merge: git -C \(topArgument) merge \(branchArgument) — then clean up: "
-                + "git -C \(topArgument) worktree remove \(ShellQuote.quote(tree)) && "
-                + "git -C \(topArgument) branch -d \(branchArgument)"
-        )
+        if let audit {
+            // The auditor is reading this worktree: the merge waits, and the
+            // cleanup above all, or it would pull the files out from under it.
+            lines.append("merge after the audit: \(audit) is reading this worktree")
+        } else {
+            lines.append(
+                "merge: git -C \(topArgument) merge \(branchArgument) — then clean up: "
+                    + "git -C \(topArgument) worktree remove \(ShellQuote.quote(tree)) && "
+                    + "git -C \(topArgument) branch -d \(branchArgument)"
+            )
+        }
         return lines
     }
 }

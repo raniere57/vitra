@@ -386,6 +386,79 @@ private func reviewRuns(in orchestrator: Orchestrator) -> [Run] {
     #expect(reviewRuns(in: fixture.orchestrator).count == 1)
 }
 
+@Test func twoWaitsAtOnceStartExactlyOneAudit() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: audits)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    // Both waits see the same finished delivery at the same time. Only the one
+    // that takes the audit claim may spawn an auditor: the other finds it.
+    async let first = fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    async let second = fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let reports = try await [first, second]
+
+    #expect(reports.count == 2)
+    #expect(reviewRuns(in: fixture.orchestrator).count == 1)
+    let auditID = try String(
+        contentsOf: fixture.root.appendingPathComponent("runs/\(id)/audit"), encoding: .utf8
+    )
+    #expect(auditID.count == 8)
+    #expect(reviewRuns(in: fixture.orchestrator).first?.id == auditID)
+}
+
+/// An auditor that keeps reading: enough to see the report while it holds the
+/// worktree.
+private let keepsReading = #"cat >/dev/null; sleep 30"#
+
+@Test func theReportDoesNotOfferToRemoveTheWorktreeWhileTheAuditReadsIt() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: keepsReading)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    let started = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let auditID = try String(
+        contentsOf: fixture.root.appendingPathComponent("runs/\(id)/audit"), encoding: .utf8
+    )
+    #expect(started.contains("merge after the audit: \(auditID) is reading this worktree"))
+    #expect(!started.contains("worktree remove"))
+
+    let again = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+    #expect(again.contains("merge after the audit: \(auditID) is reading this worktree"))
+    #expect(!again.contains("worktree remove"))
+
+    // Once the auditor has stopped, the merge and cleanup line is back.
+    _ = try await fixture.call("agent_cancel", ["id": .string(auditID)])
+    let stopped = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+    #expect(stopped.contains("worktree remove"))
+    #expect(!stopped.contains("merge after the audit:"))
+}
+
+@Test func aDiffThatCannotBeReadStartsNoAuditor() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: audits)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    // A diff program that does not exist makes `git diff` fail, while the
+    // branch and its commit are still readable.
+    try git(["config", "diff.external", "/no/such/vitra-diff"], in: repository)
+
+    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+
+    #expect(report.contains("gate: no audit — could not read the diff: "))
+    #expect(report.contains("external diff died") || report.contains("No such file"))
+    #expect(reviewRuns(in: fixture.orchestrator).isEmpty)
+    #expect(!FileManager.default.fileExists(
+        atPath: fixture.root.appendingPathComponent("runs/\(id)/audit").path
+    ))
+    // With no auditor reading it, the worktree is the orchestrator's to remove.
+    #expect(report.contains("worktree remove"))
+}
+
 @Test func aDeliveryWithNoCommitsStartsNoAudit() async throws {
     // The worker ran and exited clean, but its branch is the base it started
     // from: there is no change for anyone to read.
