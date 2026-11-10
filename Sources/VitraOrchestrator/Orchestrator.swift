@@ -707,13 +707,14 @@ public struct Orchestrator: Sendable {
             .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 
-    /// Whether an editing worker left commits on its branch. Nil when git
-    /// cannot say, as when the branch was merged and removed long ago.
+    /// Whether an editing worker left commits on its branch: false for a run
+    /// that has no branch at all. Nil when it has one and git cannot say, as
+    /// when the branch was merged and removed long ago.
     private func hasCommits(_ record: RunRecord) -> Bool? {
         guard record.spec.access == .edit,
-              let repository = record.repository, let branch = record.branch, let base = record.baseCommit,
-              let count = Git.output(["rev-list", "--count", "\(base)..\(branch)"], in: repository)
-        else { return nil }
+              let repository = record.repository, let branch = record.branch, let base = record.baseCommit
+        else { return false }
+        guard let count = Git.output(["rev-list", "--count", "\(base)..\(branch)"], in: repository) else { return nil }
         return Int(count.trimmingCharacters(in: .whitespacesAndNewlines)).map { $0 > 0 }
     }
 
