@@ -8,7 +8,7 @@ import WebKit
 /// Automation runs in an isolated content world. The page cannot see the
 /// registry of element refs, cannot redefine the functions used to click, and
 /// cannot read anything the agent evaluates.
-public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate, WKScriptMessageHandler {
+public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate, WKScriptMessageHandler, NSComboBoxDelegate {
     /// Where automation runs: same DOM, separate JavaScript globals.
     private static let world = WKContentWorld.world(name: "vitra")
 
@@ -25,7 +25,10 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
 
     private var webView: WKWebView?
     private var observations: [NSKeyValueObservation] = []
-    private let address = NSTextField()
+    /// A combo box, for the history it comes with: the list under the arrow,
+    /// and completion from that list as an address is typed.
+    private let address = NSComboBox()
+    private var addressBeforeList = ""
     private let progress = NSProgressIndicator()
     private var pendingLoads: [(Result<Void, Error>) -> Void] = []
     private lazy var findBar = FindBar(browser: self)
@@ -292,6 +295,10 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         progress.stopAnimation(nil)
         progress.isHidden = true
         onPageChanged?(webView.title ?? "", webView.url?.host ?? "")
+        if let url = webView.url {
+            BrowserHistory.record(url)
+            refreshHistory()
+        }
         finishLoads(with: .success(()))
     }
 
@@ -362,7 +369,10 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         let web = WKWebView(frame: .zero, configuration: configuration)
         web.navigationDelegate = self
         web.translatesAutoresizingMaskIntoConstraints = false
-        web.setValue(false, forKey: "drawsBackground")
+        // The web view paints its own background. Left transparent, a page that
+        // sets none — most local pages a developer opens — would put its black
+        // text straight on the panel's dark surface instead of on the white
+        // every browser gives it.
         addSubview(web)
         NSLayoutConstraint.activate([
             web.topAnchor.constraint(equalTo: topAnchor, constant: 34),
@@ -404,7 +414,12 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         address.drawsBackground = true
         address.isBordered = false
         address.focusRingType = .none
-        address.placeholderString = "address"
+        address.placeholderString = "endereço"
+        address.isButtonBordered = false
+        address.completes = true
+        address.numberOfVisibleItems = 12
+        address.delegate = self
+        refreshHistory()
         address.target = self
         address.action = #selector(addressEntered)
         address.translatesAutoresizingMaskIntoConstraints = false
@@ -506,6 +521,29 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         configuration.caseSensitive = false
         webView.find(query, configuration: configuration) { [weak self] result in
             self?.findBar.report(found: result.matchFound)
+        }
+    }
+
+    /// Offers the pages visited so far, most recent first.
+    private func refreshHistory() {
+        let items = BrowserHistory.load().map(BrowserHistory.display)
+        guard items != (address.objectValues as? [String] ?? []) else { return }
+        address.removeAllItems()
+        address.addItems(withObjectValues: items)
+    }
+
+    // Another project's browser may have been somewhere new since.
+    public func comboBoxWillPopUp(_ notification: Notification) {
+        refreshHistory()
+        addressBeforeList = address.stringValue
+    }
+
+    /// Picking a page from the list goes there: nobody picks one to then
+    /// press Return as well.
+    public func comboBoxWillDismiss(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.address.stringValue != self.addressBeforeList else { return }
+            self.addressEntered()
         }
     }
 

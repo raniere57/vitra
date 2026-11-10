@@ -34,6 +34,9 @@ public final class PreviewPanel: NSView {
 
     private let zoomButton = NSButton()
 
+    /// Asked first when Back is pressed; true means it was dealt with.
+    public var onBack: (() -> Bool)?
+
     /// A folder was clicked in the file list. The panel does not follow it
     /// itself: the terminal decides where it is, and the list follows that.
     public var onDirectorySelected: ((URL) -> Void)?
@@ -223,6 +226,9 @@ public final class PreviewPanel: NSView {
     }
 
     @objc private func backClicked() {
+        // Whoever opened the file may know better where it came from than
+        // the panel's own trail does — a list the panel never showed.
+        if onBack?() == true { return }
         guard let previous = previousStop else { return }
         if let current, history.last == current { history.removeLast() }
         switch previous {
@@ -299,6 +305,10 @@ public final class PreviewPanel: NSView {
         detailLabel.stringValue = browser.currentURL?.host ?? ""
         return browser
     }
+
+    /// The browser kept under `key`, on screen or not; nil when there is none.
+    /// For an agent working in a tab that is not the one being looked at.
+    public func keptBrowser(for key: String) -> BrowserView? { browsers[key] }
 
     /// Lets a pane's browser go, when the pane does.
     public func dropBrowser(for key: String) {

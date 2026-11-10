@@ -1,5 +1,6 @@
 import AppKit
 import VitraCore
+import UniformTypeIdentifiers
 import WebKit
 
 /// HTML, SVG and anything else that needs a browser engine.
@@ -21,9 +22,27 @@ final class WebPreviewView: NSView, PreviewContentView {
         // no local storage left behind between previews.
         configuration.websiteDataStore = .nonPersistent()
 
+        // WebKit shows a video file at the video's own size, which for
+        // anything shot upright is taller than the panel. Held to the panel
+        // and letterboxed, the whole frame and the controls are in view.
+        if UTType(filenameExtension: target.url.pathExtension)?.conforms(to: .audiovisualContent) == true {
+            let fit = """
+            const style = document.createElement('style');
+            style.textContent = 'html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111}' +
+                'video{position:fixed;inset:0;width:100%!important;height:100%!important;object-fit:contain}';
+            document.documentElement.appendChild(style);
+            """
+            configuration.userContentController.addUserScript(
+                WKUserScript(source: fit, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+            )
+        }
+
         let web = WKWebView(frame: bounds, configuration: configuration)
         web.autoresizingMask = [.width, .height]
-        web.setValue(false, forKey: "drawsBackground")
+        // The web view paints its own background. Left transparent, a page that
+        // sets none — most local pages a developer opens — would put its black
+        // text straight on the panel's dark surface instead of on the white
+        // every browser gives it.
         addSubview(web)
         webView = web
 
