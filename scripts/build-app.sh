@@ -79,10 +79,19 @@ PLIST
 
 [[ -f "$ROOT/dist/AppIcon.icns" ]] && cp "$ROOT/dist/AppIcon.icns" "$APP/Contents/Resources/"
 
-# Ad-hoc signature. Without any signature at all, macOS refuses to launch an
-# arm64 binary outright rather than merely warning about it.
-log "signing ad-hoc"
-codesign --force --deep --sign - "$APP" 2>&1 | grep -v "replacing existing signature" || true
+# Signed with the "Vitra Dev" certificate when the keychain has one, so the
+# app keeps the same identity from build to build and macOS keeps the
+# permissions it was given (Screen Recording above all). Ad-hoc otherwise:
+# without any signature at all, macOS refuses to launch an arm64 binary
+# outright rather than merely warning about it.
+IDENTITY="${VITRA_SIGN_IDENTITY:-Vitra Dev}"
+if security find-certificate -c "$IDENTITY" >/dev/null 2>&1 \
+  && codesign --force --deep --sign "$IDENTITY" "$APP" 2>/dev/null; then
+  log "signed as $IDENTITY"
+else
+  log "signing ad-hoc"
+  codesign --force --deep --sign - "$APP" 2>&1 | grep -v "replacing existing signature" || true
+fi
 
 log "built $APP ($(du -sh "$APP" | cut -f1))"
 
