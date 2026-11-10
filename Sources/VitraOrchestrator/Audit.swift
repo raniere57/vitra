@@ -27,6 +27,8 @@ public enum Audit {
     static let cheapAuditors: [(cli: WorkerCLI, model: String, effort: String?)] = [
         (.opencode, "opencode/glm-5.3-flash-free", nil),
         (.cursor, "grok-4.7-low-fast", nil),
+        (.cursor, "cursor-grok-4.6-low-fast", nil),
+        (.cursor, "cursor-grok-4.5-low-fast", nil),
         (.claude, "haiku", "low"),
     ]
 
@@ -48,23 +50,34 @@ public enum Audit {
         let ranked = Scoreboard.scores(history, kind: .review).map {
             (cli: $0.cli, model: $0.model, effort: $0.effort)
         }
-        for candidate in ranked + cheapAuditors {
-            guard candidate.cli != implementer.cli, candidate.cli != .gemini,
-                  installed.contains(candidate.cli)
-            else { continue }
-            let spec = WorkerSpec(
-                cli: candidate.cli,
-                model: candidate.model,
-                prompt: "review a change",
-                directory: "/",
-                access: .read,
-                kind: .review,
-                effort: candidate.effort
-            )
-            guard TrialRules.problem(with: spec, history: history, providers: installed.count) == nil else { continue }
-            return candidate
+        let candidates = (ranked + cheapAuditors).filter { candidate in
+            candidate.cli != implementer.cli && candidate.cli != .gemini && installed.contains(candidate.cli)
         }
-        return nil
+        if let open = candidates.first(where: {
+            TrialRules.problem(with: auditSpec($0), history: history, providers: installed.count) == nil
+        }) {
+            return open
+        }
+        // Every candidate is refused, so the exploration turn alone must not
+        // leave the delivery unaudited: the first that passes the rest wins.
+        return candidates.first(where: {
+            TrialRules.problem(
+                with: auditSpec($0), history: history, providers: installed.count, includeExploration: false
+            ) == nil
+        })
+    }
+
+    /// The review a candidate would be asked to do, as the trial rules see it.
+    private static func auditSpec(_ candidate: (cli: WorkerCLI, model: String, effort: String?)) -> WorkerSpec {
+        WorkerSpec(
+            cli: candidate.cli,
+            model: candidate.model,
+            prompt: "review a change",
+            directory: "/",
+            access: .read,
+            kind: .review,
+            effort: candidate.effort
+        )
     }
 
     /// What the auditor is asked: judge this change, edit nothing, and lead

@@ -9,7 +9,8 @@ private func review(
     _ cli: WorkerCLI,
     _ model: String,
     effort: String? = nil,
-    score: Int? = nil
+    score: Int? = nil,
+    at began: Date = start
 ) -> Run {
     Run(
         id: "0123abcd",
@@ -19,12 +20,49 @@ private func review(
         ),
         state: .finished(exitCode: 0),
         pid: 4242,
-        started: start,
-        ended: start.addingTimeInterval(10),
+        started: began,
+        ended: began.addingTimeInterval(10),
         output: WorkerOutput(text: "ok", isError: false),
         errorTail: nil,
-        rating: score.map { Rating(score: $0, note: nil, rated: start) }
+        rating: score.map { Rating(score: $0, note: nil, rated: began) }
     )
+}
+
+@Test func anExplorationTurnGoesToAnUntriedCheapAuditor() {
+    // Three providers rated on review; the last four audits all went to
+    // grok-4.7-low-fast, so the next one must explore.
+    let older = [
+        review(.opencode, "opencode/a-free", score: 4),
+        review(.gemini, "gemini-3.8-flash-low", score: 3),
+    ]
+    let recent = (1...4).map { step in
+        review(.cursor, "grok-4.7-low-fast", score: 5, at: start.addingTimeInterval(Double(step)))
+    }
+    let chosen = Audit.chooseAuditor(
+        implementer: implementer(.claude),
+        history: older + recent,
+        installed: [.claude, .cursor, .gemini]
+    )
+    #expect(chosen?.cli == .cursor)
+    #expect(chosen?.model == "cursor-grok-4.6-low-fast")
+}
+
+@Test func anExplorationTurnFallsBackWhenNoUntriedCandidateIsInstalled() {
+    // Every installed candidate is rated and due exploration: the audit still
+    // goes to the first that passes the rest of the guards, not to nothing.
+    let older = [
+        review(.cursor, "grok-4.7-low-fast", score: 3),
+        review(.gemini, "gemini-3.8-flash-low", score: 3),
+    ]
+    let recent = (1...4).map { step in
+        review(.opencode, "opencode/glm-5.3-flash-free", score: 4, at: start.addingTimeInterval(Double(step)))
+    }
+    let chosen = Audit.chooseAuditor(
+        implementer: implementer(.claude),
+        history: older + recent,
+        installed: [.claude, .opencode]
+    )
+    #expect(chosen?.model == "opencode/glm-5.3-flash-free")
 }
 
 private func implementer(_ cli: WorkerCLI) -> WorkerSpec {

@@ -8,15 +8,29 @@ import Foundation
 /// - Ladder: a model is tried at its lowest effort before a higher one. A
 ///   cheap, fast worker that does the job well is the better worker, and
 ///   that is only found out by trying it first.
+/// - Exploration: once a kind's trial is over, one piece in five goes to a
+///   worker with no record on that kind. Four pieces in a row to rated
+///   workers and the fifth must go to an untried one.
 public enum TrialRules {
     /// How many providers must have a rating on a kind before reuse is free.
     public static let providersToCompare = 3
 
+    /// How many finished pieces in a row may go to rated workers before one
+    /// must go to an untried worker.
+    public static let piecesBeforeExploration = 4
+
     static let ladder = ["minimal", "low", "medium", "high", "xhigh", "max"]
 
     /// Why `spec` should not run now, given every run so far; nil when it may.
-    /// `providers` is how many worker CLIs are installed.
-    public static func problem(with spec: WorkerSpec, history: [Run], providers: Int) -> String? {
+    /// `providers` is how many worker CLIs are installed. `includeExploration`
+    /// is false only where the exploration turn alone must not refuse, so an
+    /// audit is never skipped for it.
+    public static func problem(
+        with spec: WorkerSpec,
+        history: [Run],
+        providers: Int,
+        includeExploration: Bool = true
+    ) -> String? {
         let kind = spec.kind ?? .other
         let judged = history.filter { ($0.spec.kind ?? .other) == kind && $0.state != .running && $0.state != .cancelled }
         let (base, effort) = split(spec)
@@ -44,7 +58,33 @@ public enum TrialRules {
                 + "and \(spec.worker) already has one. Use a worker with no record on \(kind.rawValue) — from a provider "
                 + "not rated yet, fast and cheap first (agent_models lists them)."
         }
+        if includeExploration, ratedProviders.count >= needed,
+           let refusal = explorationProblem(spec, judged: judged, rated: rated) {
+            return refusal
+        }
         return nil
+    }
+
+    /// The refusal for a rated worker's piece when the last
+    /// `piecesBeforeExploration` finished pieces of its kind all went to
+    /// workers already rated on it; nil otherwise, and always nil for a worker
+    /// with no record on the kind. Approximated by current ratings, not the
+    /// ratings held when each run started.
+    private static func explorationProblem(_ spec: WorkerSpec, judged: [Run], rated: [Run]) -> String? {
+        let kind = spec.kind ?? .other
+        let ratedWorkers = Set(rated.map { workerKey($0.spec) })
+        guard ratedWorkers.contains(workerKey(spec)) else { return nil }
+        let recent = judged.sorted { $0.started > $1.started }.prefix(piecesBeforeExploration)
+        guard recent.count == piecesBeforeExploration,
+              recent.allSatisfy({ ratedWorkers.contains(workerKey($0.spec)) })
+        else { return nil }
+        return "\(kind.rawValue) is due an exploration turn: one piece in five goes to a worker with no record on "
+            + "\(kind.rawValue), fast and cheap first (agent_models lists them). \(spec.worker) already has one."
+    }
+
+    /// Which worker a spec is: the same CLI, model and effort.
+    private static func workerKey(_ spec: WorkerSpec) -> String {
+        "\(spec.cli.rawValue)/\(spec.model)/\(spec.effort ?? "")"
     }
 
     /// The model without its effort, and the effort: apart for claude and
