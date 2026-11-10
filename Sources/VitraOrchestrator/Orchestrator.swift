@@ -493,8 +493,7 @@ public struct Orchestrator: Sendable {
     public func status(_ id: String, fullText: Bool = true) throws(OrchestratorError) -> Run {
         guard let record = record(id) else { throw .unknownRun(id) }
         if let deadline = record.deadline, Date() >= deadline {
-            let minutes = Int((deadline.timeIntervalSince(record.started) / 60).rounded())
-            stop(id, record, timedOutAfter: minutes)
+            stop(id, record, timedOutAfter: record.spec.minutes ?? Self.defaultMinutes)
         }
         return run(id, record, fullText: fullText)
     }

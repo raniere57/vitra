@@ -1052,6 +1052,10 @@ private func allowedSeconds(_ id: String, in sandbox: Sandbox) throws -> Int {
     let id = try orchestrator.spawn(sandbox.spec())
     defer { try? orchestrator.cancel(id) }
 
+    // The shell makes the two files as it starts.
+    for _ in 0..<200 where !FileManager.default.fileExists(atPath: sandbox.root.appendingPathComponent("runs/\(id)/stderr").path) {
+        usleep(25_000)
+    }
     let fresh = try #require(try orchestrator.status(id).silentFor)
     #expect(fresh < 60)
     let longAgo = Date().addingTimeInterval(-300)
@@ -1067,7 +1071,7 @@ private func allowedSeconds(_ id: String, in sandbox: Sandbox) throws -> Int {
 @Test func anEmptyAnswerFromACleanExitIsAFailure() async throws {
     let sandbox = try Sandbox()
     defer { sandbox.cleanUp() }
-    let orchestrator = try sandbox.orchestrator(claude: #"cat >/dev/null; echo '{"result":"  \n","is_error":false}'"#)
+    let orchestrator = try sandbox.orchestrator(claude: #"cat >/dev/null; echo '{"result":"   ","is_error":false}'"#)
 
     let id = try orchestrator.spawn(sandbox.spec())
     let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)

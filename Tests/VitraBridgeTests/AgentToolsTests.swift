@@ -960,6 +960,11 @@ echo '{"result":"done","is_error":false}'
     let fresh = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
     #expect(!fresh.contains("silent for"))
 
+    // The shell makes the two files as it starts.
+    let stderr = fixture.root.appendingPathComponent("runs/\(id)/stderr")
+    for _ in 0..<200 where !FileManager.default.fileExists(atPath: stderr.path) {
+        try await Task.sleep(for: .milliseconds(25))
+    }
     for name in ["stdout", "stderr"] {
         try fixture.backdate(fixture.root.appendingPathComponent("runs/\(id)/\(name)").path, by: 300)
     }
