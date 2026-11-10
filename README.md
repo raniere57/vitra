@@ -605,6 +605,7 @@ padrão fica, e o motivo é impresso.
 | `Ctrl-Cmd-setas` | move o painel em foco para aquela parede da janela |
 | `Cmd-D` / `Cmd-Shift-D` | dividir à direita / abaixo |
 | `Cmd-W` | fechar painel |
+| `Cmd-Shift-T` | reabrir o último painel fechado com `Cmd-W`, com pasta e sessão |
 | `Cmd-Shift-P` | painel de visualização |
 | `Opt-Cmd-S` | barra lateral de pastas |
 | `Opt-Cmd-C` | barra lateral de sessões |

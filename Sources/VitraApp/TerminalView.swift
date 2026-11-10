@@ -925,8 +925,13 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         linkTracking = area
     }
 
+    /// Whether the pane offers to close itself from its corner. Off where the
+    /// pane is not the user's to close, such as the cockpit's maestro: a
+    /// button that does nothing is worse than no button.
+    var offersClose = true
+
     override func mouseEntered(with event: NSEvent) {
-        closeButton.isHidden = false
+        closeButton.isHidden = !offersClose
         zoomButton.isHidden = !canRearrange
         tabButton.isHidden = !canRearrange
         gripButton.isHidden = !canRearrange
@@ -1106,7 +1111,9 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         case #selector(copy(_:)):
             return session.selectedText()?.isEmpty == false
         case #selector(paste(_:)):
-            return NSPasteboard.general.string(forType: .string) != nil
+            // Not only text: a screenshot is an image with no text beside it,
+            // and Paste greyed out for it would swallow Cmd-V in silence.
+            return PasteboardAttachments.canPaste(from: .general)
         default:
             return true
         }

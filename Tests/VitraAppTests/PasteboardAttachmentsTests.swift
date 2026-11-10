@@ -30,6 +30,26 @@ struct PasteboardAttachmentsTests {
         return representation.representation(using: .png, properties: [:])!
     }
 
+    @Test("anything the terminal can paste makes Paste available, an image alone included")
+    func pasteIsOfferedForTextFilesAndImagesAlike() {
+        // A screenshot puts an image on the clipboard and no text at all. With
+        // Paste offered only for text, Cmd-V on a screenshot did nothing.
+        let image = scratchPasteboard("can-image")
+        image.setData(onePixelPNG(), forType: .png)
+        #expect(image.string(forType: .string) == nil)
+        #expect(PasteboardAttachments.canPaste(from: image))
+
+        let text = scratchPasteboard("can-text")
+        text.setString("ls -la", forType: .string)
+        #expect(PasteboardAttachments.canPaste(from: text))
+
+        let file = scratchPasteboard("can-file")
+        file.writeObjects([URL(fileURLWithPath: "/tmp") as NSURL])
+        #expect(PasteboardAttachments.canPaste(from: file))
+
+        #expect(!PasteboardAttachments.canPaste(from: scratchPasteboard("can-empty")))
+    }
+
     @Test("plain text is not an attachment")
     func plainTextIsNotAnAttachment() {
         let (store, directory) = scratchStore()

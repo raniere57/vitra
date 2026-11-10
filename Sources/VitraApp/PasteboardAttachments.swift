@@ -23,6 +23,14 @@ enum PasteboardAttachments {
         return []
     }
 
+    /// Whether `pasteboard` holds anything `paste` would act on: text, files,
+    /// or an image. Asked without reading the image, since this decides
+    /// whether the Paste command is offered and is called on every menu
+    /// validation.
+    static func canPaste(from pasteboard: NSPasteboard) -> Bool {
+        pasteboard.availableType(from: [.string, .fileURL, .png, .tiff]) != nil
+    }
+
     static func fileURLs(from pasteboard: NSPasteboard) -> [URL]? {
         pasteboard.readObjects(
             forClasses: [NSURL.self],
