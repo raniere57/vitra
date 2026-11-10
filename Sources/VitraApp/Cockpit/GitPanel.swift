@@ -107,6 +107,14 @@ final class GitPanel: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
+    /// Shows `events` as they are, without reading any repository: for the UI
+    /// snapshot tool.
+    func show(_ events: [GitEvent]) {
+        local = events
+        pulls = []
+        render()
+    }
+
     private func reloadLocal() {
         GitHistory.loadLocal(in: path) { [weak self] events in
             self?.local = events

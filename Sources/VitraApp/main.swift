@@ -31,6 +31,22 @@ if CommandLine.arguments.dropFirst().first == "maestro-status" {
     exit(0)
 }
 
+// `Vitra snapshot <dir>` draws the cockpit's views offscreen, with made-up
+// data, and writes PNGs. No window is shown and no Vitra needs to be running.
+if CommandLine.arguments.dropFirst().first == "snapshot" {
+    guard CommandLine.arguments.count == 3 else {
+        FileHandle.standardError.write(Data("usage: Vitra snapshot <output-dir>\n".utf8))
+        exit(2)
+    }
+    do {
+        for file in try UISnapshot.run(into: URL(fileURLWithPath: CommandLine.arguments[2])) { print(file.path) }
+        exit(0)
+    } catch {
+        FileHandle.standardError.write(Data("snapshot failed: \(error)\n".utf8))
+        exit(1)
+    }
+}
+
 // The cockpit is the app now. The classic terminal is still in the binary for
 // whoever needs it, behind a flag, until nothing misses it.
 let application = NSApplication.shared
