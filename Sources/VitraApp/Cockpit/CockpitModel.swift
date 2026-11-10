@@ -128,8 +128,33 @@ enum WorkerBoard {
         }
     }
 
-    static func row(_ run: Run, now: Date) -> WorkerRow {
+    /// When a run started: the clock time if it started on the day of `now`,
+    /// day and month if it was another day, and the year too if it was
+    /// another year. "Today" is judged in `timeZone`, the same zone the clock
+    /// is read in, so a run started just before midnight stays on its own day.
+    static func startedText(_ started: Date, now: Date, timeZone: TimeZone = .current) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let format: String
+        if calendar.isDate(started, inSameDayAs: now) {
+            format = "HH:mm"
+        } else if calendar.component(.year, from: started) == calendar.component(.year, from: now) {
+            format = "dd/MM HH:mm"
+        } else {
+            format = "dd/MM/yyyy HH:mm"
+        }
+        let formatter = DateFormatter()
+        // POSIX digits regardless of the machine's language or calendar settings.
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = calendar
+        formatter.timeZone = timeZone
+        formatter.dateFormat = format
+        return formatter.string(from: started)
+    }
+
+    static func row(_ run: Run, now: Date, timeZone: TimeZone = .current) -> WorkerRow {
         let model = shortName(run.spec.model, effort: run.spec.effort)
+        let started = startedText(run.started, now: now, timeZone: timeZone)
         let elapsed = duration((run.ended ?? now).timeIntervalSince(run.started))
         let kind = kind(of: run)
 
@@ -155,7 +180,7 @@ enum WorkerBoard {
             kind: kind,
             stateText: (delivered(run) && run.rating?.isSatisfactory == false ? "insatisfatório" : stateText(run.state, kind))
                 + (run.rating.map { " · \($0.score)/5" } ?? ""),
-            meta: [model, elapsed, tail].joined(separator: " · "),
+            meta: [model, started, elapsed, tail].joined(separator: " · "),
             detail: run.output?.text
         )
     }

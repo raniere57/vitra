@@ -32,6 +32,16 @@ private func run(
 
 private let now = start.addingTimeInterval(38)
 
+// A fixed offset, so the clock times in these tests do not depend on the machine.
+private let zone = TimeZone(secondsFromGMT: -3 * 3600)!
+
+/// A moment in `zone`, so a test can say when something happened in local time.
+private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int) -> Date {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = zone
+    return calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
+}
+
 // MARK: - Which runs belong to a project
 
 @Test func aProjectShowsTheRunsInItsDirectoryAndBelowIt() {
@@ -77,14 +87,26 @@ private let now = start.addingTimeInterval(38)
     #expect(row.title == "Corrigir validação")
     #expect(row.kind == .running)
     #expect(row.stateText == "rodando")
-    #expect(row.meta == "deepseek-v4.1-flash-free · 38s · edita")
-    #expect(WorkerBoard.row(run(), now: now).meta == "deepseek-v4.1-flash-free · 38s · só leitura")
+    #expect(row.meta == "deepseek-v4.1-flash-free · 10:46 · 38s · edita")
+    #expect(WorkerBoard.row(run(), now: now, timeZone: zone).meta == "deepseek-v4.1-flash-free · 10:46 · 38s · só leitura")
 }
 
 @Test func aWorkersEffortIsPartOfItsNameOnTheRow() {
     let spec = WorkerSpec(cli: .claude, model: "haiku", prompt: "x", directory: "/work/vitra", effort: "low")
     let haiku = Run(id: "0123abcd", spec: spec, state: .running, pid: 1, started: start, ended: nil, output: nil, errorTail: nil)
-    #expect(WorkerBoard.row(haiku, now: now).meta == "haiku (low) · 38s · só leitura")
+    #expect(WorkerBoard.row(haiku, now: now, timeZone: zone).meta == "haiku (low) · 10:46 · 38s · só leitura")
+}
+
+@Test func aWorkersStartShowsTheClockWhenItStartedToday() {
+    #expect(WorkerBoard.startedText(at(2026, 11, 10, 10, 42), now: at(2026, 11, 10, 15, 0), timeZone: zone) == "10:42")
+}
+
+@Test func aWorkersStartShowsDayAndMonthWhenItStartedAnotherDayOfTheYear() {
+    #expect(WorkerBoard.startedText(at(2026, 11, 9, 22, 54), now: at(2026, 11, 10, 15, 0), timeZone: zone) == "09/11 22:54")
+}
+
+@Test func aWorkersStartShowsTheYearWhenItStartedInAnotherYear() {
+    #expect(WorkerBoard.startedText(at(2025, 11, 9, 22, 54), now: at(2026, 11, 10, 15, 0), timeZone: zone) == "09/11/2025 22:54")
 }
 
 @Test func aWorkerWithNoLabelIsTitledByTheFirstLineOfItsPrompt() {
@@ -97,10 +119,10 @@ private let now = start.addingTimeInterval(38)
 
 @Test func aFinishedWorkerShowsTimeCostAndTokens() {
     let output = WorkerOutput(text: "Done.\nSecond line.", isError: false, costUSD: 0.0234, inputTokens: 22_900, outputTokens: 186)
-    let row = WorkerBoard.row(run(state: .finished(exitCode: 0), seconds: 4, output: output), now: now)
+    let row = WorkerBoard.row(run(state: .finished(exitCode: 0), seconds: 4, output: output), now: now, timeZone: zone)
     #expect(row.kind == .done)
     #expect(row.stateText == "pronto")
-    #expect(row.meta == "deepseek-v4.1-flash-free · 4s · $0.02 · 23k tokens")
+    #expect(row.meta == "deepseek-v4.1-flash-free · 10:46 · 4s · $0.02 · 23k tokens")
     #expect(row.detail == "Done.\nSecond line.")
 }
 
@@ -114,10 +136,10 @@ private let now = start.addingTimeInterval(38)
     // It ran and finished, but the maestro judged it not what was asked: on
     // the row that reads as a failure, which is what it was.
     rated.rating = Rating(score: 2, note: "wrong file", rated: start)
-    let row = WorkerBoard.row(rated, now: now)
+    let row = WorkerBoard.row(rated, now: now, timeZone: zone)
     #expect(row.stateText == "insatisfatório · 2/5")
     #expect(row.kind == .failed)
-    #expect(row.meta == "deepseek-v4.1-flash-free · 4s · wrong file")
+    #expect(row.meta == "deepseek-v4.1-flash-free · 10:46 · 4s · wrong file")
 }
 
 @Test func theRankingSaysForEachModelItsScoreItsTimeAndHowOftenItFails() {
@@ -134,11 +156,11 @@ private let now = start.addingTimeInterval(38)
 @Test func aFailedWorkerShowsWhyOnItsMetaLine() {
     let output = WorkerOutput(text: "Failed to authenticate: OAuth session expired and could not be refreshed\nmore", isError: true)
     let failed = run(cli: .claude, model: "haiku", state: .finished(exitCode: 1), seconds: 2, output: output)
-    let row = WorkerBoard.row(failed, now: now)
+    let row = WorkerBoard.row(failed, now: now, timeZone: zone)
     #expect(row.kind == .failed)
     #expect(row.stateText == "falhou")
     // Cut at 68 characters: the row is one line wide.
-    #expect(row.meta == "haiku · 2s · Failed to authenticate: OAuth session expired and could not be refr…")
+    #expect(row.meta == "haiku · 10:46 · 2s · Failed to authenticate: OAuth session expired and could not be refr…")
 }
 
 @Test func cancelledAndLostWorkersAreNamedAsSuch() {
