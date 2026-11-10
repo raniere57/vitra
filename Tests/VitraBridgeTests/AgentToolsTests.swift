@@ -197,30 +197,145 @@ private let answers = #"cat >/dev/null; echo '{"result":"the answer","is_error":
     #expect(!report.contains("a warning nobody needs"))
 }
 
-@Test func theReportOfAWorkedBranchSaysWhereItsWorkIsAndHowToMergeIt() {
+/// Runs git in `directory`, with an identity fixed so a machine with none
+/// configured can still commit, and returns what it printed.
+@discardableResult
+private func git(_ arguments: [String], in directory: URL) throws -> String {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = ["git"] + arguments
+    process.currentDirectoryURL = directory
+    var environment = ProcessInfo.processInfo.environment
+    environment["GIT_AUTHOR_NAME"] = "Vitra test"
+    environment["GIT_AUTHOR_EMAIL"] = "test@vitra.local"
+    environment["GIT_COMMITTER_NAME"] = "Vitra test"
+    environment["GIT_COMMITTER_EMAIL"] = "test@vitra.local"
+    process.environment = environment
+    process.standardInput = FileHandle.nullDevice
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = pipe
+    try process.run()
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    let output = String(decoding: data, as: UTF8.self)
+    guard process.terminationStatus == 0 else {
+        throw ToolError("git \(arguments.joined(separator: " ")): \(output)")
+    }
+    return output
+}
+
+/// Makes a repository at `directory` holding one commit, and returns that
+/// commit along with the branch it is on.
+private func makeRepository(at directory: URL) throws -> (head: String, trunk: String) {
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try git(["init", "-q"], in: directory)
+    try "initial\n".write(to: directory.appendingPathComponent("README"), atomically: true, encoding: .utf8)
+    try git(["add", "-A"], in: directory)
+    try git(["commit", "-q", "-m", "initial"], in: directory)
+    let head = try git(["rev-parse", "HEAD"], in: directory).trimmingCharacters(in: .whitespacesAndNewlines)
+    let trunk = try git(["symbolic-ref", "--short", "HEAD"], in: directory).trimmingCharacters(in: .whitespacesAndNewlines)
+    return (head, trunk)
+}
+
+@Test func theReportOfAWorkedBranchSaysWhereItsWorkIsAndHowToMergeIt() throws {
+    // A real repository, in paths a shell would break on if they went in raw:
+    // the report has to quote them, and the shortstat has to be computed
+    // against a branch that really holds a commit.
+    let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("vitra report \(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: scratch) }
+    let repository = scratch.appendingPathComponent("my repo")
+    let worktree = scratch.appendingPathComponent("work trees/0123abcd")
+    let (base, trunk) = try makeRepository(at: repository)
+
+    // The worker's branch: one commit on top of the base.
+    try git(["checkout", "-q", "-b", "vitra/0123abcd"], in: repository)
+    try "changed\n".write(to: repository.appendingPathComponent("from-worker.txt"), atomically: true, encoding: .utf8)
+    try git(["add", "-A"], in: repository)
+    try git(["commit", "-q", "-m", "worker work"], in: repository)
+    try git(["checkout", "-q", trunk], in: repository)
+    try git(["worktree", "add", "-q", worktree.path, "vitra/0123abcd"], in: repository)
+
     let run = Run(
         id: "0123abcd",
-        spec: WorkerSpec(cli: .claude, model: "haiku", prompt: "go", directory: "/work/vitra", access: .edit),
+        spec: WorkerSpec(cli: .claude, model: "haiku", prompt: "go", directory: repository.path, access: .edit),
         state: .finished(exitCode: 0),
         pid: 1,
         started: Date(timeIntervalSince1970: 0),
         ended: Date(timeIntervalSince1970: 12),
         output: WorkerOutput(text: "done", isError: false),
         errorTail: nil,
-        repository: "/work/vitra",
-        worktree: "/Users/me/.vitra/runs/0123abcd/tree",
+        repository: repository.path,
+        worktree: worktree.path,
         branch: "vitra/0123abcd",
-        baseCommit: "abcdef1234567890"
+        baseCommit: base
     )
 
     let report = AgentReport.full(run)
-    // A directory that is not a repository has nothing to diff: the branch
-    // holds no changes the report can see.
-    #expect(report.hasSuffix(
-        "\nchanges on branch vitra/0123abcd (base abcdef1): no changes"
-        + "\nmerge: git -C /work/vitra merge vitra/0123abcd — then clean up: "
-        + "git -C /work/vitra worktree remove /Users/me/.vitra/runs/0123abcd/tree && git -C /work/vitra branch -d vitra/0123abcd"
+    let lines = report.split(separator: "\n").map(String.init)
+    #expect(lines.contains(
+        "changes on branch vitra/0123abcd (base \(base.prefix(7))): 1 file changed, 1 insertion(+)"
     ))
+
+    // The merge command is a shell word for each path: run it as one, from a
+    // directory unrelated to both, and the work actually lands on the trunk.
+    let mergeLine = try #require(lines.first { $0.hasPrefix("merge: ") })
+    let command = String(mergeLine.dropFirst("merge: ".count).components(separatedBy: " — then clean up: ")[0])
+    // Each path is one single-quoted shell word, not something a space or a
+    // semicolon in it could split or end.
+    #expect(command == "git -C '\(repository.path)' merge 'vitra/0123abcd'")
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/sh")
+    process.arguments = ["-c", command]
+    process.currentDirectoryURL = scratch
+    process.standardInput = FileHandle.nullDevice
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = pipe
+    try process.run()
+    process.waitUntilExit()
+    #expect(process.terminationStatus == 0)
+    #expect(try String(contentsOf: repository.appendingPathComponent("from-worker.txt"), encoding: .utf8) == "changed\n")
+
+    // The cleanup half names both paths too, quoted.
+    #expect(mergeLine.hasSuffix(
+        "then clean up: git -C '\(repository.path)' worktree remove '\(worktree.path)' "
+            + "&& git -C '\(repository.path)' branch -d 'vitra/0123abcd'"
+    ))
+}
+
+/// A worker that writes a file and commits nothing: the shell around it is
+/// what is supposed to put the work on the branch.
+private let leavesAFile = #"""
+cat >/dev/null
+printf 'changed\n' > from-worker.txt
+echo '{"result":"done","is_error":false}'
+"""#
+
+@Test func aCommitARefusingHookRejectsIsReportedAsFailedWithTheEditsLeftInTheWorktree() async throws {
+    let fixture = try Fixture(claude: leavesAFile)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    // A hook that refuses the shell's commit, saying why.
+    let hook = repository.appendingPathComponent(".git/hooks/pre-commit")
+    try "#!/bin/sh\necho 'no commits today' >&2\nexit 1\n".write(to: hook, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
+
+    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+
+    // The worker exited zero, and that is still its answer: the commit is the
+    // shell's business, not the worker's.
+    #expect(report.hasPrefix("[\(id)] finished · "))
+    // But the report may not pass the branch off as empty while the edits sit
+    // uncommitted in the worktree.
+    #expect(report.contains("commit failed: no commits today"))
+    #expect(!report.contains("no changes"))
+    let tree = fixture.root.appendingPathComponent("runs/\(id)/tree")
+    #expect(report.contains("the edits are still uncommitted in \(tree.path)"))
+    #expect(FileManager.default.fileExists(atPath: tree.appendingPathComponent("from-worker.txt").path))
+    #expect(try !git(["status", "--porcelain"], in: tree).isEmpty)
 }
 
 @Test func agentToolsRunLocallyAndPanelToolsGoToTheWindow() async throws {

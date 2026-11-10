@@ -32,6 +32,11 @@ public struct Run: Equatable, Sendable {
     public var branch: String? = nil
     /// The commit the branch was made from.
     public var baseCommit: String? = nil
+    /// Why the shell could not commit the worker's work, when it could not.
+    ///
+    /// Present with an empty string when git refused without saying why. When
+    /// it is set the edits are still uncommitted in `worktree`.
+    public var commitError: String? = nil
     /// What the orchestrator made of the delivery, once it has said.
     public var rating: Rating? = nil
 

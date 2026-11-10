@@ -9,6 +9,8 @@ import Foundation
 ///     <root>/<id>/stdout      what the CLI printed, in its JSON mode
 ///     <root>/<id>/stderr
 ///     <root>/<id>/exit        the exit code, once the worker is done
+///     <root>/<id>/commit-error why the shell could not commit an editing
+///                             worker's work, when it could not
 ///     <root>/<id>/cancelled   present when the run was cancelled
 ///     <root>/<id>/rating.json the orchestrator's verdict on the delivery
 ///     <root>/<id>/tree        an editing worker's own worktree, when it got one
@@ -97,11 +99,18 @@ public struct Orchestrator: Sendable {
         \(run) >"$VITRA_RUN/stdout" 2>"$VITRA_RUN/stderr"
         vitra_exit=$?
         if [ -n "$VITRA_WORKTREE" ]; then
-            git -C "$VITRA_WORKTREE" add -A >/dev/null 2>&1
-            if ! git -C "$VITRA_WORKTREE" diff --cached --quiet >/dev/null 2>&1; then
-                GIT_AUTHOR_NAME='Vitra worker' GIT_AUTHOR_EMAIL='worker@vitra.local' \\
+            vitra_commit_error="$VITRA_RUN/commit-error"
+            rm -f "$vitra_commit_error"
+            if ! git -C "$VITRA_WORKTREE" add -A >/dev/null 2>"$vitra_commit_error"; then
+                : # git's reason is in the file; the worker's edits stay where they are
+            elif git -C "$VITRA_WORKTREE" diff --cached --quiet >/dev/null 2>&1; then
+                rm -f "$vitra_commit_error"
+            elif ! GIT_AUTHOR_NAME='Vitra worker' GIT_AUTHOR_EMAIL='worker@vitra.local' \\
                 GIT_COMMITTER_NAME='Vitra worker' GIT_COMMITTER_EMAIL='worker@vitra.local' \\
-                git -C "$VITRA_WORKTREE" commit -q -m "$VITRA_COMMIT_MESSAGE" >/dev/null 2>&1
+                git -C "$VITRA_WORKTREE" commit -q -m "$VITRA_COMMIT_MESSAGE" >/dev/null 2>"$vitra_commit_error"; then
+                : # a refusing hook leaves the file, even when it printed nothing
+            else
+                rm -f "$vitra_commit_error"
             fi
         fi
         echo "$vitra_exit" >"$VITRA_RUN/exit.tmp" && mv "$VITRA_RUN/exit.tmp" "$VITRA_RUN/exit"
@@ -127,8 +136,10 @@ public struct Orchestrator: Sendable {
                 directory: worktree?.directory.path ?? spec.directory
             )
         } catch {
+            // The tree sits inside the run directory: take the worktree away
+            // first, or its files are gone and git can no longer remove it.
+            if let worktree { discard(worktree) }
             try? FileManager.default.removeItem(at: directory)
-            if let worktree { _ = Git.run(["worktree", "prune"], in: worktree.top) }
             throw error
         }
 
@@ -148,8 +159,8 @@ public struct Orchestrator: Sendable {
             // A worker with no record could never be found or cancelled again,
             // and it may be one that edits. It does not get to run.
             kill(-pid, SIGKILL)
+            if let worktree { discard(worktree) }
             try? FileManager.default.removeItem(at: directory)
-            if let worktree { _ = Git.run(["worktree", "prune"], in: worktree.top) }
             throw .spawnFailed("\(error.localizedDescription)")
         }
         return id
@@ -213,6 +224,17 @@ public struct Orchestrator: Sendable {
         // worker to a path that is not there.
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return Worktree(top: topLevel, tree: tree.path, branch: branch, base: base, directory: directory)
+    }
+
+    /// Takes away a worktree and the branch a failed spawn made.
+    ///
+    /// A spawn can still fail after `git worktree add -b` — the worker may not
+    /// start, the record may not be written — and then nothing will ever use
+    /// the branch. `git worktree prune` forgets the directory but leaves the
+    /// branch in the repository for ever, so both are removed here, by name.
+    private func discard(_ worktree: Worktree) {
+        _ = Git.run(["worktree", "remove", "--force", worktree.tree], in: worktree.top)
+        _ = Git.run(["branch", "-D", worktree.branch], in: worktree.top)
     }
 
     /// Creates the directory of a new run and returns it with its id.
@@ -443,9 +465,20 @@ public struct Orchestrator: Sendable {
             worktree: record.worktree,
             branch: record.branch,
             baseCommit: record.baseCommit,
+            commitError: commitError(id),
             rating: (try? Data(contentsOf: file(id, "rating.json")))
                 .flatMap { try? JSONDecoder().decode(Rating.self, from: $0) }
         )
+    }
+
+    /// Why the shell could not commit the worker's work, when it could not.
+    ///
+    /// The file is written by the wrapper only when git refused, and may be
+    /// empty if git said nothing; its presence is the failure, not its text.
+    /// Nil means the work was committed, or the run had no worktree at all.
+    private func commitError(_ id: String) -> String? {
+        guard let data = try? Data(contentsOf: file(id, "commit-error")) else { return nil }
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func state(_ id: String, _ record: RunRecord) -> Run.State {

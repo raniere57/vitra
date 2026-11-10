@@ -1,4 +1,5 @@
 import Foundation
+import VitraCore
 import VitraOrchestrator
 
 /// The tools an orchestrating agent delegates work with, and what runs them.
@@ -153,7 +154,11 @@ public struct AgentToolExecutor: ToolExecutor {
         do {
             switch tool {
             case "agent_spawn":
-                return try spawn(arguments)
+                // A spawn that gets a worktree checks the whole repository out,
+                // which can take a while: park it off the cooperative pool.
+                return try await Self.offThePool { [orchestrator, executables, project] in
+                    try Self.spawn(arguments, orchestrator: orchestrator, executables: executables, project: project)
+                }
             case "agent_wait":
                 return try await wait(arguments)
             case "agent_list":
@@ -161,7 +166,7 @@ public struct AgentToolExecutor: ToolExecutor {
                 let runs = orchestrator.recent(limit: limit)
                 return runs.isEmpty ? "No agents have been spawned." : runs.map(AgentReport.headline).joined(separator: "\n")
             case "agent_cancel":
-                let id = try string("id", in: arguments)
+                let id = try Self.string("id", in: arguments)
                 return try await Self.offThePool { [orchestrator] in
                     try orchestrator.cancel(id)
                     return AgentReport.headline(try orchestrator.status(id))
@@ -169,7 +174,7 @@ public struct AgentToolExecutor: ToolExecutor {
             case "agent_rate":
                 return try rate(arguments)
             case "agent_scores":
-                let kind = try kind(in: arguments)
+                let kind = try Self.kind(in: arguments)
                 let runs = orchestrator.recent(limit: Self.scoredRuns)
                 return Scoreboard.summary(Scoreboard.scores(runs, kind: kind), kind: kind)
             case "agent_models":
@@ -184,7 +189,12 @@ public struct AgentToolExecutor: ToolExecutor {
         }
     }
 
-    private func spawn(_ arguments: JSONValue) throws -> String {
+    private static func spawn(
+        _ arguments: JSONValue,
+        orchestrator: Orchestrator,
+        executables: Executables,
+        project: String?
+    ) throws -> String {
         let cliName = try string("cli", in: arguments)
         guard let cli = WorkerCLI(rawValue: cliName) else {
             let names = WorkerCLI.allCases.map(\.rawValue)
@@ -221,7 +231,7 @@ public struct AgentToolExecutor: ToolExecutor {
     }
 
     private func rate(_ arguments: JSONValue) throws -> String {
-        let id = try string("id", in: arguments)
+        let id = try Self.string("id", in: arguments)
         // A whole number only: 4.5 silently recorded as 4 would be a rating
         // the orchestrator did not give.
         guard case let .number(value)? = arguments["score"], value == value.rounded(), Rating.scores.contains(Int(value)) else {
@@ -233,7 +243,7 @@ public struct AgentToolExecutor: ToolExecutor {
     }
 
     /// The commands the worker may run, when any were named.
-    private func commands(in arguments: JSONValue) throws -> [String] {
+    private static func commands(in arguments: JSONValue) throws -> [String] {
         guard let value = arguments["commands"], value != .null else { return [] }
         let strings = value.arrayValue?.compactMap(\.stringValue)
         guard let strings, strings.count == value.arrayValue?.count else {
@@ -243,7 +253,7 @@ public struct AgentToolExecutor: ToolExecutor {
     }
 
     /// The kind of task named in the arguments, or nil when none was.
-    private func kind(in arguments: JSONValue) throws -> TaskKind? {
+    private static func kind(in arguments: JSONValue) throws -> TaskKind? {
         guard let name = arguments["kind"]?.stringValue else { return nil }
         guard let kind = TaskKind(rawValue: name) else {
             let names = TaskKind.allCases.map(\.rawValue)
@@ -281,7 +291,7 @@ public struct AgentToolExecutor: ToolExecutor {
         }
     }
 
-    private func string(_ name: String, in arguments: JSONValue) throws -> String {
+    private static func string(_ name: String, in arguments: JSONValue) throws -> String {
         guard let value = arguments[name]?.stringValue else { throw ToolError("missing argument: \(name)") }
         return value
     }
@@ -351,18 +361,36 @@ enum AgentReport {
     /// much the branch holds against the commit it was made from, and the
     /// commands that put it on the branch the maestro is working on and then
     /// take the worktree away.
+    ///
+    /// The paths are quoted: a repository called `my project; rm -rf ~` is a
+    /// name, not a command, and the line is meant to be pasted into a shell.
+    /// When the commit failed the first line says so instead of reporting "no
+    /// changes", which would leave the worker's edits stranded and unmentioned
+    /// in the worktree.
     private static func branchLines(_ run: Run) -> [String] {
         guard let branch = run.branch, let base = run.baseCommit,
               let top = run.repository, let tree = run.worktree
         else { return [] }
-        let stat = Git.output(["diff", "--shortstat", "\(base)..\(branch)"], in: top)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return [
-            "changes on branch \(branch) (base \(base.prefix(7))): "
-                + (stat.map { $0.isEmpty ? "no changes" : $0 } ?? "no changes"),
-            "merge: git -C \(top) merge \(branch) — then clean up: "
-                + "git -C \(top) worktree remove \(tree) && git -C \(top) branch -d \(branch)",
-        ]
+        let topArgument = ShellQuote.quote(top)
+        let branchArgument = ShellQuote.quote(branch)
+        var lines: [String] = []
+        if let failure = run.commitError {
+            let reason = failure.isEmpty ? "git gave no reason" : failure
+            lines.append("commit failed: \(reason) — the edits are still uncommitted in \(tree)")
+        } else {
+            let stat = Git.output(["diff", "--shortstat", "\(base)..\(branch)"], in: top)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            lines.append(
+                "changes on branch \(branch) (base \(base.prefix(7))): "
+                    + (stat.map { $0.isEmpty ? "no changes" : $0 } ?? "no changes")
+            )
+        }
+        lines.append(
+            "merge: git -C \(topArgument) merge \(branchArgument) — then clean up: "
+                + "git -C \(topArgument) worktree remove \(ShellQuote.quote(tree)) && "
+                + "git -C \(topArgument) branch -d \(branchArgument)"
+        )
+        return lines
     }
 }
 

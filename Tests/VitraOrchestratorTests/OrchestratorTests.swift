@@ -637,6 +637,33 @@ echo '{"result":"done","is_error":false}'
     #expect(edit.branch == nil)
 }
 
+@Test func aSpawnThatFailsAfterMakingTheWorktreeLeavesNoBranchBehind() throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    // A tracked file that the user has replaced on disk with a directory, and
+    // sent the worker to: git checks the file out into the worktree, so the
+    // worker's directory cannot exist there and `posix_spawn` fails to enter
+    // it — after the worktree and its branch have been made.
+    try "a file, in HEAD\n".write(to: sandbox.project.appendingPathComponent("node"), atomically: true, encoding: .utf8)
+    try sandbox.makeRepository()
+    try FileManager.default.removeItem(at: sandbox.project.appendingPathComponent("node"))
+    let node = sandbox.project.appendingPathComponent("node")
+    try FileManager.default.createDirectory(at: node, withIntermediateDirectories: false)
+    let orchestrator = try sandbox.orchestrator(claude: answersDone)
+
+    #expect(throws: OrchestratorError.self) {
+        try orchestrator.spawn(sandbox.spec(access: .edit, directory: node))
+    }
+
+    // Neither the branch nor a registered worktree is left for the user to
+    // find and remove by hand.
+    #expect(try sandbox.git(["branch", "--list", "vitra/*"]).isEmpty)
+    let worktrees = try sandbox.git(["worktree", "list", "--porcelain"])
+        .split(separator: "\n")
+        .filter { $0.hasPrefix("worktree ") }
+    #expect(worktrees.count == 1)
+}
+
 @Test func aRunRecordWrittenWithoutTheWorktreeFieldsStillLoads() async throws {
     let sandbox = try Sandbox()
     defer { sandbox.cleanUp() }
