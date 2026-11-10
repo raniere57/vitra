@@ -316,8 +316,9 @@ public final class PTY: @unchecked Sendable {
 
     private static func agentName(fromArg bytes: [UInt8]) -> String? {
         let arg = String(decoding: bytes, as: UTF8.self)
-        guard let ext = scriptExtensions.first(where: { arg.hasSuffix($0) }) else { return nil }
         let base = (arg as NSString).lastPathComponent
+        if Harness.running(base) != nil { return base }
+        guard let ext = scriptExtensions.first(where: { arg.hasSuffix($0) }) else { return nil }
         return String(base.dropLast(ext.count))
     }
 

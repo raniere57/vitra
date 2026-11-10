@@ -227,6 +227,12 @@ public final class TerminalSession: @unchecked Sendable {
         }
     }
 
+    /// Everything on the terminal as plain text, scrollback included. Read on
+    /// the session's own queue: the screen is being written to there.
+    public func screenText() -> String {
+        queue.sync { core.screenText() }
+    }
+
     /// The selected text, read synchronously because the clipboard needs it now.
     public func selectedText() -> String? {
         queue.sync { core.selectedText() }

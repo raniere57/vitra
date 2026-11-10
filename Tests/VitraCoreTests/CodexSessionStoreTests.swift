@@ -3,6 +3,17 @@ import SQLite3
 import Testing
 @testable import VitraCore
 
+@Test func sessionMatchingKeepsAgentsSeparate() {
+    let sessions = Harness.allCases.enumerated().map { index, harness in
+        AgentSession(id: harness.rawValue, title: "Same project", projectPath: "/tmp/project",
+                     modified: Date(timeIntervalSince1970: Double(index)), isArchived: false,
+                     harness: harness)
+    }
+    for harness in Harness.allCases {
+        #expect(harness.matching(title: "✳ Same project", directory: "/tmp/project", in: sessions)?.id == harness.rawValue)
+    }
+}
+
 /// The columns the store reads, in the shape Codex's `threads` table has them.
 private func database(_ rows: [(id: String, cwd: String, title: String, name: String?, first: String, updated: Int64, archived: Int64)]) throws -> URL {
     let url = URL(fileURLWithPath: NSTemporaryDirectory())
