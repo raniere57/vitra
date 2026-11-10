@@ -829,3 +829,14 @@ echo '{"result":"done","is_error":false}'
         "Available models", "auto - Auto", "grok-code-fast-1 - Grok",
     ])
 }
+
+@Test func aRealCursorListingKeepsEveryGrokBeyondTheFirstLines() {
+    var lines = ["Available models", "", "auto - Auto (default)"]
+    lines += (1...120).map { "model-\($0) - Model \($0)" }
+    lines += ["cursor-grok-4.5-low - Grok 4.5 Low", "cursor-grok-4.6-low-fast - Grok 4.6 Low Fast\u{200B}", "grok-4.7-low-fast - Grok 4.7  Low Fast\u{200B}"]
+    let parsed = ModelCatalog.modelLines(lines.joined(separator: "\n"))
+    #expect(parsed.count == lines.count - 1)
+    let summary = ModelCatalog.summary(ModelCatalog.Listing(claude: false, openCode: nil, gemini: nil, cursor: parsed))
+    #expect(summary.contains("cursor-grok-4.5-low, cursor-grok-4.6-low-fast, grok-4.7-low-fast"))
+    #expect(ModelCatalog.isGrok("cursor-grok-4.6-low-fast"))
+}

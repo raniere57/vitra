@@ -79,7 +79,6 @@ public enum ModelCatalog {
     }
 
 
-    private static let longestListing = 80
     private static let listingTimeout: TimeInterval = 20
 
     /// Whether opencode may be asked for `model`.
@@ -108,14 +107,19 @@ public enum ModelCatalog {
 
     /// The lines of a CLI's model listing, or none when it answered with an
     /// error instead of a list.
+    ///
+    /// Every line is kept: cursor lists its Groks past the hundredth line, and
+    /// `summary` does the choosing. Zero-width spaces are trimmed with the
+    /// whitespace, or an id would carry an invisible tail and fail to match.
     static func modelLines(_ output: String) -> [String] {
         let plain = output.replacingOccurrences(of: "\u{1B}\\[[0-9;]*[A-Za-z]", with: "", options: .regularExpression)
+        let trimmed = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\u{200B}\u{200C}\u{200D}\u{2060}\u{FEFF}"))
         let lines = plain
             .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .map { $0.trimmingCharacters(in: trimmed) }
             .filter { !$0.isEmpty }
         guard lines.first?.hasPrefix("Error") != true else { return [] }
-        return Array(lines.prefix(longestListing))
+        return lines
     }
 
     /// What `executable` prints on stdout when run with `arguments`.
