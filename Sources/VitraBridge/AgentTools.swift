@@ -14,7 +14,7 @@ public enum AgentTools {
             """
             Delegate a self-contained piece of work to a worker agent on another model, and return its id at once without waiting. \
             You are the orchestrator: plan, split the work, and review what comes back; let workers do the reading and the typing. \
-            Use the cheapest model that does this kind of task well — agent_models lists what is available and agent_scores how each has done so far. \
+            Leave cli, model and effort out and Vitra picks the worker from the record of this kind of task (agent_scores shows it, agent_models lists what exists); name them only when the piece truly needs that model. \
             The worker sees nothing of this conversation, so the prompt must stand on its own: the goal, the files or area, and what done looks like. \
             Spawn several and then agent_wait on all of them to run work in parallel. \
             In a git repository each editing worker is given a worktree and a branch of its own automatically, so several can edit at once; when its delivery is done and its audit read, agent_merge with its id puts the branch on your checkout and cleans up, and agent_merge with discard drops it instead. \
@@ -25,13 +25,13 @@ public enum AgentTools {
                 "cli": [
                     "type": "string",
                     "enum": .array(WorkerCLI.allCases.map { .string($0.rawValue) }),
-                    "description": "Which agent CLI runs the worker.",
+                    "description": "Which agent CLI runs the worker. Leave out, with model and effort, and Vitra picks the worker and says which in the result.",
                 ],
                 "model": MCPTools.string("Model name as that CLI takes it, from agent_models: haiku, sonnet or opus for claude, opencode/…-free for opencode, a Gemini model id for gemini, a Grok id for cursor."),
                 "effort": [
                     "type": "string",
                     "enum": .array(ModelCatalog.efforts.map { .string($0) }),
-                    "description": "How hard the model thinks. Required for claude, from the pairs agent_models lists; optional for opencode; never for gemini, which has none, or cursor, where it is part of the model id. The same model at two efforts is two workers with separate records: start low for simple work and raise it when a delivery falls short.",
+                    "description": "How hard the model thinks. Required for claude when you name the worker, from the pairs agent_models lists; optional for opencode; never for gemini, which has none, or cursor, where it is part of the model id. The same model at two efforts is two workers with separate records.",
                 ],
                 "prompt": MCPTools.string("The whole task, self-contained."),
                 "directory": MCPTools.string("Absolute path of the directory the worker runs in."),
@@ -41,14 +41,10 @@ public enum AgentTools {
                     "description": "read (default): look, search and report, nothing is written. edit: the worker may change files in the directory.",
                 ],
                 "label": MCPTools.string("A few words saying what this worker is for, shown where agents are listed."),
-                "override": [
-                    "type": "string",
-                    "description": "Only when agent_spawn refused this worker for the trial or the effort ladder and no other worker can do the piece: say why in a sentence.",
-                ],
                 "commands": [
                     "type": "array",
                     "items": ["type": "string"],
-                    "description": "Commands the worker may run by itself, each the start of a command line: \"bun test\" allows \"bun test src/x.test.ts\". Give an editing worker the project's test, build or lint command so it can check its own work instead of handing that back to you. One plain command each — no shell operators — and nothing that reaches another machine, except for a task of kind deploy, which may be given ssh to the one host it deploys to (\"ssh user@host\"). claude and gemini run exactly these; opencode's editing agent runs commands already; cursor cannot be given any.",
+                    "description": "Commands the worker may run by itself, each the start of a command line: \"bun test\" allows \"bun test src/x.test.ts\". Give an editing worker the project's test, build or lint command so it can check its own work instead of handing that back to you. One plain command each — no shell operators — and nothing that reaches another machine, except for a task of kind deploy, which may be given ssh to the one host it deploys to (\"ssh user@host\"). claude and gemini run exactly these; opencode's editing agent runs commands already; cursor cannot be given any. When Vitra picks the worker, giving commands keeps cursor and gemini out of the choice.",
                 ],
                 "kind": [
                     "type": "string",
@@ -60,7 +56,7 @@ public enum AgentTools {
                     "description": "Default true: a finished editing delivery whose branch has commits is first audited by a cheap read-only worker from another provider, and agent_wait gives the audit's id. false skips that gate for this run, for a change too small to be worth it.",
                 ],
             ],
-            required: ["cli", "model", "prompt", "directory"]
+            required: ["prompt", "directory"]
         ),
         MCPTools.tool(
             "agent_wait",
@@ -127,7 +123,7 @@ public enum AgentTools {
         ),
         MCPTools.tool(
             "agent_scores",
-            "Show how each worker has done so far, per kind of task, best first: those that deliver what was asked, fastest first; then those not rated yet; then those known to fall short. With each: average rating, runs, failures, median delivery time and cost. Check it before choosing a worker. While fewer than three providers have been rated for a kind, try a worker with no record there rather than reusing a rated one; after that take the first that fits, and still give an untried one a turn now and then.",
+            "Show how each worker has done so far, per kind of task, best first: those that deliver what was asked, fastest first; then those not rated yet; then those known to fall short. With each: average rating, runs, failures, median delivery time and cost. For each kind it also says which worker Vitra would pick next and why, and which offered workers have not been tried.",
             properties: [
                 "kind": [
                     "type": "string",
@@ -154,7 +150,7 @@ public struct AgentToolExecutor: ToolExecutor {
     private static let defaultTimeout = 300
     private static let longestTimeout = 3600
     private static let defaultListLimit = 20
-    /// How far back the trial rules look; past runs beyond it are old news.
+    /// How far back the picker looks; past runs beyond it are old news.
     private static let historyLimit = 2000
     /// How far back the scoreboard looks.
     private static let scoredRuns = 2000
@@ -241,42 +237,70 @@ public struct AgentToolExecutor: ToolExecutor {
         executables: Executables,
         project: String?
     ) throws -> String {
-        let cliName = try string("cli", in: arguments)
-        guard let cli = WorkerCLI(rawValue: cliName) else {
-            let names = WorkerCLI.allCases.map(\.rawValue)
-            let known = names.dropLast().joined(separator: ", ") + " or " + (names.last ?? "")
-            throw ToolError("cli must be \(known), not '\(cliName)'")
-        }
         let accessName = arguments["access"]?.stringValue ?? WorkerAccess.read.rawValue
         guard let access = WorkerAccess(rawValue: accessName) else {
             throw ToolError("access must be read or edit, not '\(accessName)'")
         }
+        let kind = try kind(in: arguments)
+        let commands = try commands(in: arguments)
+
+        // Named by the orchestrator: run as asked. Otherwise Vitra picks.
+        var picked: WorkerPicker.Choice?
+        let cli: WorkerCLI
+        let model: String
+        let effort: String?
+        if arguments["cli"]?.stringValue != nil {
+            let cliName = try string("cli", in: arguments)
+            guard let named = WorkerCLI(rawValue: cliName) else {
+                let names = WorkerCLI.allCases.map(\.rawValue)
+                let known = names.dropLast().joined(separator: ", ") + " or " + (names.last ?? "")
+                throw ToolError("cli must be \(known), not '\(cliName)'")
+            }
+            cli = named
+            model = try string("model", in: arguments)
+            effort = arguments["effort"]?.stringValue
+        } else {
+            guard arguments["model"]?.stringValue == nil, arguments["effort"]?.stringValue == nil else {
+                throw ToolError("model and effort go with a cli: name the worker with all three, or leave all three out and Vitra picks")
+            }
+            let offers = ModelCatalog.offers(ModelCatalog.cachedListing(executables))
+            guard let choice = WorkerPicker.pick(
+                kind: kind ?? .other,
+                access: access,
+                needsCommands: !commands.isEmpty,
+                history: orchestrator.recent(limit: Self.historyLimit),
+                offers: offers,
+                installed: Set(executables.paths.keys)
+            ) else {
+                throw ToolError(
+                    "no installed worker can take this piece\(commands.isEmpty ? "" : " with commands"): "
+                        + "name one with cli, model and effort (agent_models lists them)"
+                )
+            }
+            picked = choice
+            cli = choice.offer.cli
+            model = choice.offer.model
+            effort = choice.offer.effort
+        }
 
         let spec = WorkerSpec(
             cli: cli,
-            model: try string("model", in: arguments),
+            model: model,
             prompt: try string("prompt", in: arguments),
             directory: try string("directory", in: arguments),
             access: access,
             label: arguments["label"]?.stringValue,
-            kind: try kind(in: arguments),
-            effort: arguments["effort"]?.stringValue,
+            kind: kind,
+            effort: effort,
             project: project,
-            commands: try commands(in: arguments),
+            commands: commands,
             // Nil is the default, which is on: only an explicit false turns
             // the gate off, and an explicit true is kept as it was asked.
             audit: arguments["audit"]?.boolValue
         )
-        // Held to the trial and the effort ladder, unless the maestro says
-        // why it cannot be: the record is only worth choosing by if it was
-        // earned by more than the first worker tried.
-        let override = arguments["override"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if override.isEmpty, (try? spec.validate()) != nil,
-           let problem = TrialRules.problem(with: spec, history: orchestrator.recent(limit: Self.historyLimit), providers: executables.paths.count) {
-            throw ToolError(problem + " If none of those can do this piece, say why in override.")
-        }
         let id = try orchestrator.spawn(spec)
-        return "Started agent \(id): \(spec.worker), \(access.rawValue) access, in \(spec.directory). Call agent_wait with this id for its result."
+        let why = picked.map { "picked \(spec.worker): \($0.reason). " } ?? ""
+        return "Started agent \(id): \(spec.worker), \(access.rawValue) access, in \(spec.directory). \(why)Call agent_wait with this id for its result."
     }
 
     private func rate(_ arguments: JSONValue) throws -> String {
@@ -544,7 +568,8 @@ public struct AgentToolExecutor: ToolExecutor {
         guard let choice = Audit.chooseAuditor(
             implementer: run.spec,
             history: history,
-            installed: Set(executables.paths.keys)
+            installed: Set(executables.paths.keys),
+            offers: ModelCatalog.offers(ModelCatalog.cachedListing(executables))
         ) else {
             return Gate(line: "gate: no auditor from another provider is available — review this delivery yourself.")
         }

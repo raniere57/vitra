@@ -239,6 +239,35 @@ private func run(
     Worker models by kind of task, best first (score is the average of your agent_rate ratings, 1 to 5):
     review
       claude haiku (low) — 5.0/5 over 1 rated · 1 run · 0 failed · median 10s · $0.00
+      vitra picks next: opencode opencode/glm-5.3-flash-free — learning, 0 of 2 runs on review
       not tried yet: opencode opencode/glm-5.3-flash-free
     """)
+}
+
+@Test func aKindWithNoRunsAtAllStillSaysWhoIsNextAndWhatIsUntried() {
+    let offers = [
+        ModelCatalog.Offer(cli: .opencode, model: "opencode/glm-5.3-flash-free", effort: nil),
+        ModelCatalog.Offer(cli: .claude, model: "haiku", effort: "low"),
+    ]
+    let text = Scoreboard.summary([], kind: .docs, offers: offers, history: [])
+
+    #expect(text == """
+    Worker models by kind of task, best first (score is the average of your agent_rate ratings, 1 to 5):
+    docs
+      vitra picks next: opencode opencode/glm-5.3-flash-free — learning, 0 of 2 runs on docs
+      not tried yet: opencode opencode/glm-5.3-flash-free, claude haiku (low)
+    """)
+    // Without a kind every kind is covered, the empty ones included.
+    let all = Scoreboard.summary([], offers: offers, history: [])
+    for kind in TaskKind.allCases { #expect(all.contains("\n\(kind.rawValue)\n")) }
+}
+
+@Test func theUntriedLineIsAwareOfEffort() {
+    let offers = [
+        ModelCatalog.Offer(cli: .claude, model: "haiku", effort: "low"),
+        ModelCatalog.Offer(cli: .claude, model: "haiku", effort: "high"),
+    ]
+    let history = [run(.claude, "haiku", kind: .review, effort: "low")]
+    // haiku at low has run on review; haiku at high has not.
+    #expect(Scoreboard.untriedLine(offers, history: history, kind: .review) == "  not tried yet: claude haiku (high)")
 }

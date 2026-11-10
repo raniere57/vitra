@@ -63,7 +63,11 @@ private let answers = #"cat >/dev/null; echo '{"result":"the answer","is_error":
     let fixture = try Fixture(claude: answers)
     defer { fixture.cleanUp() }
 
-    #expect(try await fixture.call("agent_scores") == "No worker has finished a run yet, so there is nothing to compare.")
+    // With no history there are no scores, but the picker's next choice and
+    // the untried workers are still said, for a kind with no runs at all.
+    let empty = try await fixture.call("agent_scores", ["kind": "review"])
+    #expect(empty.contains("review\n  vitra picks next: claude haiku (low) — learning, 0 of 2 runs on review\n"))
+    #expect(empty.contains("  not tried yet: claude haiku (low), claude haiku (medium), claude haiku (high), claude sonnet (high), claude opus (low)"))
 
     let id = try await fixture.spawn()
     _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
@@ -91,6 +95,41 @@ private let answers = #"cat >/dev/null; echo '{"result":"the answer","is_error":
     await #expect(throws: ToolError("score must be a whole number from 1 to 5")) {
         try await fixture.call("agent_rate", ["id": .string(id)])
     }
+}
+
+@Test func aSpawnWithoutACLIIsPickedByVitraAndSaysWhichAndWhy() async throws {
+    let fixture = try Fixture(claude: answers)
+    defer { fixture.cleanUp() }
+
+    let text = try await fixture.call("agent_spawn", ["prompt": "go", "directory": .string(fixture.root.path), "kind": "review"])
+    #expect(text.contains("claude haiku (low), read access"))
+    #expect(text.contains("picked claude haiku (low): learning, 0 of 2 runs on review."))
+    let id = String(text.dropFirst("Started agent ".count).prefix(8))
+    #expect(try fixture.orchestrator.status(id).spec.effort == "low")
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+
+    // Commands are passed along to the worker it picks.
+    let withCommands = try await fixture.call("agent_spawn", [
+        "prompt": "go", "directory": .string(fixture.root.path), "kind": "review", "commands": ["bun test"],
+    ])
+    #expect(withCommands.contains("picked claude haiku (low): learning, 1 of 2 runs on review."))
+
+    // A model without a cli is a half-named worker: refused rather than guessed.
+    await #expect(throws: ToolError("model and effort go with a cli: name the worker with all three, or leave all three out and Vitra picks")) {
+        try await fixture.call("agent_spawn", ["model": "haiku", "prompt": "go", "directory": .string(fixture.root.path)])
+    }
+}
+
+@Test func aWorkerTheOrchestratorNamesRunsAsAskedWithNoTrialOrLadder() async throws {
+    let fixture = try Fixture(claude: answers)
+    defer { fixture.cleanUp() }
+
+    // haiku at high with nothing lower tried, and again, and a rated one again.
+    let first = try await fixture.spawn(["effort": "high", "kind": "implement"])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(first)], "timeout_seconds": 10])
+    _ = try await fixture.call("agent_rate", ["id": .string(first), "score": 5])
+    let again = try await fixture.spawn(["effort": "high", "kind": "implement"])
+    #expect(try fixture.orchestrator.status(again).spec.effort == "high")
 }
 
 @Test func aSpawnedAgentRemembersWhichProjectsMaestroAskedForIt() async throws {

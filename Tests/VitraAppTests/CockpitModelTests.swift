@@ -322,11 +322,12 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     // Delegation is the rule, with the exceptions named rather than left to
     // the maestro's sense of what counts as small.
     #expect(brief.contains("Delegate by default"))
-    #expect(brief.contains("cheapest, fastest one that does the job well"))
-    // Merit has to be earned against the others, not by having gone first.
-    #expect(brief.contains("three providers"))
-    #expect(brief.contains("lowest effort before a higher one"))
+    // Vitra picks the worker; the maestro tags the kind and passes commands.
+    #expect(brief.contains("Vitra picks the worker from the record"))
+    #expect(brief.contains("two deliveries"))
     #expect(brief.contains("commands"))
+    #expect(!brief.contains("override"))
+    #expect(!brief.contains("call agent_scores"))
     // A deploy is mostly waiting, and may be handed to a worker and rated;
     // what cannot be undone in production stays with the maestro.
     #expect(brief.contains("A deploy is a worker's job too"))

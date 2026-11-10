@@ -18,6 +18,14 @@ public enum ModelCatalog {
             self.gemini = gemini
             self.cursor = cursor
         }
+
+        /// Whether every CLI that is installed answered with a list. One that
+        /// is installed and listed nothing failed, and the listing is not
+        /// worth keeping; with nothing installed at all there is nothing to keep.
+        var isComplete: Bool {
+            let answers = [openCode, gemini, cursor].compactMap { $0 }
+            return (claude || !answers.isEmpty) && answers.allSatisfy { !$0.isEmpty }
+        }
     }
 
     /// The Claude workers on offer: each model with the efforts it may run at.
@@ -118,22 +126,36 @@ public enum ModelCatalog {
     /// The last listing, kept so a tool that needs it often does not wait
     /// several seconds per call. Reused only for the same executables.
     private final class ListingCache: @unchecked Sendable {
-        let lock = NSLock()
-        var entry: (paths: [WorkerCLI: String], at: Date, listing: Listing)?
+        private let lock = NSLock()
+        private var entry: (paths: [WorkerCLI: String], at: Date, listing: Listing)?
+
+        func listing(for paths: [WorkerCLI: String], now: Date) -> Listing? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let entry, entry.paths == paths, now.timeIntervalSince(entry.at) < cacheLifetime else { return nil }
+            return entry.listing
+        }
+
+        func store(_ listing: Listing, for paths: [WorkerCLI: String], at now: Date) {
+            lock.lock()
+            defer { lock.unlock() }
+            entry = (paths, now, listing)
+        }
     }
     private static let listingCache = ListingCache()
 
     /// `listing`, reused for `cacheLifetime` seconds when the executables are
     /// the same. Blocks like `listing`: call it off the cooperative pool.
+    ///
+    /// The lock is held only to read or write the cache, never while the CLIs
+    /// are asked, which takes seconds. A listing in which an installed CLI
+    /// listed nothing — signed out, timed out, errored — is returned but not
+    /// kept: the next call asks again instead of serving the gap for ten
+    /// minutes.
     public static func cachedListing(_ executables: Executables, now: Date = Date()) -> Listing {
-        listingCache.lock.lock()
-        defer { listingCache.lock.unlock() }
-        if let entry = listingCache.entry, entry.paths == executables.paths,
-           now.timeIntervalSince(entry.at) < cacheLifetime {
-            return entry.listing
-        }
+        if let cached = listingCache.listing(for: executables.paths, now: now) { return cached }
         let fresh = listing(executables)
-        listingCache.entry = (executables.paths, now, fresh)
+        if fresh.isComplete { listingCache.store(fresh, for: executables.paths, at: now) }
         return fresh
     }
 

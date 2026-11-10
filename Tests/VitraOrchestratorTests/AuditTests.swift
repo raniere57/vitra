@@ -4,7 +4,7 @@ import Testing
 
 private let start = Date(timeIntervalSince1970: 1_000_000)
 
-/// One finished review, as the scoreboard and the trial rules see it.
+/// One finished review of a worker.
 private func review(
     _ cli: WorkerCLI,
     _ model: String,
@@ -28,49 +28,6 @@ private func review(
     )
 }
 
-@Test func anExplorationTurnGoesToAnUntriedCheapAuditor() {
-    // Three providers rated on review; grok-4.7-low-fast already earned a
-    // rating, then the last four audits all went to it, so the next one
-    // must explore. Started dates increase so each of those four counts as
-    // a rated worker's piece (a same-worker rating that started before it).
-    let older = [
-        review(.cursor, "grok-4.7-low-fast", score: 5, at: start),
-        review(.opencode, "opencode/a-free", score: 4, at: start.addingTimeInterval(1)),
-        review(.gemini, "gemini-3.8-flash-low", score: 3, at: start.addingTimeInterval(2)),
-    ]
-    let recent = (1...4).map { step in
-        review(.cursor, "grok-4.7-low-fast", score: 5, at: start.addingTimeInterval(Double(step + 2)))
-    }
-    let chosen = Audit.chooseAuditor(
-        implementer: implementer(.claude),
-        history: older + recent,
-        installed: [.claude, .cursor, .gemini]
-    )
-    #expect(chosen?.cli == .cursor)
-    #expect(chosen?.model == "cursor-grok-4.6-low-fast")
-}
-
-@Test func anExplorationTurnFallsBackWhenNoUntriedCandidateIsInstalled() {
-    // Every installed candidate is rated and due exploration: the audit still
-    // goes to the first that passes the rest of the guards, not to nothing.
-    // Seed rating on glm first, then four more of it, so exploration is due
-    // (same-worker rating that started before each recent piece).
-    let older = [
-        review(.opencode, "opencode/glm-5.3-flash-free", score: 4, at: start),
-        review(.cursor, "grok-4.7-low-fast", score: 3, at: start.addingTimeInterval(1)),
-        review(.gemini, "gemini-3.8-flash-low", score: 3, at: start.addingTimeInterval(2)),
-    ]
-    let recent = (1...4).map { step in
-        review(.opencode, "opencode/glm-5.3-flash-free", score: 4, at: start.addingTimeInterval(Double(step + 2)))
-    }
-    let chosen = Audit.chooseAuditor(
-        implementer: implementer(.claude),
-        history: older + recent,
-        installed: [.claude, .opencode]
-    )
-    #expect(chosen?.model == "opencode/glm-5.3-flash-free")
-}
-
 private func implementer(_ cli: WorkerCLI) -> WorkerSpec {
     WorkerSpec(
         cli: cli,
@@ -82,147 +39,74 @@ private func implementer(_ cli: WorkerCLI) -> WorkerSpec {
     )
 }
 
-/// `count` delivered reviews of one worker, started a second apart from `step`.
-private func reviews(
-    _ cli: WorkerCLI,
-    _ model: String,
-    count: Int = 2,
-    score: Int? = nil,
-    step: Double = 0
-) -> [Run] {
-    (0..<count).map { offset in
-        review(cli, model, score: score, at: start.addingTimeInterval(step + Double(offset)))
-    }
+private let offers = [
+    ModelCatalog.Offer(cli: .claude, model: "haiku", effort: "low"),
+    ModelCatalog.Offer(cli: .claude, model: "haiku", effort: "medium"),
+    ModelCatalog.Offer(cli: .opencode, model: "opencode/glm-5.3-flash-free", effort: nil),
+    ModelCatalog.Offer(cli: .gemini, model: "gemini-3.8-flash-low", effort: nil),
+    ModelCatalog.Offer(cli: .cursor, model: "grok-4.7-low-fast", effort: nil),
+]
+private let everyCLI: Set<WorkerCLI> = [.claude, .opencode, .gemini, .cursor]
+
+/// `count` delivered reviews of one worker, started a second apart.
+private func reviews(_ cli: WorkerCLI, _ model: String, effort: String? = nil, count: Int = 2, score: Int? = nil) -> [Run] {
+    (0..<count).map { review(cli, model, effort: effort, score: score, at: start.addingTimeInterval(Double($0))) }
 }
 
-@Test func aCheapAuditorWithFewerThanTwoReviewsIsTriedBeforeTheRanking() {
-    // grok-4.7 is top rated, but grok-4.6 has no review yet: the audit goes
-    // to 4.6 so the cheap auditors each get a record.
-    let history = reviews(.cursor, "grok-4.7-low-fast", score: 5)
+@Test func theAuditorIsTheCheapestUntriedReviewerFromAnotherProvider() {
     let chosen = Audit.chooseAuditor(
-        implementer: implementer(.claude),
-        history: history,
-        installed: [.claude, .cursor]
+        implementer: implementer(.claude), history: [], installed: everyCLI, offers: offers
     )
-    #expect(chosen?.model == "cursor-grok-4.6-low-fast")
-}
-
-@Test func onceEveryCheapAuditorHasTwoReviewsTheRankingDecides() {
-    // Each cheap auditor has two delivered reviews, so the order goes back to
-    // the scoreboard: the top rated grok-4.7 audits, not the cheap list's first.
-    // A gemini rating makes the trial over: three providers have one.
-    let history = reviews(.cursor, "grok-4.7-low-fast", score: 5)
-        + reviews(.opencode, "opencode/glm-5.3-flash-free", score: 4, step: 10)
-        + reviews(.cursor, "cursor-grok-4.6-low-fast", score: 3, step: 20)
-        + reviews(.cursor, "cursor-grok-4.5-low-fast", score: 3, step: 30)
-        + reviews(.gemini, "gemini-3.8-flash-low", score: 3, step: 40)
-    let chosen = Audit.chooseAuditor(
-        implementer: implementer(.claude),
-        history: history,
-        installed: [.claude, .opencode, .cursor]
-    )
-    #expect(chosen?.model == "grok-4.7-low-fast")
-}
-
-@Test func theBestRatedReviewerFromAnotherProviderAudits() {
-    // Each cheap auditor already has two reviews, so the trial is over and
-    // the scoreboard's order decides: the highest rated first.
-    let history = reviews(.cursor, "grok-4.7-low-fast", score: 5)
-        + reviews(.opencode, "opencode/a-free", score: 4, step: 10)
-        + reviews(.gemini, "gemini-3.8-flash-low", score: 3, step: 20)
-        + reviews(.opencode, "opencode/glm-5.3-flash-free", step: 30)
-        + reviews(.cursor, "cursor-grok-4.6-low-fast", step: 40)
-        + reviews(.cursor, "cursor-grok-4.5-low-fast", step: 50)
-    let chosen = Audit.chooseAuditor(
-        implementer: implementer(.claude),
-        history: history,
-        installed: [.claude, .opencode, .gemini, .cursor]
-    )
-    #expect(chosen?.cli == .cursor)
-    #expect(chosen?.model == "grok-4.7-low-fast")
+    // Free opencode comes before claude, and gemini is never an auditor.
+    #expect(chosen?.cli == .opencode)
+    #expect(chosen?.model == "opencode/glm-5.3-flash-free")
     #expect(chosen?.effort == nil)
 }
 
-@Test func aGeminiWorkerIsNeverTheAuditor() {
-    // gemini workers run through Antigravity's agy, which reaches for shell
-    // commands even when told to read; headless it is refused and the audit
-    // fails. So it is not tried from the cheap list, nor from a review record
-    // however good: another provider is preferred, and with none it is no
-    // audit at all.
-    let history = [
-        review(.gemini, "gemini-3.8-flash-low", score: 5),
-        review(.opencode, "opencode/a-free", score: 4),
-        review(.cursor, "grok-4.7-low-fast", score: 3),
-    ]
-    let chosen = Audit.chooseAuditor(
-        implementer: implementer(.claude),
-        history: history,
-        installed: [.claude, .opencode, .gemini, .cursor]
-    )
-    #expect(chosen?.cli == .opencode)
-    #expect(Audit.chooseAuditor(
-        implementer: implementer(.claude), history: [], installed: [.claude, .gemini]
-    ) == nil)
+@Test func theImplementersOwnProviderAndGeminiAreNeverTheAuditor() {
+    for cli in WorkerCLI.allCases {
+        // Reviews all round, so the whole offer is rated and every CLI is a
+        // candidate wherever the exclusions allow.
+        let history = reviews(.claude, "haiku", effort: "low", score: 5)
+            + reviews(.claude, "haiku", effort: "medium", score: 5)
+            + reviews(.opencode, "opencode/glm-5.3-flash-free", score: 5)
+            + reviews(.gemini, "gemini-3.8-flash-low", score: 5)
+            + reviews(.cursor, "grok-4.7-low-fast", score: 5)
+        let chosen = Audit.chooseAuditor(implementer: implementer(cli), history: history, installed: everyCLI, offers: offers)
+        #expect(chosen?.cli != cli)
+        #expect(chosen?.cli != .gemini)
+    }
 }
 
-@Test func theImplementersOwnProviderIsNeverTheAuditor() {
-    // claude is ranked first, and cannot audit a claude delivery: a sibling
-    // misses what its sibling missed.
-    let history = [
-        review(.claude, "haiku", effort: "low", score: 5),
-        review(.gemini, "gemini-3.8-flash-low", score: 4),
-        review(.opencode, "opencode/a-free", score: 3),
-    ]
-    let chosen = Audit.chooseAuditor(
-        implementer: implementer(.claude),
-        history: history,
-        installed: [.claude, .gemini, .opencode]
-    )
-    #expect(chosen?.cli == .opencode)
-}
-
-@Test func withNoReviewRecordTheCheapListIsUsedInOrder() {
-    let installed: Set<WorkerCLI> = [.claude, .opencode, .cursor, .gemini]
-    // opencode comes first and is skipped only when it is the implementer.
-    #expect(Audit.chooseAuditor(implementer: implementer(.claude), history: [], installed: installed)?.cli == .opencode)
-    #expect(Audit.chooseAuditor(implementer: implementer(.cursor), history: [], installed: installed)?.cli == .opencode)
-    #expect(Audit.chooseAuditor(implementer: implementer(.gemini), history: [], installed: installed)?.cli == .opencode)
-    #expect(Audit.chooseAuditor(implementer: implementer(.opencode), history: [], installed: installed)?.cli == .cursor)
-    // claude is third in the list, after the two that are missing here.
-    #expect(Audit.chooseAuditor(
-        implementer: implementer(.opencode), history: [], installed: [.claude, .opencode]
-    )?.cli == .claude)
-
-    let cheapest = Audit.chooseAuditor(implementer: implementer(.claude), history: [], installed: installed)
-    #expect(cheapest?.model == "opencode/glm-5.3-flash-free")
-    #expect(cheapest?.effort == nil)
+@Test func theAuditorsEffortCountsNotJustItsModel() {
+    // haiku at low has its two deliveries, haiku at medium none: the audit
+    // goes to medium. Matching on the model alone would take it for done.
+    let history = reviews(.claude, "haiku", effort: "low")
+        + reviews(.opencode, "opencode/glm-5.3-flash-free")
+        + reviews(.cursor, "grok-4.7-low-fast")
+    let chosen = Audit.chooseAuditor(implementer: implementer(.opencode), history: history, installed: everyCLI, offers: offers)
+    #expect(chosen?.cli == .claude)
+    #expect(chosen?.model == "haiku")
+    #expect(chosen?.effort == "medium")
 }
 
 @Test func anUninstalledCLIIsNotAnAuditor() {
     let chosen = Audit.chooseAuditor(
-        implementer: implementer(.claude),
-        history: [],
-        installed: [.claude, .cursor]
+        implementer: implementer(.claude), history: [], installed: [.claude, .cursor], offers: offers
     )
     #expect(chosen?.cli == .cursor)
-    #expect(chosen?.model == "grok-4.7-low-fast")
 }
 
-@Test func aReviewerTheTrialRulesRefuseIsPassedOver() {
-    // One provider has a review rating, so the trial still refuses a worker
-    // already rated on review — the cheap fallback is that same worker here.
-    let history = [review(.opencode, "opencode/glm-5.3-flash-free", score: 4)]
-    let chosen = Audit.chooseAuditor(
-        implementer: implementer(.claude),
-        history: history,
-        installed: [.claude, .opencode]
-    )
-    #expect(chosen == nil)
-}
-
-@Test func noAuditorWhenEveryCandidateIsGone() {
-    // Only the implementer's own CLI is installed, and it may not audit itself.
-    #expect(Audit.chooseAuditor(implementer: implementer(.claude), history: [], installed: [.claude]) == nil)
+@Test func noAuditorWhenOnlyTheImplementersOrGeminiAreLeft() {
+    #expect(Audit.chooseAuditor(
+        implementer: implementer(.claude), history: [], installed: [.claude], offers: offers
+    ) == nil)
+    #expect(Audit.chooseAuditor(
+        implementer: implementer(.claude), history: [], installed: [.claude, .gemini], offers: offers
+    ) == nil)
+    #expect(Audit.chooseAuditor(
+        implementer: implementer(.claude), history: [], installed: everyCLI, offers: []
+    ) == nil)
 }
 
 @Test func theAuditorIsToldTheTaskTheDiffAndHowToAnswer() {

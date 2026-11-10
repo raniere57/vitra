@@ -189,28 +189,45 @@ public enum Scoreboard {
     }
 
     /// The ranking as text for the orchestrating model.
+    ///
+    /// With `offers`, each kind also says who the picker would choose next
+    /// and which offered workers have no run on it: that holds for a kind
+    /// with no runs at all too, which is where it matters most.
     public static func summary(
         _ scores: [ModelScore],
         kind: TaskKind? = nil,
         offers: [ModelCatalog.Offer] = [],
-        history: [Run] = []
+        history: [Run] = [],
+        now: Date = Date()
     ) -> String {
-        guard !scores.isEmpty else {
+        guard !scores.isEmpty || !offers.isEmpty else {
             let what = kind.map { "a \($0.rawValue) task" } ?? "a run"
             return "No worker has finished \(what) yet, so there is nothing to compare."
         }
         var lines = ["Worker models by kind of task, best first (score is the average of your agent_rate ratings, 1 to 5):"]
         // (Within a kind: those rated 4 or better, fastest first; then the unrated; then the rest.)
-        for kind in TaskKind.allCases {
-            let ofKind = scores.filter { $0.kind == kind }
-            guard !ofKind.isEmpty else { continue }
-            lines.append(kind.rawValue)
+        for each in kind.map({ [$0] }) ?? TaskKind.allCases {
+            let ofKind = scores.filter { $0.kind == each }
+            let extra = [
+                nextLine(offers, history: history, kind: each, now: now),
+                untriedLine(offers, history: history, kind: each),
+            ].compactMap { $0 }
+            guard !ofKind.isEmpty || !extra.isEmpty else { continue }
+            lines.append(each.rawValue)
             lines.append(contentsOf: ofKind.map { "  " + line($0) })
-            if let untried = untriedLine(offers, history: history, kind: kind) {
-                lines.append(untried)
-            }
+            lines.append(contentsOf: extra)
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// Who the picker would choose next for `kind` (a piece that only reads
+    /// and runs no commands), and why; nil when nothing is offered or may run.
+    static func nextLine(_ offers: [ModelCatalog.Offer], history: [Run], kind: TaskKind, now: Date = Date()) -> String? {
+        guard let choice = WorkerPicker.pick(
+            kind: kind, access: .read, needsCommands: false, history: history,
+            offers: offers, installed: Set(offers.map(\.cli)), now: now
+        ) else { return nil }
+        return "  vitra picks next: \(choice.offer.name) — \(choice.reason)"
     }
 
     /// How many untried workers are named before the rest are counted.
@@ -219,10 +236,10 @@ public enum Scoreboard {
     /// The offered workers with no run of `kind` in `history`, as one line
     /// for that kind; nil when there are none or nothing is offered.
     public static func untriedLine(_ offers: [ModelCatalog.Offer], history: [Run], kind: TaskKind) -> String? {
-        let tried = Set(history.filter { ($0.spec.kind ?? .other) == kind }.map {
-            ModelCatalog.Offer(cli: $0.spec.cli, model: $0.spec.model, effort: $0.spec.effort)
-        })
-        let untried = offers.filter { !tried.contains($0) }
+        // A worker is its CLI, model and effort: haiku at low having run says
+        // nothing of haiku at high.
+        let ofKind = history.filter { ($0.spec.kind ?? .other) == kind }
+        let untried = offers.filter { offer in !ofKind.contains { WorkerPicker.isRun($0, of: offer) } }
         guard !untried.isEmpty else { return nil }
         let named = untried.prefix(untriedNamed).map(\.name)
         let rest = untried.count - named.count
@@ -249,7 +266,7 @@ public enum Scoreboard {
         run.state == .lost || run.output?.isError == true
     }
 
-    private static func median(_ values: [TimeInterval]) -> TimeInterval? {
+    static func median(_ values: [TimeInterval]) -> TimeInterval? {
         guard !values.isEmpty else { return nil }
         let sorted = values.sorted()
         let middle = sorted.count / 2
