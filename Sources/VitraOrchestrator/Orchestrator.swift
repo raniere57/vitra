@@ -258,7 +258,11 @@ public struct Orchestrator: Sendable {
 
         // What the project keeps out of git but the worker needs. Whatever
         // could not be applied is written beside the run for the report.
-        let setup = WorktreeSetup.apply(repository: URL(fileURLWithPath: topLevel), to: tree)
+        // The sources come from the main working tree, not from `topLevel`: when
+        // the directory is itself a worktree, its ignored folders are symlinks
+        // into the main checkout, which the setup would refuse as outside the
+        // repository. The common git dir is `<main>/.git` for every worktree.
+        let setup = WorktreeSetup.apply(repository: URL(fileURLWithPath: mainWorkingTree(from: topLevel)), to: tree)
         if !setup.skipped.isEmpty {
             try? Data((setup.skipped.joined(separator: "\n") + "\n").utf8)
                 .write(to: run.appendingPathComponent("worktree-setup"))
@@ -274,6 +278,15 @@ public struct Orchestrator: Sendable {
         // worker to a path that is not there.
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return Worktree(top: topLevel, tree: tree.path, branch: branch, base: base, directory: directory)
+    }
+
+    /// The top of the main working tree, which holds the common git dir. Falls
+    /// back to `topLevel` when git cannot say, so a normal checkout is unchanged.
+    private func mainWorkingTree(from topLevel: String) -> String {
+        let common = (Git.output(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: topLevel) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !common.isEmpty else { return topLevel }
+        return URL(fileURLWithPath: common).deletingLastPathComponent().path
     }
 
     /// Takes away a worktree and the branch a failed spawn made.

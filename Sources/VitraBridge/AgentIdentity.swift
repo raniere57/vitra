@@ -95,17 +95,21 @@ struct AgentIdentity: Equatable, Sendable {
         return root.appendingPathComponent(id, isDirectory: true)
     }
 
-    /// Which tool set the helper serves. The maestro's only when its own
-    /// environment says so and names no worker or run. Everything else gets
-    /// the worker's set: a worker whose variables were dropped, or a caller
-    /// that is not known at all.
+    /// Which tool set the helper serves. The maestro's when its own environment
+    /// names no worker or run and either says it is the maestro or carries
+    /// `VITRA_PANE`. The pane is set in the project's shell, so a maestro started
+    /// from a config written before the role existed, or relaunched by hand,
+    /// still gets its tools. Everything else gets the worker's set: a worker
+    /// whose variables were dropped, or a caller that is not known at all.
     enum ServedRole: Equatable, Sendable {
         case maestro
         case worker
 
         static func decide(own: [String: String]) -> ServedRole {
             let names = own.nonEmpty(agentKey) != nil || own.nonEmpty(runKey) != nil
-            return own[VitraMCPConfig.roleKey] == VitraMCPConfig.maestroRole && !names ? .maestro : .worker
+            let saysMaestro = own[VitraMCPConfig.roleKey] == VitraMCPConfig.maestroRole
+                || own.nonEmpty(paneKey) != nil
+            return saysMaestro && !names ? .maestro : .worker
         }
     }
 

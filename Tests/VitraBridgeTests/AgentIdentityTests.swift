@@ -112,10 +112,23 @@ private func procargs2(argv: [String], exec: String = "/usr/bin/vitra", padding:
     #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_ROLE": "maestro", "VITRA_RUN": "/x/runs/abcd1234"]) == .worker)
 }
 
+@Test func thePaneAloneMakesTheMaestroEvenWithAnOldConfigWithoutTheRole() {
+    // A maestro started from a config written before VITRA_ROLE existed, or
+    // relaunched by hand in the project's shell, still has the pane.
+    #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_PANE": "pane-1"]) == .maestro)
+    #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_ROLE": "", "VITRA_PANE": "pane-1"]) == .maestro)
+}
+
+@Test func thePaneDoesNotMakeAWorkerAMaestro() {
+    #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_PANE": "pane-1", "VITRA_AGENT": "abcd1234"]) == .worker)
+    #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_PANE": "pane-1", "VITRA_RUN": "/x/runs/abcd1234"]) == .worker)
+}
+
 @Test func anUnknownCallerGetsTheWorkerSet() {
     #expect(AgentIdentity.ServedRole.decide(own: [:]) == .worker)
     #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_ROLE": "something"]) == .worker)
     #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_ROLE": ""]) == .worker)
+    #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_PANE": ""]) == .worker)
 }
 
 // MARK: - Identity by working directory

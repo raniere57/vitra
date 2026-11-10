@@ -746,6 +746,43 @@ echo '{"result":"done","is_error":false}'
     #expect(run.worktreeSkipped == ["link vendor/absent: missing in the checkout"])
 }
 
+@Test func aWorkerSentToAWorktreeStillLinksFromTheMainCheckout() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    try "vendor/\n".write(to: sandbox.project.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+    try "archive\n".write(to: sandbox.project.appendingPathComponent("vendor/lib/a.a").createDirectoryIfNeeded(), atomically: true, encoding: .utf8)
+    try "link vendor/lib\n".write(
+        to: sandbox.project.appendingPathComponent(".vitra/worktree").createDirectoryIfNeeded(),
+        atomically: true,
+        encoding: .utf8
+    )
+    try sandbox.makeRepository()
+
+    // The directory the fix is sent to is itself a worktree of the project, and
+    // its ignored `vendor/lib` is a symlink into the main checkout, as a
+    // previous worker's tree is.
+    let side = sandbox.root.appendingPathComponent("side")
+    try sandbox.git(["worktree", "add", "-q", "-b", "side", side.path, "HEAD"])
+    try FileManager.default.createDirectory(at: side.appendingPathComponent("vendor"), withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(
+        at: side.appendingPathComponent("vendor/lib"),
+        withDestinationURL: sandbox.project.appendingPathComponent("vendor/lib")
+    )
+
+    let orchestrator = try sandbox.orchestrator(claude: #"""
+    cat >/dev/null
+    if [ -f vendor/lib/a.a ]; then echo found > found.txt; fi
+    echo '{"result":"done","is_error":false}'
+    """#)
+
+    let id = try orchestrator.spawn(sandbox.spec(access: .edit, directory: side))
+    let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)
+
+    #expect(run.state == .finished(exitCode: 0))
+    #expect(try sandbox.git(["show", "vitra/\(id):found.txt"]) == "found\n")
+    #expect(run.worktreeSkipped.isEmpty)
+}
+
 @Test func aLinkedOrCopiedPathIsNotCommittedEvenWhenTheProjectIgnoresADirectoryOfThatName() async throws {
     let sandbox = try Sandbox()
     defer { sandbox.cleanUp() }
