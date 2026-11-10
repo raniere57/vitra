@@ -103,7 +103,11 @@ enum UISnapshot {
         application.setActivationPolicy(.prohibited)
         application.appearance = NSAppearance(named: .darkAqua)
 
-        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-snapshot-\(UUID().uuidString)")
+        // Under /tmp, not the per-user temp folder: the project's path is drawn
+        // in the header, and that one is long enough to squeeze the other plates.
+        // The real folder behind /tmp, because the file search reports real paths
+        // and the lists show them relative to the project's.
+        let scratch = URL(fileURLWithPath: "/private/tmp/vs\(UUID().uuidString.prefix(4))")
         defer { try? FileManager.default.removeItem(at: scratch) }
         let fixtures = try SnapshotFixtures.makeProject(in: scratch, now: Date())
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -164,8 +168,11 @@ enum UISnapshot {
     /// moment to draw thumbnails.
     private static func recent(_ kind: RecentFiles.Kind, _ context: Context) throws -> NSView {
         let list = RecentFilesView()
-        list.load(kind, in: context.fixtures.project)
-        guard settle(timeout: 5, until: { !list.entries.isEmpty }) else { throw SnapshotError.render("the \(kind) list never filled") }
+        let root = context.fixtures.project
+        list.show(RecentFiles.find(in: root, kind: kind), root: root)
+        guard !list.entries.isEmpty else { throw SnapshotError.render("the \(kind) list is empty") }
+        // Thumbnails arrive from the system on the main queue; the file's own
+        // icon stands in where they do not.
         settle(timeout: 1.5, until: { false })
         return list
     }

@@ -235,7 +235,9 @@ final class RecentFilesView: NSView {
         }
     }
 
-    private func show(_ entries: [RecentFiles.Entry], root: URL) {
+    /// Internal, not private: the UI snapshot tool fills the list with it
+    /// directly instead of waiting on the search's trip through the main queue.
+    func show(_ entries: [RecentFiles.Entry], root: URL) {
         self.entries = entries
         note.stringValue = "Nenhum arquivo desse tipo no projeto."
         note.isHidden = !entries.isEmpty
