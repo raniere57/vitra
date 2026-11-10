@@ -19,6 +19,7 @@ final class GitPanel: NSView {
     private var timer: Timer?
     private var watches: [DispatchSourceFileSystemObject] = []
     private var watchGeneration = 0
+    private var pendingReload: DispatchWorkItem?
 
     init(path: String) {
         self.path = path
@@ -81,7 +82,7 @@ final class GitPanel: NSView {
             eventMask: [.write, .rename, .delete, .extend],
             queue: .main
         )
-        source.setEventHandler { [weak self] in self?.reloadLocal() }
+        source.setEventHandler { [weak self] in self?.repositoryChanged() }
         source.setCancelHandler { Darwin.close(descriptor) }
         source.resume()
         watches.append(source)
@@ -90,6 +91,20 @@ final class GitPanel: NSView {
     private func stopWatching() {
         watches.forEach { $0.cancel() }
         watches.removeAll()
+        pendingReload?.cancel()
+        pendingReload = nil
+    }
+
+    /// One reload for a burst: a commit or a fetch writes the git directory
+    /// many times over, and each reload is two git processes.
+    private func repositoryChanged() {
+        pendingReload?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingReload = nil
+            self?.reloadLocal()
+        }
+        pendingReload = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
     private func reloadLocal() {
