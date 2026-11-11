@@ -203,7 +203,8 @@ enum StageModel {
     }
 
     static func stateText(_ run: Run, _ outcome: StageNode.Outcome, now: Date) -> String {
-        let score = run.rating.map { " \($0.score)/5" } ?? ""
+        // An audit's line is too short for its rating; the card carries it.
+        let score = isAudit(run) ? "" : run.rating.map { " \($0.score)/5" } ?? ""
         // An audit is a short disc beside its delivery: its verdict, when its
         // answer's first line gives one, says more than "pronto".
         if isAudit(run), outcome == .done, let verdict = auditVerdict(run.output?.text) { return verdict }
