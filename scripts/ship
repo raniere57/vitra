@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+#
+# The routine after a change, quiet: one line per step instead of a screen of
+# build output.
+#
+#   scripts/ship test        run the whole suite; print the verdict (and failures)
+#   scripts/ship build       build and sign dist/Vitra.app; print how it was signed and its size
+#   scripts/ship install     replace /Applications/Vitra.app and reopen it, detached, in 10 s
+#   scripts/ship all         test, then build (stops at the first failure)
+#
+# Full output of the last run of each step is kept in /tmp/vitra-ship-<step>.log.
+
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+
+run_test() {
+  "$ROOT/scripts/test.sh" >/tmp/vitra-ship-test.log 2>&1
+  local status=$?
+  grep -E "✘|error:" /tmp/vitra-ship-test.log | grep -v "passing [0-9]* argument" | cut -c1-240 | head -12
+  grep -E "Test run with" /tmp/vitra-ship-test.log | tail -1
+  return $status
+}
+
+run_build() {
+  "$ROOT/scripts/build-app.sh" >/tmp/vitra-ship-build.log 2>&1 || { tail -5 /tmp/vitra-ship-build.log; return 1; }
+  local signed size
+  signed="$(grep -Eo "signed as .*|signing ad-hoc" /tmp/vitra-ship-build.log | tail -1)"
+  size="$(du -h "$ROOT/dist/Vitra.app/Contents/MacOS/Vitra" | cut -f1)"
+  echo "build ok · $signed · binário $size"
+}
+
+run_install() {
+  nohup /bin/sh -c 'sleep 10; /Users/raniere/Dev/.vitra-wt/instalar.sh' >/tmp/vitra-install.log 2>&1 &
+  disown
+  echo "instalação em 10 s"
+}
+
+case "${1:-all}" in
+  test) run_test ;;
+  build) run_build ;;
+  install) run_install ;;
+  all) run_test && run_build ;;
+  *) echo "uso: scripts/ship [test|build|install|all]" >&2; exit 2 ;;
+esac
