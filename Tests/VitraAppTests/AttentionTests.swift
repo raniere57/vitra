@@ -270,3 +270,26 @@ private let utc = TimeZone(identifier: "UTC")!
     let texts = ProviderChips.derive(runs: runs, usage: usage, now: t0, timeZone: utc).map(\.text)
     #expect(texts.map { $0.split(separator: " ").first.map(String.init) } == ["claude", "opencode", "gemini"])
 }
+
+@Test func aStatusLineRedrawnAfterAPermissionPromptMeansWorkResumed() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-att-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let project = "/tmp/project-\(UUID().uuidString)"
+    let asked = Date(timeIntervalSince1970: 1_000)
+    let record = AttentionRecord(state: .needsPermission, message: "permission", since: asked, path: CockpitProject(path: project).path)
+    try #require(AttentionRecord.encode(record)).write(to: Attention.file(for: project, in: directory))
+
+    // Drawn with the prompt itself: still asking.
+    Attention.resumed(project: project, now: asked.addingTimeInterval(1), in: directory)
+    #expect(Attention.load(for: project, in: directory)?.state == .needsPermission)
+
+    Attention.resumed(project: project, now: asked.addingTimeInterval(5), in: directory)
+    #expect(Attention.load(for: project, in: directory)?.state == .working)
+
+    // A maestro that is merely waiting is not touched by its status line.
+    let waiting = AttentionRecord(state: .waiting, message: nil, since: asked, path: record.path)
+    try #require(AttentionRecord.encode(waiting)).write(to: Attention.file(for: project, in: directory))
+    Attention.resumed(project: project, now: asked.addingTimeInterval(60), in: directory)
+    #expect(Attention.load(for: project, in: directory)?.state == .waiting)
+}

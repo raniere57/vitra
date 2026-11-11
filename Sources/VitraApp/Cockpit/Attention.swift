@@ -140,6 +140,24 @@ enum Attention {
             try? data.write(to: file(for: project, in: directory), options: .atomic)
         }
     }
+
+    /// How long after a permission was asked for a sign of work means it was
+    /// given: the status line also runs as the prompt itself is drawn.
+    static let permissionSettles: TimeInterval = 2
+
+    /// claude is at work again: its status line was redrawn. No hook fires
+    /// when the user answers a permission prompt, so without this the project
+    /// would go on saying "pede permissão" until the turn ended.
+    static func resumed(project: String?, now: Date = Date(), in directory: URL = Maestro.supportDirectory) {
+        guard let project, let record = load(for: project, in: directory),
+              record.state == .needsPermission,
+              now.timeIntervalSince(record.since) > permissionSettles,
+              let data = AttentionRecord.encode(
+                  AttentionRecord(state: .working, message: nil, since: now, path: record.path)
+              )
+        else { return }
+        try? data.write(to: file(for: project, in: directory), options: .atomic)
+    }
 }
 
 /// What the cockpit makes of a state.

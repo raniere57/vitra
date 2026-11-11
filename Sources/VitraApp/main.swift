@@ -37,6 +37,7 @@ if CommandLine.arguments.dropFirst().first == "hook" {
 // `Vitra maestro-status` is the maestro's status line: it notes the usage
 // figures claude hands it, then runs the status line the user already had.
 if CommandLine.arguments.dropFirst().first == "maestro-status" {
+    Attention.resumed(project: ProcessInfo.processInfo.environment["VITRA_PROJECT"])
     MaestroStatus.run(
         input: FileHandle.standardInput.readDataToEndOfFile(),
         binary: Bundle.main.executablePath ?? CommandLine.arguments[0]
