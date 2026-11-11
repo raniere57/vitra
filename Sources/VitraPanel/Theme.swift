@@ -32,6 +32,14 @@ public enum Theme {
     /// The danger colour as text: the dot's red is too dark to read at 12 pt.
     public static let dangerText = color(0xEE8F87)
 
+    // MARK: Diff washes
+
+    /// The ground under an added and a removed line of a diff: the success
+    /// green and the danger red let down almost to the graphite, so a long
+    /// diff reads as calm bands and the text on them keeps its contrast.
+    public static let addedWash = color(0x15261C)
+    public static let removedWash = color(0x2B191B)
+
     // MARK: Provider tints
 
     /// One muted tint per worker CLI, for the Palco's nodes and timeline bars.

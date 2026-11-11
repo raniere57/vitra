@@ -5,6 +5,8 @@ import VitraOrchestrator
 final class WorkersPanel: NSView {
     /// The user asked for every running worker to be stopped.
     var onStopAll: (([String]) -> Void)?
+    /// The user asked to review a delivery's diff.
+    var onReview: ((Delivery) -> Void)?
 
     /// How many workers are running, for the tab's title.
     var runningCount: Int { runningIDs.count }
@@ -51,9 +53,9 @@ final class WorkersPanel: NSView {
             view.removeFromSuperview()
             rowViews[id] = nil
         }
-        for (index, row) in shown.enumerated() {
+        for (index, (row, run)) in zip(shown, runs).enumerated() {
             let view = rowViews[row.id] ?? makeRow(row.id)
-            view.show(row, isOpen: openRow == row.id)
+            view.show(row, isOpen: openRow == row.id, delivery: Delivery(run))
             // The last row ends on the footer's rule: two lines there would
             // read as a seam.
             view.showsSeparator = index < shown.count - 1
@@ -67,6 +69,7 @@ final class WorkersPanel: NSView {
     private func makeRow(_ id: String) -> WorkerRowView {
         let view = WorkerRowView()
         view.onClick = { [weak self] in self?.toggle(id) }
+        view.onReview = { [weak self] delivery in self?.onReview?(delivery) }
         rowViews[id] = view
         rows.addArrangedSubview(view)
         // Full width: a row's hover and its hairline run edge to edge, and it
@@ -186,6 +189,10 @@ final class WorkersPanel: NSView {
 /// Clicking it opens the worker's answer underneath.
 final class WorkerRowView: NSView {
     var onClick: (() -> Void)?
+    var onReview: ((Delivery) -> Void)? {
+        get { actions.onReview }
+        set { actions.onReview = newValue }
+    }
 
     private static let longestAnswerShown = 4000
 
@@ -198,6 +205,8 @@ final class WorkerRowView: NSView {
     private let answer = NSTextField(wrappingLabelWithString: "")
     private let answerBox = NSView.filled(CockpitStyle.bar, cornerRadius: CockpitStyle.Radius.card)
     private let hairline = NSView.rule(CockpitStyle.softLine)
+    private let actions = DeliveryActionsView()
+    private var delivery: Delivery?
     /// Whether the row draws the hairline under it.
     var showsSeparator = true {
         didSet { hairline.isHidden = !showsSeparator }
@@ -218,7 +227,8 @@ final class WorkerRowView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func show(_ row: WorkerRow, isOpen: Bool) {
+    func show(_ row: WorkerRow, isOpen: Bool, delivery: Delivery? = nil) {
+        self.delivery = delivery
         title.stringValue = row.title
         title.textColor = row.kind == .stopped ? CockpitStyle.muted : CockpitStyle.text
         state.stringValue = row.stateText
@@ -247,6 +257,7 @@ final class WorkerRowView: NSView {
     func setOpen(_ open: Bool) {
         isOpen = open
         answerBox.isHidden = !(open && hasAnswer)
+        actions.show(delivery, isOpen: open)
         paint()
     }
 
@@ -332,7 +343,7 @@ final class WorkerRowView: NSView {
         answerBox.addSubview(answer)
         answerBox.isHidden = true
 
-        let column = NSStackView(views: [top, meta, answerBox])
+        let column = NSStackView(views: [top, meta, answerBox, actions])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = CockpitStyle.Space.sm
@@ -354,6 +365,8 @@ final class WorkerRowView: NSView {
             meta.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor),
             answerBox.leadingAnchor.constraint(equalTo: title.leadingAnchor),
             answerBox.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+            actions.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            actions.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor),
 
             answer.topAnchor.constraint(equalTo: answerBox.topAnchor, constant: CockpitStyle.Space.lg),
             answer.bottomAnchor.constraint(equalTo: answerBox.bottomAnchor, constant: -CockpitStyle.Space.lg),

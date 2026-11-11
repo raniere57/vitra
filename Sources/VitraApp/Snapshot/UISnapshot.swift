@@ -37,6 +37,13 @@ enum UISnapshot {
             panel.show(context.fixtures.workerRuns(), now: context.fixtures.now)
             return panel
         }),
+        Shot(name: "workers-delivery", size: NSSize(width: 420, height: 720), build: { context in
+            let panel = WorkersPanel()
+            panel.show(context.fixtures.deliveryRuns(), now: context.fixtures.now)
+            panel.reveal(context.fixtures.reviewDelivery.runID)
+            return panel
+        }),
+        Shot(name: "diff-review", size: NSSize(width: 720, height: 640), build: { try diffReview($0) }),
         Shot(name: "stage", size: NSSize(width: 420, height: 720), build: { palco($0, $0.fixtures.palcoRuns()) }),
         Shot(name: "stage-empty", size: NSSize(width: 420, height: 720), build: { palco($0, $0.fixtures.palcoQuiet(), merged: false) }),
         Shot(name: "stage-reduced-motion", size: NSSize(width: 420, height: 720), build: { palco($0, $0.fixtures.palcoRuns(), reduceMotion: true) }),

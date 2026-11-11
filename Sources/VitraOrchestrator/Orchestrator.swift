@@ -56,6 +56,10 @@ public struct Orchestrator: Sendable {
     private let root: URL
     private let memoryRoot: URL
     private let executables: Executables
+    /// What a worker's environment is made from; nil for this process's own.
+    /// The app passes the maestro's shell's, so a worker it spawns runs as
+    /// one the maestro's helper would have.
+    private let spawnEnvironment: [String: String]?
     private let browserConfig: String?
     /// The `vitra` binary a worker's own MCP configuration starts.
     private let vitraBinary: String?
@@ -76,8 +80,10 @@ public struct Orchestrator: Sendable {
         executables: Executables = .discover(),
         browserConfig: String? = nil,
         vitraBinary: String? = nil,
-        memoryRoot: URL = ProjectMemory.defaultRoot
+        memoryRoot: URL = ProjectMemory.defaultRoot,
+        spawnEnvironment: [String: String]? = nil
     ) {
+        self.spawnEnvironment = spawnEnvironment
         let isRealStore = root == Orchestrator.defaultRoot
         self.root = root
         self.memoryRoot = memoryRoot
@@ -226,7 +232,7 @@ public struct Orchestrator: Sendable {
             let label = spec.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             variables["VITRA_COMMIT_MESSAGE"] = "vitra \(id): " + (label.isEmpty ? spec.worker : label)
         }
-        let environment = Self.workerEnvironment(from: ProcessInfo.processInfo.environment)
+        let environment = Self.workerEnvironment(from: spawnEnvironment ?? ProcessInfo.processInfo.environment)
             // VITRA_AGENT is who the worker is to Vitra's browser: the tab it
             // opens there is filed under its run.
             .merging(variables) { _, new in new }

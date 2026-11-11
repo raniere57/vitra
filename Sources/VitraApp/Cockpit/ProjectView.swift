@@ -382,6 +382,28 @@ final class ProjectView: NSView {
         (tab.isWide ? sideWide : sideNarrow)?.isActive = true
     }
 
+    /// Comments written on deliveries, kept for the session: a review is
+    /// built afresh each time it is opened, the comments outlive it.
+    private let reviewBook = ReviewCommentBook()
+
+    /// Opens a delivery's diff where files are read, the wide side area;
+    /// back returns to the tab the user came from.
+    func review(_ delivery: Delivery) {
+        let from = tabs.selected
+        let view = DiffReviewView(delivery: delivery, book: reviewBook, isSolo: mode == .solo) { [project, paneID] notes, done in
+            DeliveryRedo.send(run: delivery.runID, notes: notes, project: project.path, pane: paneID, done: done)
+        }
+        view.onBack = { [weak self] in
+            guard let self else { return }
+            self.select(from)
+            if from == .workers { self.workers.reveal(delivery.runID) }
+        }
+        select(.files)
+        tabSlot.subviews.forEach { $0.removeFromSuperview() }
+        tabSlot.addFilling(view)
+        view.focus()
+    }
+
     /// Shows a file in the Arquivos tab.
     func preview(_ target: PreviewTarget) {
         // So the back arrow leads to the project's files, not to nothing.
@@ -870,6 +892,7 @@ final class ProjectView: NSView {
             if tab == .terminal, let view = self.sharedTerminalView { self.window?.makeFirstResponder(view) }
         }
         tabSlot.addFilling(workers)
+        workers.onReview = { [weak self] delivery in self?.review(delivery) }
 
         // The right side has two shapes: narrow for the lists, and half the
         // window for a page or a file.
