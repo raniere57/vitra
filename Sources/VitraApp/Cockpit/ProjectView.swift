@@ -144,7 +144,22 @@ final class ProjectView: NSView {
         icon.heightAnchor.constraint(equalToConstant: CockpitStyle.iconSize).isActive = true
         return NSView.pill([icon, branch])
     }()
-    private let titleLabel = NSTextField.label("Maestro", font: CockpitStyle.title, color: CockpitStyle.text)
+    private lazy var titleLabel = NSTextField.label(mode.title, font: CockpitStyle.title, color: CockpitStyle.text)
+    /// Whether the maestro delegates or works alone; persisted by the window.
+    private(set) var mode: MaestroMode
+    /// Called with the new mode once the user has switched to it.
+    var onModeChange: ((MaestroMode) -> Void)?
+    /// Set while the maestro is being stopped to start again in another mode,
+    /// so the shell's exit relaunches it instead of counting as a failure.
+    private var relaunchPending = false
+    private lazy var modeControl: NSSegmentedControl = {
+        let control = NSSegmentedControl(labels: ["Orquestrador", "Solo"], trackingMode: .selectOne, target: self, action: #selector(modeChosen(_:)))
+        control.controlSize = .small
+        control.font = CockpitStyle.meta
+        control.selectedSegment = mode == .solo ? 1 : 0
+        control.toolTip = "Orquestrador delega a workers; Solo trabalha sozinho, sem as ferramentas de agentes"
+        return control
+    }()
     private lazy var modelPill = NSView.pill([model, effort])
     /// The maestro's session name, when it has told one; what the header can
     /// hide is decided by `fitHeader`.
@@ -162,6 +177,7 @@ final class ProjectView: NSView {
     /// offscreen. The app always starts the terminal.
     init(project: CockpitProject, kit: TerminalKit, startsTerminal: Bool = true) {
         self.project = project
+        self.mode = project.mode
         self.kit = kit
         super.init(frame: .zero)
         wantsLayer = true
@@ -222,7 +238,7 @@ final class ProjectView: NSView {
     /// (the tab bar's chip says it too once it is worth saying), and only then
     /// the path. Model, effort, "waiting for you" and branch never clip.
     private func fitHeader() {
-        let core = [titleLabel, modelPill, attentionPill, branchPill].filter { !$0.isHidden }
+        let core = [titleLabel, modeControl, modelPill, attentionPill, branchPill].filter { !$0.isHidden }
         // Before the first layout there is no width to decide from.
         let hasRoom = { (plates: [NSView], withSession: Bool) -> Bool in
             self.headerWidth == 0 || self.headerWidth >= self.headerNeeds(plates, withSession: withSession)
@@ -601,6 +617,7 @@ final class ProjectView: NSView {
                                 ?? UUID().uuidString.lowercased(),
                             project: project.path
                         ),
+                        mode: mode,
                         in: Maestro.supportDirectory
                     )
                     session.send(text: line)
@@ -658,6 +675,11 @@ final class ProjectView: NSView {
     /// time round.
     private func shellExited() {
         guard !isShutDown else { return }
+        if relaunchPending {
+            relaunchPending = false
+            startTerminal(launchingMaestro: true)
+            return
+        }
         let now = Date()
         recentExits = recentExits.filter { now.timeIntervalSince($0) < Self.exitWindow } + [now]
         guard recentExits.count < Self.exitsBeforeGivingUp else {
@@ -668,6 +690,53 @@ final class ProjectView: NSView {
             return
         }
         startTerminal(launchingMaestro: false)
+    }
+
+    // MARK: - Mode
+
+    @objc private func modeChosen(_ sender: NSSegmentedControl) {
+        let chosen: MaestroMode = sender.selectedSegment == 1 ? .solo : .orchestrator
+        guard chosen != mode else { return }
+        // A maestro at work is restarted in the new mode; with none running
+        // the mode is just noted, for the next start.
+        guard isBusy, let window else {
+            apply(chosen)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = chosen == .solo ? "Trocar para Solo?" : "Trocar para Orquestrador?"
+        alert.informativeText = "Trocar para \(chosen == .solo ? "Solo" : "Orquestrador") reinicia o maestro deste projeto e retoma a mesma conversa."
+        alert.addButton(withTitle: "Trocar e reiniciar")
+        alert.addButton(withTitle: "Cancelar")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
+            guard response == .alertFirstButtonReturn else {
+                self.modeControl.selectedSegment = self.mode == .solo ? 1 : 0
+                return
+            }
+            self.apply(chosen)
+            self.relaunchMaestro()
+        }
+    }
+
+    private func apply(_ chosen: MaestroMode) {
+        mode = chosen
+        modeControl.selectedSegment = chosen == .solo ? 1 : 0
+        titleLabel.stringValue = chosen.title
+        onModeChange?(chosen)
+        fitHeader()
+    }
+
+    /// Ends the project's shell, and the maestro in it, the way closing the
+    /// project does; its exit starts a fresh shell and the maestro again, in
+    /// the current mode, resuming the conversation it was in.
+    private func relaunchMaestro() {
+        guard let terminal else {
+            startTerminal(launchingMaestro: true)
+            return
+        }
+        relaunchPending = true
+        terminal.session.terminate()
     }
 
     private func showFailure(_ message: String) {
@@ -722,7 +791,8 @@ final class ProjectView: NSView {
         sessionPill.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(300), for: .horizontal)
         sessionPill.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.sessionMinWidth).isActive = true
         sessionPill.isHidden = true
-        let header = MaestroHeader(views: [title, modelPill, attentionPill, usagePill, sessionPill, NSView(), place, branchPill])
+        modeControl.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let header = MaestroHeader(views: [title, modeControl, modelPill, attentionPill, usagePill, sessionPill, NSView(), place, branchPill])
         header.spacing = CockpitStyle.Space.md
         header.setCustomSpacing(CockpitStyle.Space.lg, after: title)
         header.edgeInsets = NSEdgeInsets(top: 0, left: CockpitStyle.inset, bottom: 0, right: CockpitStyle.inset)

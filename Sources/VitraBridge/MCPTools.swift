@@ -117,6 +117,17 @@ public enum MCPTools {
     public static let worker: [JSONValue] = panel.filter { $0["name"]?.stringValue != "terminal_run" } + MemoryTools.all
 
     /// Every tool `vitra mcp` serves: the panel's, the orchestrator's, and the notes.
+    /// A maestro working alone: the panel, the shared terminal and the notes, no agents.
+    public static let solo: [JSONValue] = panel + MemoryTools.all
+
+    static func tools(for role: AgentIdentity.ServedRole) -> [JSONValue] {
+        switch role {
+        case .maestro: all
+        case .solo: solo
+        case .worker: worker
+        }
+    }
+
     public static let all: [JSONValue] = panel + AgentTools.all + MemoryTools.all
 
     public static let names: [String] = all.compactMap { $0["name"]?.stringValue }

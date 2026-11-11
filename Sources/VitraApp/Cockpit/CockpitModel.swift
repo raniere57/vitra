@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import os
+import VitraBridge
 import VitraCore
 import VitraOrchestrator
 
@@ -18,14 +19,40 @@ struct CockpitProject: Codable, Equatable {
     /// maestro's.
     var session: String?
 
-    init(path: String, session: String? = nil) {
+    /// Whether the maestro delegates to workers or works alone.
+    var mode: MaestroMode
+
+    init(path: String, session: String? = nil, mode: MaestroMode = .orchestrator) {
         // One spelling per directory, so a trailing slash never makes a
         // second tab for the same place.
         self.path = path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
         self.session = session
+        self.mode = mode
+    }
+
+    private enum CodingKeys: String, CodingKey { case path, session, mode }
+
+    /// Files saved before the mode existed, or with one this build does not
+    /// know, open in the orchestrator mode.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            path: try container.decode(String.self, forKey: .path),
+            session: try container.decodeIfPresent(String.self, forKey: .session),
+            mode: (try? container.decodeIfPresent(MaestroMode.self, forKey: .mode)) ?? .orchestrator
+        )
     }
 
     var name: String { URL(fileURLWithPath: path).lastPathComponent }
+}
+
+/// How a project's maestro works: handing pieces to workers, or alone.
+enum MaestroMode: String, Codable, Equatable {
+    case orchestrator
+    case solo
+
+    /// The header's title for the mode.
+    var title: String { self == .solo ? "Solo" : "Maestro" }
 }
 
 enum CockpitProjects {
@@ -70,7 +97,7 @@ struct CockpitState: Codable, Equatable {
     private var repaired: CockpitState {
         let projects = projects.map { project in
             let isUUID = project.session.flatMap { UUID(uuidString: $0) } != nil
-            return isUUID ? project : CockpitProject(path: project.path)
+            return isUUID ? project : CockpitProject(path: project.path, mode: project.mode)
         }
         let last = max(projects.count - 1, 0)
         return CockpitState(projects: projects, selected: min(max(selected, 0), last))
@@ -404,9 +431,18 @@ enum Maestro {
     /// Claude settings: the tools exist for sessions the cockpit starts, and
     /// nothing is left behind in a file the user did not ask to have changed.
     /// The role in its environment is what gives the helper the maestro's tools.
-    static func mcpConfig(binary: String) -> String {
-        VitraMCPConfig.claudeConfig(binary: binary, environment: VitraMCPConfig.maestroEnvironment())
+    /// In solo mode the role says so, and the helper serves no agent tools.
+    static func mcpConfig(binary: String, mode: MaestroMode = .orchestrator) -> String {
+        let environment = mode == .solo
+            ? [VitraMCPConfig.roleKey: StdioBridge.soloRole]
+            : VitraMCPConfig.maestroEnvironment()
+        return VitraMCPConfig.claudeConfig(binary: binary, environment: environment)
     }
+
+    /// What the maestro is told in solo mode, instead of the brief.
+    static let soloBrief = """
+    You work alone in this session: do the work yourself. Vitra's browser, terminal, screen and memory tools are available.
+    """
 
     /// Writes the maestro's MCP configuration and brief into `directory` and
     /// returns the line that starts it, as typed into the project's shell.
@@ -420,14 +456,18 @@ enum Maestro {
         binary: String,
         claude: String,
         conversation: Conversation,
+        mode: MaestroMode = .orchestrator,
         in directory: URL
     ) throws -> String {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let config = directory.appendingPathComponent("mcp.json")
-        let instructions = directory.appendingPathComponent("brief.md")
+        // Separate files per mode: the folder is shared by every project, and
+        // one project's solo launch must not rewrite another's orchestrator files.
+        let isSolo = mode == .solo
+        let config = directory.appendingPathComponent(isSolo ? "mcp-solo.json" : "mcp.json")
+        let instructions = directory.appendingPathComponent(isSolo ? "solo.md" : "brief.md")
         let settings = directory.appendingPathComponent("settings.json")
-        try Data(mcpConfig(binary: binary).utf8).write(to: config, options: .atomic)
-        try Data(brief.utf8).write(to: instructions, options: .atomic)
+        try Data(mcpConfig(binary: binary, mode: mode).utf8).write(to: config, options: .atomic)
+        try Data((isSolo ? soloBrief : brief).utf8).write(to: instructions, options: .atomic)
         try Data(Self.settings(binary: binary).utf8).write(to: settings, options: .atomic)
         return launchLine(
             claude: claude,

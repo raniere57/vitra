@@ -184,6 +184,11 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         let view = ProjectView(project: project, kit: kit)
         view.workers.onStopAll = { [weak self] ids in self?.feed.cancel(ids) }
         view.loadRanking = { [weak self] done in self?.feed.scores(done) }
+        view.onModeChange = { [weak self] mode in
+            guard let self, let index = self.projects.firstIndex(where: { $0.path == project.path }) else { return }
+            self.projects[index].mode = mode
+            self.save()
+        }
         views[project.path] = view
         return view
     }
