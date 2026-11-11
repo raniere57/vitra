@@ -1231,7 +1231,7 @@ private func successorID(in line: String) -> String {
     let successor = successorID(in: lines[0])
     // The wait went on with the successor, and came back with its answer.
     #expect(lines[1].hasPrefix("[\(successor)] finished · claude haiku (low) · "))
-    #expect(lines[1].hasSuffix(" · probe · retry of \(id)"))
+    #expect(lines[1].hasSuffix(" · retry of \(id) · probe"))
     #expect(lines.last == "the answer")
 
     // The same piece: prompt, kind, label, directory, time limit.
@@ -1369,7 +1369,7 @@ echo '{"type":"text","part":{"text":"redone"}}'
 
     // The redo's own wait audits the whole change again, once, and says it is a redo.
     let report = try await fixture.call("agent_wait", ["ids": [.string(redoID)], "timeout_seconds": 10])
-    #expect(report.contains(" · add logout (redo) · redo of \(id)\n"))
+    #expect(report.contains(" · redo of \(id) · add logout (redo)\n"))
     let secondAudit = try String(contentsOf: fixture.root.appendingPathComponent("runs/\(redoID)/audit"), encoding: .utf8)
     #expect(secondAudit != firstAudit)
     #expect(report.contains("gate: audit \(secondAudit) by opencode"))
