@@ -1263,6 +1263,32 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         return (UInt16(first), UInt16(start), UInt16(last), UInt16(end))
     }
 
+    /// What the user has typed into the running program's input and not yet
+    /// sent: "" for an empty input, nil when that cannot be told — no program
+    /// holding the terminal, nothing drawn yet, or the view scrolled away
+    /// from the live edge. Faint cells are left out: Claude Code draws its
+    /// placeholder and its suggested next prompt dim, and neither is typing.
+    ///
+    /// The screen is read fresh: a project in a tab nobody is looking at is
+    /// not drawn, and its last picture may be old.
+    func typedInput() -> String? {
+        if session.updateSnapshot(snapshot) { setNeedsRender() }
+        guard session.isRunningProgram, snapshot.rows > 0, snapshot.scroll.isAtBottom, snapshot.cursor != nil else { return nil }
+        guard let input = inputSpan() else { return "" }
+        var typed = ""
+        for row in Int(input.firstRow) ... Int(input.lastRow) {
+            let from = row == Int(input.firstRow) ? Int(input.start) : 0
+            let to = row == Int(input.lastRow) ? Int(input.end) : Int(snapshot.columns) - 1
+            guard from <= to else { continue }
+            for column in from ... to {
+                let cell = snapshot[column, row]
+                guard !cell.flags.contains(.faint) else { continue }
+                typed += snapshot.text(of: cell) ?? " "
+            }
+        }
+        return typed.trimmingCharacters(in: .whitespaces)
+    }
+
     /// How many rows away from the cursor an input is looked for.
     private static let longestInput = 40
 

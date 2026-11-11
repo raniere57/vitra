@@ -42,9 +42,17 @@ struct ShortcutsTests {
 
     @Test func requestedChordsArePresent() {
         let glyphs = Set(chords.map(\.glyphs))
-        for expected in ["⌃⇥", "⌃⇧⇥", "⌥⌘←", "⌥⌘→", "⌘J", "⇧⌘J", "⌘\\", "⇧⌘\\", "⌘K", "⌘/", "⌘F", "⌘G", "⇧⌘G", "⌘O"] {
+        for expected in ["⌃⇥", "⌃⇧⇥", "⌥⌘←", "⌥⌘→", "⌘J", "⇧⌘J", "⌘\\", "⇧⌘\\", "⌘K", "⌘/", "⌘F", "⌘G", "⇧⌘G", "⌘O", "⇧⌘⏎"] {
             #expect(glyphs.contains(expected), "\(expected) is missing")
         }
+    }
+
+    @Test func maestroUpdateAndFilaAreInTheMenus() {
+        let update = Shortcut.table.first { $0.action == #selector(CockpitWindowController.updateAllMaestros(_:)) }
+        #expect(update?.title == "Atualizar todos os maestros")
+        #expect(update?.chord == nil)
+        let fila = Shortcut.table.first { $0.action == #selector(CockpitWindowController.addToQueue(_:)) }
+        #expect(fila?.chord?.glyphs == "⇧⌘⏎")
     }
 
     /// The terminal sends ⌘⌫, ⌘⌦, ⌘← and ⌘→ to the shell itself; none of

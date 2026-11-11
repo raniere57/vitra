@@ -20,6 +20,7 @@ import Testing
         "window-1440", "window-min", "workers", "ranking", "git", "files", "recent-images", "browser-tabs", "preview-header", "quit-hold",
         "stage", "stage-empty", "stage-reduced-motion", "resumo", "resumo-expanded",
         "welcome", "welcome-min", "shortcuts", "find", "window-hint",
+        "update-outdated", "update-armed", "fila-expanded", "fila-collapsed",
     ]
     #expect(Set(expected).isSubset(of: Set(UISnapshot.shots.map(\.name))))
     #expect(files.count == UISnapshot.shots.count)

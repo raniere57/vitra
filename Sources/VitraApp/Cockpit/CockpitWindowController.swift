@@ -134,6 +134,15 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     @objc func findNextInConversation(_ sender: Any?) { current?.findStep(forward: true) }
     @objc func findPreviousInConversation(_ sender: Any?) { current?.findStep(forward: false) }
 
+    /// ⇧⌘⏎: the Fila of the project on screen, open, its field ready.
+    @objc func addToQueue(_ sender: Any?) { current?.openQueue() }
+
+    /// Every opened project's maestro that runs an older build: restarted
+    /// now if it waits, armed to restart when its turn ends if it works.
+    @objc func updateAllMaestros(_ sender: Any?) {
+        views.values.filter(\.isOutdated).forEach { $0.updateMaestro(asking: false) }
+    }
+
     /// ⌘/: every chord, as a sheet over the window.
     @objc func showShortcuts(_ sender: Any?) {
         guard let window, window.attachedSheet == nil else { return }
@@ -224,6 +233,14 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             self.projects[index].sidePanelHidden = hidden
             self.save()
         }
+        view.onQueueChange = { [weak self] in
+            guard let self else { return }
+            self.tabBar.show(self.tabs(now: Date()), selected: self.selected)
+        }
+        // What the maestro is doing as the project opens is where its next
+        // change is measured from: a turn already running when the app
+        // started still ends in a send.
+        attention[project.path] = Attention.load(for: project.path)
         views[project.path] = view
         return view
     }
@@ -303,7 +320,8 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             CockpitTabBar.Tab(
                 name: $0.name,
                 running: WorkerBoard.runningCount(WorkerBoard.runs(runs, in: $0)),
-                callsForYou: AttentionPolicy.isCalling(attention[$0.path], now: now)
+                callsForYou: AttentionPolicy.isCalling(attention[$0.path], now: now),
+                queued: views[$0.path]?.promptQueue.count ?? 0
             )
         }
     }
@@ -319,7 +337,13 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         for project in projects where views[project.path] != nil {
             records[project.path] = Attention.load(for: project.path)
         }
+        let previous = attention
         attention = records
+        // A change of state is news to the project: the end of a turn is when
+        // an armed update and the Fila act. The same state read again is not.
+        for (path, view) in views where previous[path]?.state != records[path]?.state {
+            view.attentionChanged(from: previous[path]?.state, to: records[path]?.state)
+        }
 
         // Typing in that project's terminal: the app is in front, on that tab.
         let isInFront = NSApp.isActive && window?.isKeyWindow == true
@@ -456,6 +480,8 @@ extension CockpitWindowController: NSMenuItemValidation {
             return projects.indices.contains(item.tag)
         case #selector(nextProject(_:)), #selector(previousProject(_:)):
             return projects.count > 1
+        case #selector(updateAllMaestros(_:)):
+            return views.values.contains(where: \.isOutdated)
         case #selector(toggleSidePanel(_:)):
             item.title = current?.isSideHidden == true ? "Mostrar o painel" : "Ocultar o painel"
             return current != nil

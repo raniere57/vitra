@@ -82,12 +82,14 @@ struct Shortcut {
     @MainActor static let table: [Shortcut] = {
         var items: [Shortcut] = [
             Shortcut(menu: .app, title: "Sobre o Vitra", chord: nil, action: #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+            Shortcut(menu: .app, title: "Atualizar todos os maestros", chord: nil, action: #selector(CockpitWindowController.updateAllMaestros(_:)), separatorBefore: true),
             Shortcut(menu: .app, title: "Ocultar Vitra", chord: chord("h"), action: #selector(NSApplication.hide(_:)), separatorBefore: true),
             Shortcut(menu: .app, title: "Encerrar Vitra (segure)", chord: chord("q"), action: #selector(CockpitAppDelegate.quitRequested(_:)), separatorBefore: true),
             Shortcut(menu: .app, title: "Encerrar todos os terminais e sair", chord: nil, action: #selector(CockpitAppDelegate.endTerminalsAndQuit(_:))),
 
             Shortcut(menu: .file, title: "Abrir projeto…", chord: chord("o"), action: #selector(CockpitWindowController.openProject(_:))),
             Shortcut(menu: .file, title: "Fechar projeto", chord: chord("w"), action: #selector(CockpitWindowController.closeProject(_:))),
+            Shortcut(menu: .file, title: "Adicionar à fila", chord: chord("\r", [.command, .shift]), action: #selector(CockpitWindowController.addToQueue(_:)), separatorBefore: true),
 
             Shortcut(menu: .edit, title: "Recortar", chord: chord("x"), action: #selector(NSText.cut(_:)), sheetGroup: "Recortar, copiar, colar, tudo"),
             Shortcut(menu: .edit, title: "Copiar", chord: chord("c"), action: #selector(NSText.copy(_:)), sheetGroup: "Recortar, copiar, colar, tudo"),

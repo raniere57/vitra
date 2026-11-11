@@ -9,6 +9,9 @@ final class CockpitTabBar: NSView {
         let running: Int
         /// The maestro is waiting on the user: the dot turns amber and pulses.
         var callsForYou = false
+        /// Prompts in the project's Fila: "+3" after the worker count, the
+        /// first thing the bar gives up when tight.
+        var queued = 0
     }
 
     var onSelect: ((Int) -> Void)?
@@ -69,11 +72,20 @@ final class CockpitTabBar: NSView {
     /// The chips are the first thing the bar gives up: the tabs and the day's
     /// cost never clip for them. Decided from what each piece needs, not from
     /// how the layout came out, so it cannot flap.
+    ///
+    /// The Fila counts on the tabs go before even the chips: they are the
+    /// least of what a tab says.
     override func layout() {
         super.layout()
-        let needed = CockpitStyle.trafficLightInset + tabs.fittingSize.width + CockpitStyle.inset
-            + chipRow.fittingSize.width + CockpitStyle.Space.lg
-            + today.fittingSize.width + CockpitStyle.Space.md + cost.fittingSize.width + CockpitStyle.inset
+        let tabViews = tabs.arrangedSubviews.compactMap { $0 as? TabView }
+        let queueWidth = tabViews.map(\.queueWidth).reduce(0, +)
+        let shownQueue = tabViews.contains { $0.showsQueue } ? queueWidth : 0
+        let tabsBare = tabs.fittingSize.width - shownQueue
+        let spend = today.fittingSize.width + CockpitStyle.Space.md + cost.fittingSize.width + CockpitStyle.inset
+        let chips = shownChips.isEmpty ? 0 : chipRow.fittingSize.width + CockpitStyle.Space.lg
+        let showsQueue = CockpitStyle.trafficLightInset + tabsBare + queueWidth + CockpitStyle.inset + chips + spend <= bounds.width
+        tabViews.forEach { $0.showsQueue = showsQueue }
+        let needed = CockpitStyle.trafficLightInset + tabsBare + (showsQueue ? queueWidth : 0) + CockpitStyle.inset + chips + spend
         let hides = shownChips.isEmpty || needed > bounds.width
         if chipRow.isHidden != hides { chipRow.isHidden = hides }
     }
@@ -151,6 +163,12 @@ private final class TabView: NSView {
             }
             if tab.callsForYou { pulsingDot = dot }
         }
+        if tab.queued > 0 {
+            queueLabel.stringValue = "+\(tab.queued)"
+            queueLabel.toolTip = "\(tab.queued) na fila do maestro"
+            queueLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+            views.append(queueLabel)
+        }
         let row = NSStackView(views: views)
         row.spacing = CockpitStyle.Space.md
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -172,8 +190,26 @@ private final class TabView: NSView {
         setAccessibilityRole(.button)
         let running = tab.running > 0 ? ", \(tab.running) rodando" : ""
         let waiting = tab.callsForYou ? ", aguardando você" : ""
-        setAccessibilityLabel(tab.name + running + waiting)
+        let queued = tab.queued > 0 ? ", \(tab.queued) na fila" : ""
+        setAccessibilityLabel(tab.name + running + waiting + queued)
+        hasQueue = tab.queued > 0
         paint()
+    }
+
+    private let queueLabel = NSTextField.label(font: CockpitStyle.meta, color: CockpitStyle.muted)
+    private var hasQueue = false
+
+    /// What the "+3" takes with its gap; nothing for a tab without a queue.
+    var queueWidth: CGFloat {
+        hasQueue ? queueLabel.fittingSize.width + CockpitStyle.Space.md : 0
+    }
+
+    var showsQueue: Bool {
+        get { hasQueue && !queueLabel.isHidden }
+        set {
+            let hidden = !(newValue && hasQueue)
+            if queueLabel.isHidden != hidden { queueLabel.isHidden = hidden }
+        }
     }
 
     // MARK: Pulse

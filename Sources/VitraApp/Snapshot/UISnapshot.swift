@@ -122,6 +122,11 @@ enum UISnapshot {
         Shot(name: "shortcuts", size: shortcutsSize, build: { _ in ShortcutsSheet.makeView {} }),
         Shot(name: "find", size: CockpitWindowController.minSize, build: { try find($0) }),
         Shot(name: "window-hint", size: CockpitWindowController.minSize, build: { try cockpit($0, showsHint: true) }),
+        Shot(name: "update-outdated", size: CockpitWindowController.minSize, build: { try update($0, .outdated) }),
+        Shot(name: "update-armed", size: CockpitWindowController.minSize, build: { try update($0, .armed) }),
+        Shot(name: "update-wide", size: NSSize(width: 1440, height: 900), build: { try update($0, .outdated) }),
+        Shot(name: "fila-expanded", size: CockpitWindowController.minSize, build: { try fila($0, expanded: true) }),
+        Shot(name: "fila-collapsed", size: CockpitWindowController.minSize, build: { try fila($0, expanded: false) }),
         Shot(name: "quit-hold", size: NSSize(width: 480, height: 140), build: { context in
             context.window.contentView?.addFilling(placeholder("terminal"))
             QuitHold().show(in: context.window)
@@ -184,9 +189,12 @@ enum UISnapshot {
         let attention = fixtures.attention()
         project.show(attention: AttentionPolicy.label(attention[fixtures.path], now: fixtures.now))
 
+        configure(project)
+
         let bar = CockpitTabBar()
         bar.show([
-            .init(name: "vitra", running: WorkerBoard.runningCount(runs), callsForYou: AttentionPolicy.isCalling(attention[fixtures.path], now: fixtures.now)),
+            .init(name: "vitra", running: WorkerBoard.runningCount(runs), callsForYou: AttentionPolicy.isCalling(attention[fixtures.path], now: fixtures.now),
+                  queued: project.promptQueue.count),
             .init(name: "hapto", running: 0, callsForYou: AttentionPolicy.isCalling(attention["hapto"], now: fixtures.now)),
             .init(name: "docs", running: 0),
         ], selected: 0)
@@ -208,7 +216,6 @@ enum UISnapshot {
             project.trailingAnchor.constraint(equalTo: window.trailingAnchor),
             project.bottomAnchor.constraint(equalTo: window.bottomAnchor),
         ])
-        configure(project)
         return window
     }
 

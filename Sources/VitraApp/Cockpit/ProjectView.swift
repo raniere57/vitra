@@ -206,10 +206,32 @@ final class ProjectView: NSView {
     private var headerWidth: CGFloat = 0
     /// Whether the project is on a branch; the plate shows only if it also fits.
     private var hasBranch = false
-    /// Narrower than this the session name is cut to an ellipsis; narrower
-    /// than what it takes to keep this and the path's minimum, it is hidden.
-    private static let sessionMinWidth: CGFloat = 96
-    private static let placeMinWidth: CGFloat = 56
+    /// The header row, for the tests that hold it inside its pane.
+    private(set) var header: NSStackView?
+
+    // MARK: Bringing a surviving maestro up to the new build
+
+    /// Where the maestro stands against the installed build.
+    var updateState = MaestroUpdateState()
+    let updatePill = MaestroUpdatePill()
+    /// The first thing the next launch of the maestro is told, once.
+    var nextLaunchPrompt: String?
+
+    // MARK: The Fila
+
+    /// What the maestro is told next; saved on every change when `queueStore`
+    /// is set (the app), kept in memory when not (the snapshot tool).
+    var promptQueue = PromptQueue()
+    let queueStore: URL?
+    let queueDrawer = PromptQueueDrawer()
+    /// Called when the queue's length or pause changes, for the tab bar.
+    var onQueueChange: (() -> Void)?
+    /// A look again at a prompt held back by text in the maestro's input.
+    var queueRetry: Timer?
+    static let queueRetryInterval: TimeInterval = 3
+    /// How long after the paste the Return goes: Claude Code takes a pasted
+    /// block in as a whole before a key may submit it.
+    static let submitDelay: TimeInterval = 0.25
 
     /// `startsTerminal: false` builds the view without a shell, a timer or an
     /// event monitor; the UI snapshot tool uses it to lay the project out
@@ -222,9 +244,12 @@ final class ProjectView: NSView {
         self.mode = project.mode
         self.isSideHidden = project.sidePanelHidden
         self.kit = kit
+        // The snapshot tool must neither read nor write the user's queues.
+        self.queueStore = startsTerminal ? PromptQueueStore.directory : nil
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = CockpitStyle.ground.cgColor
+        if let queueStore { promptQueue = PromptQueueStore.load(for: project.path, in: queueStore) }
         build()
         if showsHint ?? !FirstRunHint().isDismissed { addHint() }
         applySideWidth()
@@ -282,45 +307,45 @@ final class ProjectView: NSView {
     /// What gives way, first to last: the session name, then the usage figure
     /// (the tab bar's chip says it too once it is worth saying), and only then
     /// the path. Model, effort, "waiting for you" and branch never clip.
-    private func fitHeader() {
-        let always = [titleLabel, modeControl, modelPill, attentionPill].filter { !$0.isHidden }
-        let core = hasBranch ? always + [branchPill] : always
-        // The mode switch never clips either, but it can say less: at the
-        // narrowest window its first segment is abbreviated before anything
-        // that matters is pushed out.
-        modeControl.setLabel("Orquestrador", forSegment: 0)
-        if headerWidth > 0, headerWidth < headerNeeds(core, withSession: false) {
-            modeControl.setLabel("Orq.", forSegment: 0)
-        }
-        // Before the first layout there is no width to decide from.
-        let hasRoom = { (plates: [NSView], withSession: Bool) -> Bool in
-            self.headerWidth == 0 || self.headerWidth >= self.headerNeeds(plates, withSession: withSession)
-        }
-        let showsUsage = usageIsKnown && hasRoom(core + [usagePill], false)
-        usagePill.isHidden = !showsUsage
-        let plates = showsUsage ? core + [usagePill] : core
-        sessionPill.isHidden = sessionName == nil || !hasRoom(plates, true)
-        // At the narrowest window, with the maestro asking for something, even
-        // that is too much: the path goes, then the branch. The header must
-        // never be wider than its pane, or it pushes the side panel off screen.
-        let withoutPlace = headerNeeds(core, withSession: false) - Self.placeMinWidth - CockpitStyle.Space.md
-        place.isHidden = headerWidth > 0 && headerWidth < headerNeeds(core, withSession: false)
-        let branchWidth = branchPill.fittingSize.width + CockpitStyle.Space.md
-        branchPill.isHidden = !hasBranch || (place.isHidden && headerWidth < withoutPlace)
-        if branchPill.isHidden, hasBranch, headerWidth >= withoutPlace - branchWidth + Self.placeMinWidth + CockpitStyle.Space.md {
-            // With the branch gone there may be room for the path again.
-            place.isHidden = false
-        }
+    func fitHeader() {
+        let fit = HeaderFit.fit(width: headerWidth, headerWidths)
+        // The mode switch never clips, but it can say less: at the narrowest
+        // window its first segment is abbreviated.
+        modeControl.setLabel(fit.abbreviatesMode ? "Orq." : "Orquestrador", forSegment: 0)
+        usagePill.isHidden = !fit.showsUsage
+        sessionPill.isHidden = !fit.showsSession
+        place.isHidden = !fit.showsPlace
+        branchPill.isHidden = !fit.showsBranch
+        updatePill.show(updateState.phase, compact: fit.compactsUpdate)
     }
 
-    /// The width the header needs for `plates`, the spacer, the path at its
-    /// minimum and, when asked, the session plate at its minimum.
-    private func headerNeeds(_ plates: [NSView], withSession: Bool) -> CGFloat {
-        let visible = plates.count + 2 + (withSession ? 1 : 0)
-        let widths = plates.map(\.fittingSize.width).reduce(0, +)
-        let gaps = CGFloat(visible - 1) * CockpitStyle.Space.md + (CockpitStyle.Space.lg - CockpitStyle.Space.md)
-        return 2 * CockpitStyle.inset + widths + gaps + Self.placeMinWidth + (withSession ? Self.sessionMinWidth : 0)
+    /// What each plate of the header takes, as `HeaderFit` reads it.
+    var headerWidths: HeaderFit.Widths {
+        HeaderFit.Widths(
+            title: titleLabel.fittingSize.width,
+            modeFull: modeWidths.full,
+            modeShort: modeWidths.short,
+            model: modelPill.fittingSize.width,
+            attention: attention.stringValue.isEmpty ? nil : attentionPill.fittingSize.width,
+            update: updateState.phase == .current ? nil : updatePill.widths.full,
+            updateCompact: updateState.phase == .current ? nil : updatePill.widths.compact,
+            usage: usageIsKnown ? usagePill.fittingSize.width : nil,
+            hasSession: sessionName != nil,
+            branch: hasBranch ? branchPill.fittingSize.width : nil
+        )
     }
+
+    /// The mode switch with its first segment whole and abbreviated; its
+    /// labels never change otherwise, so measured once.
+    private lazy var modeWidths: (full: CGFloat, short: CGFloat) = {
+        let current = modeControl.label(forSegment: 0)
+        modeControl.setLabel("Orq.", forSegment: 0)
+        let short = modeControl.fittingSize.width
+        modeControl.setLabel("Orquestrador", forSegment: 0)
+        let full = modeControl.fittingSize.width
+        modeControl.setLabel(current ?? "Orquestrador", forSegment: 0)
+        return (full, short)
+    }()
 
     /// Hands the keyboard to the maestro.
     func focusTerminal() {
@@ -360,6 +385,7 @@ final class ProjectView: NSView {
         release(sharedTerminalView?.session)
         sharedTerminalView?.prepareForRemoval()
         housekeeping?.invalidate()
+        queueRetry?.invalidate()
         if let activityMonitor { NSEvent.removeMonitor(activityMonitor) }
         browserTabs.tabs.map(\.id).forEach(browserPanel.dropBrowser(for:))
         browserPanel.clearContent()
@@ -858,6 +884,7 @@ final class ProjectView: NSView {
                         guard let self, let view, self.terminal === view else { return }
                         if outcome == .attached {
                             self.resumesInterruptedWork = false
+                            self.checkSurvivorBuild()
                         } else if launchingMaestro {
                             self.launchMaestro(in: view.session)
                         }
@@ -895,11 +922,13 @@ final class ProjectView: NSView {
                     project: project.path
                 ),
                 mode: mode,
-                prompt: resumesInterruptedWork ? Maestro.resumePrompt(mode: mode) : nil,
+                prompt: nextLaunchPrompt ?? (resumesInterruptedWork ? Maestro.resumePrompt(mode: mode) : nil),
                 in: Maestro.supportDirectory
             )
             resumesInterruptedWork = false
+            nextLaunchPrompt = nil
             session.send(text: line)
+            maestroLaunched()
         } catch {
             // Printed, not written as a comment: zsh does not take `#`
             // as one at a prompt, and would try to run the message.
@@ -1052,7 +1081,7 @@ final class ProjectView: NSView {
     /// Ends the project's shell, and the maestro in it, the way closing the
     /// project does; its exit starts a fresh shell and the maestro again, in
     /// the current mode, resuming the conversation it was in.
-    private func relaunchMaestro() {
+    func relaunchMaestro() {
         guard let terminal else {
             startTerminal(launchingMaestro: true)
             return
@@ -1104,17 +1133,22 @@ final class ProjectView: NSView {
         // What gives way, in this order: the path (head-truncated, lowest
         // priority), then the session name, which truncates down to a minimum
         // width and is hidden below it — never drawn as an empty plate. The
-        // model, effort, usage and branch plates never clip.
-        place.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        place.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.placeMinWidth).isActive = true
+        // model, effort, usage and branch plates never clip. Both sit below
+        // the header's clipping resistance (250): the row truncates them
+        // before it would rather clip off its far end.
+        place.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(230), for: .horizontal)
+        place.widthAnchor.constraint(greaterThanOrEqualToConstant: HeaderFit.placeMinWidth).isActive = true
         session.lineBreakMode = .byTruncatingTail
-        session.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(300), for: .horizontal)
+        session.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(240), for: .horizontal)
         session.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        sessionPill.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(300), for: .horizontal)
-        sessionPill.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.sessionMinWidth).isActive = true
+        sessionPill.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(240), for: .horizontal)
+        sessionPill.widthAnchor.constraint(greaterThanOrEqualToConstant: HeaderFit.sessionMinWidth).isActive = true
         sessionPill.isHidden = true
         modeControl.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let header = MaestroHeader(views: [title, modeControl, modelPill, attentionPill, usagePill, sessionPill, NSView(), place, branchPill])
+        updatePill.onUpdate = { [weak self] in self?.updateMaestro(asking: true) }
+        updatePill.onCancel = { [weak self] in self?.cancelArmedUpdate() }
+        let header = MaestroHeader(views: [title, modeControl, modelPill, attentionPill, updatePill, usagePill, sessionPill, NSView(), place, branchPill])
+        self.header = header
         header.spacing = CockpitStyle.Space.md
         header.setCustomSpacing(CockpitStyle.Space.lg, after: title)
         // The header never widens its pane: it would push the side panel off
@@ -1129,7 +1163,8 @@ final class ProjectView: NSView {
         refreshPlace()
 
         let headerRule = NSView.rule(CockpitStyle.softLine)
-        for view in [header, headerRule, terminalSlot, divider, side] as [NSView] {
+        buildQueueDrawer()
+        for view in [header, headerRule, queueDrawer, terminalSlot, divider, side] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -1180,7 +1215,10 @@ final class ProjectView: NSView {
             headerRule.leadingAnchor.constraint(equalTo: leadingAnchor),
             headerRule.trailingAnchor.constraint(equalTo: divider.leadingAnchor),
 
-            terminalSlot.topAnchor.constraint(equalTo: headerRule.bottomAnchor),
+            queueDrawer.topAnchor.constraint(equalTo: headerRule.bottomAnchor),
+            queueDrawer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            queueDrawer.trailingAnchor.constraint(equalTo: divider.leadingAnchor),
+            terminalSlot.topAnchor.constraint(equalTo: queueDrawer.bottomAnchor),
             terminalSlot.leadingAnchor.constraint(equalTo: leadingAnchor),
             terminalSlot.trailingAnchor.constraint(equalTo: divider.leadingAnchor),
             terminalSlot.bottomAnchor.constraint(equalTo: bottomAnchor),
