@@ -1,33 +1,48 @@
 import Foundation
 
-/// Chooses the worker for a piece of work, from the record, with no model in
-/// the loop.
+/// Chooses the worker for a piece of work, from the user's lineup and the
+/// record, with no model in the loop: the maestro says what kind of piece it
+/// is and how hard, never who does it.
 ///
 /// A worker is a CLI, a model and an effort: haiku at low and haiku at high
 /// are two workers with separate records. The order is:
 ///
-/// 1. Workers rated 4 or more on the kind, the fastest first.
-/// 2. Every fifth piece of a kind is a learning turn instead: the cheapest
-///    worker with fewer than two deliveries on the kind, so each earns a
-///    record without holding the work up. A higher effort of a model waits
-///    until a lower one has run. With nobody left to learn, the least used.
-/// 3. While nobody is rated 4 or more on the kind, learning comes first.
-/// 4. Otherwise the cheapest worker that may run.
-///
-/// A hard piece goes only to strong workers when any may run, and has no
-/// learning turns; an easy one stays off them when a lighter worker may run.
-/// A worker whose last three runs all failed rests for half an hour, and a CLI
-/// whose provider said it is out of quota, signed out or down is left alone
-/// until that has had time to pass.
+/// 1. Who may run at all: installed, offered, not excluded, able to run the
+///    commands asked for, its provider not out, not resting after three
+///    failures in a row.
+/// 2. Every fifth piece of a kind and difficulty is a learning turn: a
+///    demoted lineup worker gets its chance back, else the cheapest worker
+///    with fewer than two deliveries on the kind (strong ones only for a hard
+///    piece). Never two learning turns in a row.
+/// 3. The first worker of the difficulty's lineup that may run and is not
+///    demoted: average below 4 over two ratings or more on the kind, or more
+///    than twice as slow as the next lineup worker (three deliveries each).
+/// 4. Workers not in the lineup, by the record: the fastest rated 4 or more,
+///    else the cheapest. The lineup is a preference, not a fence.
 ///
 /// Pure: the choice is a function of its inputs, so it can be tested without
 /// spawning anything.
 public enum WorkerPicker {
     public struct Choice: Equatable, Sendable {
         public let offer: ModelCatalog.Offer
+        public let pick: PickReason
         /// Why, in a few words: it is shown to the orchestrator.
-        public let reason: String
+        public var reason: String { pick.text }
     }
+
+    /// Why a lineup worker is passed over on its record.
+    public enum Demotion: Equatable, Sendable {
+        case rating(Double)
+        /// More than twice as slow as the named worker.
+        case slow(than: ModelCatalog.Offer)
+    }
+
+    /// Ratings a lineup worker needs before its average can demote it.
+    static let ratingsToDemote = 2
+    /// Deliveries each of two workers needs before their times are compared.
+    static let deliveriesToCompare = 3
+    /// How many times slower than the next worker demotes one.
+    static let slowerThan = 2.0
 
     /// Delivered runs a worker needs on a kind before it stops being tried.
     static let deliveriesToLearn = 2
@@ -57,6 +72,7 @@ public enum WorkerPicker {
     ///   - excludedWorkers: single workers that must not be picked, such as the
     ///     one whose delivery is being redone.
     ///   - difficulty: how hard the piece is.
+    ///   - lineup: the user's preference per difficulty.
     public static func pick(
         kind: TaskKind,
         access: WorkerAccess,
@@ -67,134 +83,204 @@ public enum WorkerPicker {
         excluded: Set<WorkerCLI> = [],
         excludedWorkers: Set<ModelCatalog.Offer> = [],
         difficulty: Difficulty = .normal,
+        lineup: Lineup = .standard,
         now: Date = Date()
-    ) -> Choice? {
-        func attempt(skipping skipped: Set<ModelCatalog.Offer>) -> Choice? {
-            choose(
-                kind: kind, access: access, needsCommands: needsCommands, history: history, offers: offers,
-                installed: installed, excluded: excluded, skipping: skipped, difficulty: difficulty, now: now
-            )
-        }
-        let resters = resting(history, now: now)
-        let choice = attempt(skipping: excludedWorkers.union(resters.keys))
-        guard !resters.isEmpty,
-              let without = attempt(skipping: excludedWorkers),
-              without.offer != choice?.offer,
-              let until = resters[without.offer]
-        else { return choice }
-        // The rest changed the choice: say who is resting and until when.
-        guard let choice else { return nil }
-        return Choice(
-            offer: choice.offer,
-            reason: choice.reason + "; \(without.offer.name) is resting until \(clock(until)) after \(restingAfter) failures in a row"
-        )
-    }
-
-    private static func choose(
-        kind: TaskKind,
-        access: WorkerAccess,
-        needsCommands: Bool,
-        history: [Run],
-        offers: [ModelCatalog.Offer],
-        installed: Set<WorkerCLI>,
-        excluded: Set<WorkerCLI>,
-        skipping: Set<ModelCatalog.Offer>,
-        difficulty: Difficulty,
-        now: Date
     ) -> Choice? {
         // Not a verdict on anyone: a run the user stopped is not a try, and a
         // run whose provider was out of quota or down is not a run at all.
         let ofKind = history.filter {
             ($0.spec.kind ?? .other) == kind && $0.state != .cancelled && $0.providerFailure == nil
         }
-        let stalled = stalledCLIs(history, now: now)
+        let stalls = stallCauses(history, now: now)
+        let resters = resting(history, now: now)
 
-        let eligible = offers.enumerated().filter { _, offer in
-            guard installed.contains(offer.cli), !excluded.contains(offer.cli), !stalled.contains(offer.cli),
-                  !skipping.contains(offer)
-            else { return false }
+        /// What keeps `offer` from this piece, or nil when it may run.
+        func blocker(_ offer: ModelCatalog.Offer) -> PickReason.Cause? {
+            guard offers.contains(offer), installed.contains(offer.cli), !excluded.contains(offer.cli),
+                  !excludedWorkers.contains(offer)
+            else { return .unavailable }
             switch offer.cli {
-            case .claude, .opencode: return true
-            case .cursor: return !needsCommands
-            case .gemini: return !needsCommands && access == .read && geminiKinds.contains(kind)
+            case .claude, .opencode: break
+            case .cursor: if needsCommands { return .unavailable }
+            case .gemini: if needsCommands || access != .read || !geminiKinds.contains(kind) { return .unavailable }
             }
-        }
-        // A hard piece goes to a strong worker when one may run, an easy one
-        // to a light worker when one may.
-        let strong = eligible.filter { _, offer in isStrong(offer) }
-        let light = eligible.filter { _, offer in !isStrong(offer) }
-        let pool: [(offset: Int, element: ModelCatalog.Offer)]
-        switch difficulty {
-        case .hard: pool = strong.isEmpty ? eligible : strong
-        case .easy: pool = light.isEmpty ? eligible : light
-        case .normal: pool = eligible
+            if let stall = stalls[offer.cli] { return stall }
+            return resters[offer] == nil ? nil : .resting
         }
 
-        let candidates = pool.map { order, offer in
-            Candidate(offer: offer, order: order, runs: ofKind.filter { isRun($0, of: offer) }, difficulty: difficulty)
+        let eligible = offers.filter { blocker($0) == nil }
+        let tier = lineup.tier(difficulty)
+        let tierEligible = tier.filter { blocker($0) == nil }
+        func demoted(_ worker: ModelCatalog.Offer) -> Demotion? {
+            let next = tierEligible.drop { $0 != worker }.dropFirst().first
+            return demotion(of: worker, kind: kind, difficulty: difficulty, history: history, next: next)
         }
+        func candidate(_ offer: ModelCatalog.Offer) -> Candidate {
+            Candidate(
+                offer: offer, order: offers.firstIndex(of: offer) ?? offers.count,
+                runs: ofKind.filter { isRun($0, of: offer) }, difficulty: difficulty
+            )
+        }
+
+        if let learner = learningTurn(
+            kind: kind, difficulty: difficulty, ofKind: ofKind, offers: offers, eligible: eligible,
+            demotedInLineup: tierEligible.filter { demoted($0) != nil }, candidate: candidate
+        ) {
+            return Choice(offer: learner, pick: PickReason(code: .learning, text: "learning turn"))
+        }
+
+        if let index = tier.firstIndex(where: { blocker($0) == nil && demoted($0) == nil }) {
+            return lineupChoice(
+                tier, at: index, difficulty: difficulty, kind: kind,
+                why: { blocker($0) ?? demoted($0).map { _ in .demoted } }, demoted: demoted, resters: resters
+            )
+        }
+
+        // Nobody in the lineup may run: the others, by their record.
+        let others = strengthPool(eligible.filter { !tier.contains($0) }, difficulty: difficulty).map(candidate)
             // Known bad on this kind, at this effort: never picked on its own.
             .filter { $0.average.map { $0 >= Double(Rating.satisfactory) } ?? true }
-            // Nor one that has run twice here and delivered nothing: unrated
-            // failures are a record too.
+            // Nor one that has run twice here and delivered nothing.
             .filter { $0.runs.count < deliveriesToLearn || $0.delivered > 0 }
-
-        func cliRuns(_ candidate: Candidate) -> Int {
-            ofKind.filter { $0.spec.cli == candidate.offer.cli }.count
+        let good = others.filter { ($0.average ?? 0) >= Double(Rating.satisfactory) }
+        if let best = good.min(by: {
+            ($0.medianSeconds, $0.medianCost, $0.order) < ($1.medianSeconds, $1.medianCost, $1.order)
+        }) {
+            return Choice(offer: best.offer, pick: PickReason(
+                code: .record, text: "not in the lineup: fastest rated \(Rating.satisfactory)+ on \(kind.rawValue)"
+            ))
         }
-        // What the pick says about the piece, when it was not a normal one.
-        func said(_ reason: String) -> String {
-            difficulty == .normal ? reason : reason + ", \(difficulty.rawValue) piece"
+        if let cheapest = others.min(by: { ($0.costRank, $0.order) < ($1.costRank, $1.order) }) {
+            return Choice(offer: cheapest.offer, pick: PickReason(
+                code: .cheapest, text: "not in the lineup: cheapest that may run"
+            ))
         }
+        // Only demoted lineup workers are left: the first of them.
+        guard let fallback = tierEligible.first, let index = tier.firstIndex(of: fallback) else { return nil }
+        return Choice(offer: fallback, pick: PickReason(
+            code: .lineup,
+            text: "\(ordinal(index + 1)) in your lineup: demoted, but nobody else may run",
+            position: index + 1
+        ))
+    }
 
-        // A hard piece is not the place to try an unknown worker.
-        let learning = difficulty == .hard ? nil : candidates.filter {
-            $0.delivered < deliveriesToLearn && lowerEffortTried($0.offer, offers: offers, ofKind: ofKind)
-        }.min(by: {
-            ($0.costRank, cliRuns($0), $0.order) < ($1.costRank, cliRuns($1), $1.order)
-        })
-        func learn(_ first: Candidate) -> Choice {
-            Choice(
-                offer: first.offer,
-                reason: said("learning, \(first.delivered) of \(deliveriesToLearn) runs on \(kind.rawValue)")
-            )
+    /// The choice of `tier[index]`, saying why those before it were passed.
+    private static func lineupChoice(
+        _ tier: [ModelCatalog.Offer], at index: Int, difficulty: Difficulty, kind: TaskKind,
+        why: (ModelCatalog.Offer) -> PickReason.Cause?, demoted: (ModelCatalog.Offer) -> Demotion?,
+        resters: [ModelCatalog.Offer: Date]
+    ) -> Choice {
+        let worker = tier[index]
+        let place = ordinal(index + 1)
+        guard let passed = tier.first, index > 0, let cause = why(passed) else {
+            return Choice(offer: worker, pick: PickReason(
+                code: .lineup, text: "\(place) in your lineup for \(difficulty.rawValue) pieces", position: index + 1
+            ))
         }
-
-        // Proven workers do the work; trying the others is a turn, not a
-        // toll. With dozens of untried workers on offer, learning them all
-        // first would put every slow or broken one ahead of the good ones.
-        let good = candidates.filter { ($0.average ?? 0) >= Double(Rating.satisfactory) }
-        if !good.isEmpty {
-            if difficulty != .hard, ofKind.count % explorationEvery == explorationEvery - 1 {
-                if let learning { return learn(learning) }
-                if let least = candidates.min(by: {
-                    ($0.runs.count, $0.costRank, $0.order) < ($1.runs.count, $1.costRank, $1.order)
-                }) {
-                    return Choice(
-                        offer: least.offer,
-                        reason: said(
-                            "every fifth piece goes to the least used worker: "
-                                + "\(least.runs.count) \(least.runs.count == 1 ? "run" : "runs") on \(kind.rawValue)"
-                        )
-                    )
-                }
+        let said: String
+        switch cause {
+        case .quota: said = "is out of quota"
+        case .signedOut: said = "is signed out"
+        case .down: said = "is down"
+        case .resting:
+            said = "is resting until \(resters[passed].map(clock) ?? "later") after \(restingAfter) failures in a row"
+        case .demoted, .slow:
+            switch demoted(passed) {
+            case let .rating(average)?: said = "is demoted, rated \(String(format: "%.1f", average)) on \(kind.rawValue)"
+            case let .slow(than)?: said = "is demoted, over twice as slow as \(shortName(than)) on \(kind.rawValue)"
+            case nil: said = "is demoted"
             }
-            if let best = good.min(by: {
-                ($0.medianSeconds, $0.medianCost, $0.order) < ($1.medianSeconds, $1.medianCost, $1.order)
-            }) {
-                return Choice(offer: best.offer, reason: said(best.fastestReason(kind)))
+        case .unavailable: said = "cannot take this piece"
+        }
+        let slow: Bool = if case .slow = demoted(passed) { true } else { false }
+        return Choice(offer: worker, pick: PickReason(
+            code: .lineup, text: "\(place) in your lineup: \(shortName(passed)) \(said)", position: index + 1,
+            passed: passed.model.split(separator: "/").last.map(String.init) ?? passed.model,
+            cause: cause == .demoted && slow ? .slow : cause
+        ))
+    }
+
+    /// The worker for this piece when it is a learning turn, or nil.
+    ///
+    /// Every fifth piece of a kind and difficulty, unless the last one was a
+    /// learning turn too: the lineup's first keeps the work it is given.
+    private static func learningTurn(
+        kind: TaskKind, difficulty: Difficulty, ofKind: [Run], offers: [ModelCatalog.Offer],
+        eligible: [ModelCatalog.Offer], demotedInLineup: [ModelCatalog.Offer],
+        candidate: (ModelCatalog.Offer) -> Candidate
+    ) -> ModelCatalog.Offer? {
+        let same = ofKind.filter { ($0.spec.difficulty ?? .normal) == difficulty }
+        guard same.count % explorationEvery == explorationEvery - 1,
+              same.max(by: { $0.started < $1.started })?.pick?.code != .learning
+        else { return nil }
+        // A hard piece learns among strong workers only.
+        let pool = difficulty == .hard ? eligible.filter(isStrong) : strengthPool(eligible, difficulty: difficulty)
+        if let back = demotedInLineup.first(where: pool.contains) { return back }
+        func cliRuns(_ offer: ModelCatalog.Offer) -> Int { ofKind.filter { $0.spec.cli == offer.cli }.count }
+        return pool.map(candidate)
+            .filter { $0.delivered < deliveriesToLearn && lowerEffortTried($0.offer, offers: offers, ofKind: ofKind) }
+            .min { ($0.costRank, cliRuns($0.offer), $0.order) < ($1.costRank, cliRuns($1.offer), $1.order) }?
+            .offer
+    }
+
+    /// A hard piece goes to a strong worker when one may run, an easy one to a
+    /// light worker when one may.
+    private static func strengthPool(_ workers: [ModelCatalog.Offer], difficulty: Difficulty) -> [ModelCatalog.Offer] {
+        let strong = workers.filter(isStrong)
+        let light = workers.filter { !isStrong($0) }
+        switch difficulty {
+        case .hard: return strong.isEmpty ? workers : strong
+        case .easy: return light.isEmpty ? workers : light
+        case .normal: return workers
+        }
+    }
+
+    /// Why the record passes over `worker`, a lineup worker, on this kind:
+    /// rated below 4 on average over two ratings or more, or more than twice
+    /// as slow on this kind and difficulty as `next`, the lineup worker after
+    /// it, with three deliveries each.
+    public static func demotion(
+        of worker: ModelCatalog.Offer, kind: TaskKind, difficulty: Difficulty, history: [Run], next: ModelCatalog.Offer?
+    ) -> Demotion? {
+        func runs(_ offer: ModelCatalog.Offer) -> [Run] {
+            history.filter {
+                ($0.spec.kind ?? .other) == kind && $0.state != .cancelled && $0.providerFailure == nil && isRun($0, of: offer)
             }
         }
-
-        // Nobody has earned the kind yet: the cheap untried ones go first.
-        if let learning { return learn(learning) }
-
-        return candidates.min { ($0.costRank, $0.order) < ($1.costRank, $1.order) }.map {
-            Choice(
-                offer: $0.offer,
-                reason: said("cheapest that may run; none is rated \(Rating.satisfactory) or more on \(kind.rawValue)")
-            )
+        let mine = runs(worker)
+        let ratings = mine.compactMap { $0.rating?.score }
+        if ratings.count >= ratingsToDemote {
+            let average = Double(ratings.reduce(0, +)) / Double(ratings.count)
+            if average < Double(Rating.satisfactory) { return .rating(average) }
         }
+        guard let next else { return nil }
+        func times(_ runs: [Run]) -> [TimeInterval] {
+            runs.filter { ($0.spec.difficulty ?? .normal) == difficulty && isDelivery($0) }.map(\.duration)
+        }
+        let own = times(mine)
+        let theirs = times(runs(next))
+        guard own.count >= deliveriesToCompare, theirs.count >= deliveriesToCompare,
+              let slow = Scoreboard.median(own), let fast = Scoreboard.median(theirs),
+              slow > slowerThan * fast
+        else { return nil }
+        return .slow(than: next)
+    }
+
+    /// "1st", "2nd", "3rd", "4th".
+    static func ordinal(_ number: Int) -> String {
+        let suffix: String
+        switch (number % 10, number % 100) {
+        case (1, let tens) where tens != 11: suffix = "st"
+        case (2, let tens) where tens != 12: suffix = "nd"
+        case (3, let tens) where tens != 13: suffix = "rd"
+        default: suffix = "th"
+        }
+        return "\(number)\(suffix)"
+    }
+
+    /// A worker as a reason has room for it: `opus (low)`, `glm-5.3-flash-free`.
+    public static func shortName(_ offer: ModelCatalog.Offer) -> String {
+        (offer.model.split(separator: "/").last.map(String.init) ?? offer.model) + (offer.effort.map { " (\($0))" } ?? "")
     }
 
     // MARK: Candidates
@@ -239,12 +325,6 @@ public enum WorkerPicker {
             let tiers = ModelCatalog.claudeWorkers.flatMap { worker in worker.efforts.map { (worker.model, $0) } }
             let index = tiers.firstIndex { $0.0 == offer.model && $0.1 == offer.effort }
             return 1 + (index ?? tiers.count)
-        }
-
-        func fastestReason(_ kind: TaskKind) -> String {
-            let score = String(format: "%.1f", average ?? 0)
-            let seconds = medianSeconds.isFinite ? ", median \(Int(medianSeconds.rounded()))s" : ""
-            return "fastest rated \(Rating.satisfactory) or more on \(kind.rawValue) (average \(score)\(seconds))"
         }
     }
 
@@ -315,14 +395,26 @@ public enum WorkerPicker {
     /// a quota when it came to nothing within a minute and is under half an
     /// hour old.
     static func stalledCLIs(_ history: [Run], now: Date) -> Set<WorkerCLI> {
-        var stalled: Set<WorkerCLI> = []
+        Set(stallCauses(history, now: now).keys)
+    }
+
+    /// The CLIs to leave alone for now, each with what its provider said; a
+    /// quick failure with no words is taken for a quota.
+    static func stallCauses(_ history: [Run], now: Date) -> [WorkerCLI: PickReason.Cause] {
+        var stalled: [WorkerCLI: PickReason.Cause] = [:]
         for (cli, runs) in Dictionary(grouping: history, by: \.spec.cli) {
             guard let latest = runs.max(by: { $0.started < $1.started }) else { continue }
             if let said = runs.filter({ $0.providerFailure != nil }).max(by: { $0.started < $1.started }),
                let failure = said.providerFailure {
                 let recovered = runs.contains { $0.started > said.started && isDelivery($0) }
                 let since = now.timeIntervalSince(said.ended ?? said.started)
-                if !recovered, failure.stall.map({ since < $0 }) ?? true { stalled.insert(cli) }
+                if !recovered, failure.stall.map({ since < $0 }) ?? true {
+                    switch failure {
+                    case .quota: stalled[cli] = .quota
+                    case .signedOut: stalled[cli] = .signedOut
+                    case .unavailable: stalled[cli] = .down
+                    }
+                }
                 // The words settle it, whichever way: no guessing from speed.
                 if latest.providerFailure != nil { continue }
             }
@@ -331,7 +423,7 @@ public enum WorkerPicker {
                   latest.duration < quickFailure,
                   now.timeIntervalSince(latest.started) < quotaMemory
             else { continue }
-            stalled.insert(cli)
+            stalled[cli] = .quota
         }
         return stalled
     }

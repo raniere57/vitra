@@ -54,6 +54,8 @@ public struct Run: Equatable, Sendable {
     public var providerFailure: ProviderFailure? = nil
     /// Whether Vitra chose the worker, the spawn having left the cli out.
     public var wasPicked: Bool = false
+    /// Why Vitra chose this worker, when it did and said.
+    public var pick: PickReason? = nil
     /// The run this one retried after its provider failed: at most one
     /// failover per original run.
     public var retryOf: String? = nil
@@ -83,6 +85,7 @@ public struct Run: Equatable, Sendable {
         timedOutAfter: Int? = nil,
         providerFailure: ProviderFailure? = nil,
         wasPicked: Bool = false,
+        pick: PickReason? = nil,
         retryOf: String? = nil,
         redoOf: String? = nil,
         isPaused: Bool = false
@@ -106,6 +109,7 @@ public struct Run: Equatable, Sendable {
         self.timedOutAfter = timedOutAfter
         self.providerFailure = providerFailure
         self.wasPicked = wasPicked
+        self.pick = pick
         self.retryOf = retryOf
         self.redoOf = redoOf
         self.isPaused = isPaused
@@ -140,6 +144,8 @@ struct RunRecord: Codable {
     var deadline: Date? = nil
     /// Whether Vitra picked the worker; absent when the maestro named it.
     var picked: Bool? = nil
+    /// Why Vitra picked it, so the reason survives a restart.
+    var pick: PickReason? = nil
     /// The run this one is the failover of, or the redo of.
     var retryOf: String? = nil
     var redoOf: String? = nil

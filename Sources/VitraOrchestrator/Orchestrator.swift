@@ -92,6 +92,8 @@ public struct Orchestrator: Sendable {
     public struct SpawnLink: Sendable {
         /// Vitra chose the worker: the spawn left the cli out.
         public var picked = false
+        /// Why, when Vitra picked.
+        public var pick: PickReason?
         /// The run this one is the failover of, after its provider failed.
         public var retryOf: String?
         /// The run this one redoes.
@@ -99,8 +101,12 @@ public struct Orchestrator: Sendable {
         /// The branch of an earlier delivery to go on from, for a redo.
         public var continuing: Continuation?
 
-        public init(picked: Bool = false, retryOf: String? = nil, redoOf: String? = nil, continuing: Continuation? = nil) {
-            self.picked = picked
+        public init(
+            picked: Bool = false, pick: PickReason? = nil, retryOf: String? = nil, redoOf: String? = nil,
+            continuing: Continuation? = nil
+        ) {
+            self.picked = picked || pick != nil
+            self.pick = pick
             self.retryOf = retryOf
             self.redoOf = redoOf
             self.continuing = continuing
@@ -254,6 +260,7 @@ public struct Orchestrator: Sendable {
                 baseCommit: worktree?.base,
                 deadline: started.addingTimeInterval(TimeInterval(spec.minutes ?? Self.defaultMinutes) * 60),
                 picked: link.picked ? true : nil,
+                pick: link.pick,
                 retryOf: link.retryOf,
                 redoOf: link.redoOf
             )
@@ -785,6 +792,7 @@ public struct Orchestrator: Sendable {
             timedOutAfter: timedOutAfter,
             providerFailure: providerFailure,
             wasPicked: record.picked == true,
+            pick: record.pick,
             retryOf: record.retryOf,
             redoOf: record.redoOf,
             isPaused: FileManager.default.fileExists(atPath: file(id, "paused").path)
