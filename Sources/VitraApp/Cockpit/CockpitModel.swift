@@ -487,9 +487,12 @@ enum Maestro {
     /// and hands it the session's id.
     static func settings(binary: String) -> String {
         let hook: [String: Any] = ["type": "command", "command": ShellQuote.quote(binary) + " maestro-session"]
+        // The attention hooks are added beside SessionStart, never over it.
+        var hooks = AttentionHook.settingsHooks(binary: binary)
+        hooks["SessionStart"] = [["hooks": [hook]]]
         let settings: [String: Any] = [
             "remoteControlAtStartup": false,
-            "hooks": ["SessionStart": [["hooks": [hook]]]],
+            "hooks": hooks,
             "statusLine": ["type": "command", "command": MaestroStatus.command(binary: binary)],
         ]
         let data = (try? JSONSerialization.data(withJSONObject: settings, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data()

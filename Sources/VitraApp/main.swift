@@ -21,6 +21,19 @@ if CommandLine.arguments.dropFirst().first == "maestro-session" {
     exit(0)
 }
 
+// `Vitra hook <event>` is the hook claude runs when the maestro needs the user
+// (Notification), ends a turn (Stop), is answered (UserPromptSubmit) or goes
+// away (SessionEnd). It leaves the project's attention state on disk and says
+// nothing; it always exits 0, so a hook can never get in claude's way.
+if CommandLine.arguments.dropFirst().first == "hook" {
+    Attention.run(
+        event: CommandLine.arguments.dropFirst(2).first,
+        input: FileHandle.standardInput.readDataToEndOfFile(),
+        environmentProject: ProcessInfo.processInfo.environment["VITRA_PROJECT"]
+    )
+    exit(0)
+}
+
 // `Vitra maestro-status` is the maestro's status line: it notes the usage
 // figures claude hands it, then runs the status line the user already had.
 if CommandLine.arguments.dropFirst().first == "maestro-status" {
