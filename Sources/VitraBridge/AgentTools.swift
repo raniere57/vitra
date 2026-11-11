@@ -489,7 +489,7 @@ public struct AgentToolExecutor: ToolExecutor {
     /// Writes down on every run of the branch how it ended, so a second
     /// agent_merge of any of them says so instead of failing on a branch that
     /// is gone.
-    private func close(_ members: [Run], _ text: String) {
+    private func markClosed(_ members: [Run], _ text: String) {
         for member in members {
             guard let directory = orchestrator.directory(of: member.id) else { continue }
             try? Data(text.utf8).write(to: directory.appendingPathComponent("closed"), options: .atomic)
@@ -588,7 +588,7 @@ public struct AgentToolExecutor: ToolExecutor {
 
         let removed = worktree.map { Git.run(["worktree", "remove", "--force", $0], in: repository) }
         let deleted = Git.run(["branch", "-D", branch], in: repository)
-        close(members, "\(discard ? "discarded" : "merged") through agent \(id)")
+        markClosed(members, "\(discard ? "discarded" : "merged") through agent \(id)")
 
         var lines: [String]
         if discard {
