@@ -1329,7 +1329,7 @@ private func successorID(in line: String) -> String {
     let text = try await fixture.call("agent_spawn", [
         "prompt": "go", "directory": .string(fixture.root.path), "kind": "review", "difficulty": "hard",
     ])
-    #expect(text.contains("picked claude haiku (high): cheapest that may run; none is rated 4 or more on review, hard piece."))
+    #expect(text.contains("picked claude opus (low): 1st in your lineup for hard pieces."))
     #expect(try fixture.orchestrator.status(startedID(text)).spec.difficulty == .hard)
 
     // Left out, it is judged from the prompt and stored all the same.
@@ -1432,7 +1432,8 @@ echo '{"type":"text","part":{"text":"redone"}}'
     let redo = try fixture.orchestrator.status(startedID(other))
     #expect(redo.spec.cli == .opencode)
     #expect(redo.spec.model == "opencode/glm-5.3-flash-free")
-    #expect(other.contains("picked: learning"))
+    #expect(other.contains("picked: 3rd in your lineup for normal pieces"))
+    #expect(try fixture.orchestrator.status(startedID(other)).wasPicked)
     #expect(other.contains("claude haiku (low) delivered a 2/5"))
     // Still on the same branch: it builds on the delivery whoever does it.
     #expect(redo.branch == "vitra/\(id)")
