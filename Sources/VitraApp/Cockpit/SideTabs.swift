@@ -16,6 +16,20 @@ enum SideTab: String, CaseIterable {
         }
     }
 
+    /// The tab's picture: seven names do not fit the narrow panel with any
+    /// air, so only the selected tab spells its name out.
+    var symbol: String {
+        switch self {
+        case .palco: return "atom"
+        case .workers: return "person.2"
+        case .ranking: return "list.number"
+        case .browser: return "globe"
+        case .files: return "folder"
+        case .git: return "arrow.triangle.branch"
+        case .terminal: return "terminal"
+        }
+    }
+
     /// A page or a file needs room to be read; a list does not.
     var isWide: Bool { self == .browser || self == .files || self == .terminal }
 }
@@ -31,7 +45,7 @@ final class SideTabs: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         let stack = NSStackView()
-        stack.spacing = 0
+        stack.spacing = CockpitStyle.Space.xs
         // The first tab's text, not its plate, sits on the content inset, so
         // it lines up with what is below it.
         stack.edgeInsets = NSEdgeInsets(top: 0, left: CockpitStyle.inset - TabButton.textOffset, bottom: 0, right: CockpitStyle.Space.md)
@@ -68,10 +82,22 @@ final class SideTabs: NSView {
     private func paint() {
         for (tab, button) in buttons {
             let isSelected = tab == selected
-            button.attributedTitle = NSAttributedString(string: titles[tab] ?? tab.title, attributes: [
-                .font: isSelected ? CockpitStyle.ui(12, .semibold) : CockpitStyle.label,
-                .foregroundColor: isSelected ? CockpitStyle.text : CockpitStyle.muted,
+            let title = titles[tab] ?? tab.title
+            // Selected: the picture and the name. Otherwise the picture alone,
+            // with whatever count the name carries ("Workers · 2" → "2").
+            let count = title.components(separatedBy: " · ").dropFirst().last
+            let shown = isSelected ? title : (count ?? "")
+            let colour = isSelected ? CockpitStyle.text : CockpitStyle.muted
+            button.image = NSImage(systemSymbolName: tab.symbol, accessibilityDescription: tab.title)?
+                .withSymbolConfiguration(.init(pointSize: 12, weight: isSelected ? .semibold : .regular))
+            button.contentTintColor = colour
+            button.imagePosition = shown.isEmpty ? .imageOnly : .imageLeading
+            button.attributedTitle = NSAttributedString(string: shown.isEmpty ? "" : " " + shown, attributes: [
+                .font: isSelected ? CockpitStyle.ui(12, .semibold) : CockpitStyle.meta,
+                .foregroundColor: colour,
             ])
+            button.toolTip = title
+            button.setAccessibilityLabel(title)
             button.layer?.backgroundColor = (isSelected ? CockpitStyle.tab : .clear).cgColor
             button.setAccessibilityValue(isSelected ? "selecionada" : nil)
         }
@@ -81,7 +107,7 @@ final class SideTabs: NSView {
 /// A tab: text on a pill that is filled when the tab is the one shown.
 private final class TabButton: NSButton {
     /// Room between the pill's edge and its text, on each side.
-    static let padding: CGFloat = 2
+    static let padding: CGFloat = 6
     /// Where the text really starts, measured from the plate's edge: less than
     /// `padding`, since the button brings a little room of its own.
     static let textOffset: CGFloat = 4
