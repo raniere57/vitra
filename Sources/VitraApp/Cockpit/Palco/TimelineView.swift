@@ -9,7 +9,7 @@ import VitraPanel
 final class TimelineView: NSView {
     private static let titleHeight: CGFloat = 26
     private static let axisHeight: CGFloat = 20
-    private static let labelColumn: CGFloat = 104
+    private static let labelColumn: CGFloat = 112
     private static let gutter: CGFloat = 10
     private static let labelFont = CockpitStyle.meta
     private static let auditFont = CockpitStyle.mono(9)
@@ -156,7 +156,8 @@ final class TimelineView: NSView {
         case .failed: fill = CockpitStyle.danger.withAlphaComponent(0.8)
         case .stopped: fill = CockpitStyle.muted.withAlphaComponent(0.3)
         }
-        let barFrame = CGRect(x: Self.leftEdge + bar.minX, y: minY, width: bar.maxX - bar.minX, height: height)
+        // At least a dot: a bar of a few points is not a lens.
+        let barFrame = CGRect(x: Self.leftEdge + bar.minX, y: minY, width: max(bar.maxX - bar.minX, height), height: height)
         lane.bar.frame = barFrame
         lane.bar.cornerRadius = height / 2
         lane.bar.backgroundColor = fill.cgColor
@@ -180,7 +181,10 @@ final class TimelineView: NSView {
     }
 
     private func placeGrid(_ layout: TimelineLayout, area: CGRect) {
-        let lines = layout.lines()
+        // With nothing to show, the axis would only be noise.
+        let lines = nodes.isEmpty ? [] : layout.lines()
+        nowLine.isHidden = nodes.isEmpty
+        nowCap.isHidden = nodes.isEmpty
         let path = CGMutablePath()
         for line in lines {
             let x = Self.leftEdge + line.x

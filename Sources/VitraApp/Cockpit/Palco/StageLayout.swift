@@ -53,26 +53,26 @@ struct StageGeometry: Equatable {
     /// What the trunk and its caption take from the bottom.
     static let trunkHeight: CGFloat = 46
     /// The inner orbit's size against the outer's.
-    static let innerScale: CGFloat = 0.62
+    static let innerScale: CGFloat = 0.66
     /// Slot 0 sits up and to the left, clear of the core's own title.
     static let firstAngle: CGFloat = -2 * .pi / 3
 
     let size: CGSize
 
-    /// Room a node needs beside and below it: its label.
+    /// From the sides to an outer node's centre: half its label's width.
     private static let marginX: CGFloat = 46
-    private static let marginTop: CGFloat = 26
-    private static let marginBottom: CGFloat = 40
+    /// From the top, and from the trunk, to an outer node's centre: the node
+    /// and its three lines of text, which sit above it at the top and below it
+    /// at the bottom.
+    private static let marginY: CGFloat = 58
 
-    var center: CGPoint {
-        CGPoint(x: size.width / 2, y: Self.marginTop + (size.height - Self.trunkHeight - Self.marginTop - Self.marginBottom) / 2 + Self.nodeRadius)
-    }
+    var center: CGPoint { CGPoint(x: size.width / 2, y: Self.marginY + radii.height) }
 
     /// The outer orbit's half-width and half-height.
     var radii: CGSize {
         CGSize(
             width: max(size.width / 2 - Self.marginX, Self.coreRadius * 2),
-            height: max((size.height - Self.trunkHeight - Self.marginTop - Self.marginBottom) / 2, Self.coreRadius * 1.6)
+            height: max((size.height - Self.trunkHeight - 2 * Self.marginY) / 2, Self.coreRadius * 1.6)
         )
     }
 
@@ -86,16 +86,16 @@ struct StageGeometry: Equatable {
         return CGPoint(x: center.x + radii.width * scale * cos(theta), y: center.y + radii.height * scale * sin(theta))
     }
 
-    /// Where an audit hangs: beside its delivery, a little way along the
-    /// orbit, on the side away from the core's axis so it stays on the stage.
+    /// Where an audit hangs: level with its delivery's disc, on the side away
+    /// from the core's axis. Level, because the delivery's words sit above or
+    /// below the disc and an audit there would land on them; and turned to the
+    /// other side when there is no room on the first.
     func auditPosition(besideDelivery point: CGPoint) -> CGPoint {
-        let toward = CGPoint(x: point.x - center.x, y: point.y - center.y)
-        let length = max(hypot(toward.x, toward.y), 1)
-        // Perpendicular to the spoke, the way that has more room.
-        var side = CGPoint(x: -toward.y / length, y: toward.x / length)
-        let candidate = CGPoint(x: point.x + side.x * 42, y: point.y + side.y * 42)
-        if candidate.x < 20 || candidate.x > size.width - 20 || candidate.y < 20 { side = CGPoint(x: -side.x, y: -side.y) }
-        return CGPoint(x: point.x + side.x * 42, y: point.y + side.y * 42)
+        let reach = Self.nodeRadius + Self.auditRadius + 8
+        let away: CGFloat = point.x >= center.x ? 1 : -1
+        let x = point.x + away * reach
+        let inside = x >= Self.auditRadius + 4 && x <= size.width - Self.auditRadius - 4
+        return CGPoint(x: inside ? x : point.x - away * reach, y: point.y)
     }
 
     // MARK: The trunk

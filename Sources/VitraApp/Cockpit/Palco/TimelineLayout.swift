@@ -15,6 +15,7 @@ struct TimelineLayout: Equatable {
 
     let start: Date
     let end: Date
+    let now: Date
     /// The width the span is spread over.
     let width: CGFloat
 
@@ -25,6 +26,7 @@ struct TimelineLayout: Equatable {
         let back = min(max(now.timeIntervalSince(oldest) * 1.04, Self.minimumSpan), Self.window)
         start = now.addingTimeInterval(-back)
         end = now.addingTimeInterval(back * Self.lookahead)
+        self.now = now
         self.width = max(width, 1)
     }
 
@@ -103,7 +105,8 @@ struct TimelineLayout: Equatable {
         let offset = TimeInterval(timeZone.secondsFromGMT(for: start))
         var t = ((start.timeIntervalSince1970 + offset) / step).rounded(.up) * step - offset
         var lines: [Line] = []
-        while t < end.timeIntervalSince1970 {
+        // Not past now: the room after it is for bars to grow into, not a future to label.
+        while t <= now.timeIntervalSince1970 {
             let date = Date(timeIntervalSince1970: t)
             lines.append(Line(date: date, x: x(date), label: Self.clock(date, timeZone: timeZone)))
             t += step

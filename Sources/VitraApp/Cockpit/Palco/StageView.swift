@@ -170,6 +170,7 @@ final class StageView: NSView {
         let from = node.auditOf.flatMap { targets[$0] } ?? geometry.center
         let slot = slots.slots[node.id] ?? 0
         let curve = LinkCurve(from: up(from), to: up(entry.target), bend: node.auditOf != nil ? 1 : (slot % 4 < 2 ? 1 : -1))
+        entry.layer.placeText(above: entry.target.y < geometry.center.y - 8)
         CALayer.instantly {
             entry.layer.position = up(entry.target)
             entry.link.path = curve.path
@@ -347,6 +348,7 @@ final class StageView: NSView {
         }
         refreshStatic()
         refreshMotion()
+        if hovered != nil { showCard(for: hovered) }
     }
 
     override func viewDidChangeBackingProperties() {

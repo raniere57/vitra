@@ -31,10 +31,10 @@ final class SideTabs: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         let stack = NSStackView()
-        stack.spacing = CockpitStyle.Space.hair
+        stack.spacing = 0
         // The first tab's text, not its plate, sits on the content inset, so
         // it lines up with what is below it.
-        stack.edgeInsets = NSEdgeInsets(top: 0, left: CockpitStyle.inset - TabButton.textOffset, bottom: 0, right: CockpitStyle.inset)
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: CockpitStyle.inset - TabButton.textOffset, bottom: 0, right: CockpitStyle.Space.md)
         for tab in SideTab.allCases {
             let button = TabButton(title: tab.title, target: self, action: #selector(pressed(_:)))
             button.tag = SideTab.allCases.firstIndex(of: tab) ?? 0
@@ -81,10 +81,10 @@ final class SideTabs: NSView {
 /// A tab: text on a pill that is filled when the tab is the one shown.
 private final class TabButton: NSButton {
     /// Room between the pill's edge and its text, on each side.
-    static let padding: CGFloat = 6
+    static let padding: CGFloat = 2
     /// Where the text really starts, measured from the plate's edge: less than
     /// `padding`, since the button brings a little room of its own.
-    static let textOffset: CGFloat = 4
+    static let textOffset: CGFloat = 0
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: super.intrinsicContentSize.width + 2 * Self.padding, height: 24)

@@ -119,6 +119,7 @@ final class StageNodeLayer: CALayer {
     private let label = CATextLayer.line(StageNodeLayer.labelFont, CockpitStyle.text)
     private let state = CATextLayer.line(StageNodeLayer.stateFont, CockpitStyle.muted)
     private var dots: [CALayer] = []
+    private var isTextAbove = false
 
     init(radius: CGFloat, isAudit: Bool) {
         self.radius = radius
@@ -173,22 +174,48 @@ final class StageNodeLayer: CALayer {
         for layer in [halo, disc, track, ring, glyph] { addSublayer(layer) }
 
         guard !isAudit else { return }
-        let labelHeight = CATextLayer.lineHeight(Self.labelFont)
-        let stateHeight = CATextLayer.lineHeight(Self.stateFont)
-        let left = box.midX - Self.labelWidth / 2
-        label.frame = CGRect(x: left, y: -labelHeight - 3, width: Self.labelWidth, height: labelHeight)
-        state.frame = CGRect(x: left, y: label.frame.minY - stateHeight + 1, width: Self.labelWidth, height: stateHeight)
         addSublayer(label)
         addSublayer(state)
-        for index in 0..<5 {
+        for _ in 0..<5 {
             let dot = CALayer()
             dot.bounds = CGRect(x: 0, y: 0, width: Self.dotSize, height: Self.dotSize)
             dot.cornerRadius = Self.dotSize / 2
-            dot.position = CGPoint(x: box.midX + CGFloat(index - 2) * (Self.dotSize + 3), y: state.frame.minY - Self.dotSize / 2 - 2)
             dot.isHidden = true
             dots.append(dot)
             addSublayer(dot)
         }
+        placeText(above: false)
+    }
+
+    /// Puts the label, the state and the rating dots below the disc, or above
+    /// it. A worker in the upper half of the stage carries them above, so that
+    /// its link, which arrives from the core, does not run through its words.
+    func placeText(above: Bool) {
+        guard !isAudit, above != isTextAbove || label.frame == .zero else { return }
+        isTextAbove = above
+        let box = bounds
+        let labelHeight = CATextLayer.lineHeight(Self.labelFont)
+        let stateHeight = CATextLayer.lineHeight(Self.stateFont)
+        let left = box.midX - Self.labelWidth / 2
+        let gap: CGFloat = 3
+        CALayer.instantly {
+            if above {
+                // Reading down to the disc: label, state, dots.
+                let dotY = box.maxY + gap + Self.dotSize / 2
+                for (index, dot) in dots.enumerated() { dot.position = dotPosition(index, y: dotY) }
+                state.frame = CGRect(x: left, y: box.maxY + gap + Self.dotSize + 2 - 1, width: Self.labelWidth, height: stateHeight)
+                label.frame = CGRect(x: left, y: state.frame.maxY - 1, width: Self.labelWidth, height: labelHeight)
+            } else {
+                label.frame = CGRect(x: left, y: -labelHeight - gap, width: Self.labelWidth, height: labelHeight)
+                state.frame = CGRect(x: left, y: label.frame.minY - stateHeight + 1, width: Self.labelWidth, height: stateHeight)
+                let dotY = state.frame.minY - Self.dotSize / 2 - 2
+                for (index, dot) in dots.enumerated() { dot.position = dotPosition(index, y: dotY) }
+            }
+        }
+    }
+
+    private func dotPosition(_ index: Int, y: CGFloat) -> CGPoint {
+        CGPoint(x: bounds.midX + CGFloat(index - 2) * (Self.dotSize + 3), y: y)
     }
 
     // MARK: Showing a node
@@ -201,8 +228,8 @@ final class StageNodeLayer: CALayer {
             let tint = StagePalette.tint(node.provider)
             let stateColor = StagePalette.state(node)
             if previous?.provider != node.provider {
-                disc.fillColor = tint.withAlphaComponent(0.2).cgColor
-                disc.strokeColor = tint.withAlphaComponent(0.5).cgColor
+                disc.fillColor = tint.withAlphaComponent(0.3).cgColor
+                disc.strokeColor = tint.withAlphaComponent(0.65).cgColor
                 glyph.foregroundColor = StagePalette.light(tint, 0.5).cgColor
                 halo.shadowColor = tint.cgColor
             }
