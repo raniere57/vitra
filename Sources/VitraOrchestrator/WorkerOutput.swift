@@ -235,7 +235,14 @@ public enum ProviderFailure: Codable, Equatable, Sendable {
 
     private static let patterns: [(regex: String, make: @Sendable (String) -> ProviderFailure)] = [
         (#"free usage limit|usage limit|rate[ _-]?limit|quota|\b429\b|too many requests|\bcredit"#, { .quota($0) }),
-        (#"authentication required|not logged in|not signed in|\blog ?in\b|\bsign ?in\b|unauthori[sz]ed"#, { .signedOut($0) }),
+        // A bare "login" is not enough: a worker that failed a task about
+        // logins says it too. The CLIs ask to log in, they do not just name it.
+        (
+            #"authentication required|not (?:logged|signed) in|/login|unauthori[sz]ed|"#
+                + #"\b(?:please|must|need to|run|try to)\b[^.\n]{0,20}\b(?:log|sign) ?in\b|"#
+                + #"\b(?:log|sign) ?in (?:required|first|again)"#,
+            { .signedOut($0) }
+        ),
         (
             #"overloaded|service unavailable|bad gateway|gateway time-?out|"#
                 + #"(?:http|status|error|code)[^0-9\n]{0,12}5\d\d\b|\b5\d\d (?:internal|server|service|bad|gateway)"#,

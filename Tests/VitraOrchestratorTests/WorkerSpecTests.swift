@@ -274,3 +274,51 @@ private func spec(
     ])
     #expect(environment == ["PATH": "/usr/bin", "HOME": "/Users/x", "OPENCODE_CONFIG": "/tmp/x.json"])
 }
+
+// MARK: - Difficulty
+
+private func paths(_ count: Int) -> String {
+    (1...count).map { "Sources/Module/File\($0).swift" }.joined(separator: ", ")
+}
+
+private let difficultyCases: [(String, TaskKind?, WorkerAccess, Difficulty)] = [
+    // Six distinct files, whatever the kind.
+    ("Read " + paths(6), .explore, .read, .hard),
+    ("Change " + paths(5), .implement, .edit, .normal),
+    // The same file named twice is one file.
+    ("Read " + paths(1) + " and again " + paths(1), .explore, .read, .easy),
+    // Longer than 4000 characters.
+    (String(repeating: "word ", count: 801), .other, .read, .hard),
+    // Implement + edit + three files + a word for reshaping.
+    ("Refactor " + paths(3), .implement, .edit, .hard),
+    ("Migrate " + paths(3) + " to the new API", .implement, .edit, .hard),
+    ("Redesign the architecture across " + paths(3), .implement, .edit, .hard),
+    ("Refactor " + paths(2), .implement, .edit, .normal),
+    ("Refactor " + paths(3), .implement, .read, .normal),
+    ("Refactor " + paths(3), .explore, .edit, .normal),
+    // Short, at most one path, and a kind that only reads.
+    ("Where is the retry logic?", .explore, .read, .easy),
+    ("Summarise Sources/Module/File1.swift", .docs, .read, .easy),
+    ("Review this", .review, .read, .easy),
+    ("Where is the retry logic?", .implement, .edit, .normal),
+    ("Where is the retry logic?", nil, .read, .normal),
+    ("Compare " + paths(2), .explore, .read, .normal),
+    (String(repeating: "x", count: 600), .explore, .read, .normal),
+    // URLs and abbreviations are not files.
+    ("See https://example.com/a/b/page.html and https://example.com/c/d.html, e.g. this, i.e. that, etc. now read main.swift", .explore, .read, .easy),
+    ("See https://example.com/a.html, " + paths(1) + ", main.swift, Run.swift", .explore, .read, .normal),
+]
+
+@Test("The default difficulty is judged from the prompt", arguments: difficultyCases)
+func theDefaultDifficultyIsJudgedFromThePrompt(prompt: String, kind: TaskKind?, access: WorkerAccess, expected: Difficulty) {
+    #expect(Difficulty.estimate(prompt: prompt, kind: kind, access: access) == expected)
+}
+
+@Test func difficultyIsStoredInTheSpecAndAnOldRecordWithoutOneStillLoads() throws {
+    let hard = WorkerSpec(cli: .claude, model: "sonnet", prompt: "go", directory: "/tmp", effort: "high", difficulty: .hard)
+    let decoded = try JSONDecoder().decode(WorkerSpec.self, from: JSONEncoder().encode(hard))
+    #expect(decoded.difficulty == .hard)
+
+    let old = #"{"cli":"claude","model":"haiku","prompt":"go","directory":"/tmp"}"#
+    #expect(try JSONDecoder().decode(WorkerSpec.self, from: Data(old.utf8)).difficulty == nil)
+}

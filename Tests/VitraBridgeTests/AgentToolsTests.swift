@@ -124,14 +124,17 @@ private let answers = #"cat >/dev/null; echo '{"result":"the answer","is_error":
 
     let text = try await fixture.call("agent_spawn", ["prompt": "go", "directory": .string(fixture.root.path), "kind": "review"])
     #expect(text.contains("claude haiku (low), read access"))
-    #expect(text.contains("picked claude haiku (low): learning, 0 of 2 runs on review."))
+    // A short read of nothing in particular is an easy piece, and the pick says so.
+    #expect(text.contains("picked claude haiku (low): learning, 0 of 2 runs on review, easy piece."))
     let id = String(text.dropFirst("Started agent ".count).prefix(8))
     #expect(try fixture.orchestrator.status(id).spec.effort == "low")
+    #expect(try fixture.orchestrator.status(id).spec.difficulty == .easy)
     _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
 
-    // Commands are passed along to the worker it picks.
+    // Commands are passed along to the worker it picks; a normal piece says nothing of its difficulty.
     let withCommands = try await fixture.call("agent_spawn", [
         "prompt": "go", "directory": .string(fixture.root.path), "kind": "review", "commands": ["bun test"],
+        "difficulty": "normal",
     ])
     #expect(withCommands.contains("picked claude haiku (low): learning, 1 of 2 runs on review."))
 
@@ -853,7 +856,8 @@ echo '{"result":"done","is_error":false}'
     }
     #expect(try await router.run(tool: "browser_open", arguments: [:], pane: nil) == "panel:browser_open")
     #expect(AgentTools.names == [
-        "agent_spawn", "agent_wait", "agent_list", "agent_cancel", "agent_merge", "agent_models", "agent_rate", "agent_scores",
+        "agent_spawn", "agent_redo", "agent_wait", "agent_list", "agent_cancel", "agent_merge", "agent_models",
+        "agent_rate", "agent_scores",
     ])
 }
 

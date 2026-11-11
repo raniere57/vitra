@@ -13,11 +13,15 @@ private func run(
     cost: Double = 0,
     score: Int? = nil,
     kind: TaskKind? = nil,
-    effort: String? = nil
+    effort: String? = nil,
+    providerFailure: ProviderFailure? = nil,
+    difficulty: Difficulty? = nil
 ) -> Run {
     Run(
         id: "0123abcd",
-        spec: WorkerSpec(cli: cli, model: model, prompt: "go", directory: "/tmp", kind: kind, effort: effort),
+        spec: WorkerSpec(
+            cli: cli, model: model, prompt: "go", directory: "/tmp", kind: kind, effort: effort, difficulty: difficulty
+        ),
         state: state,
         pid: 4242,
         started: start,
@@ -26,7 +30,8 @@ private func run(
             ? nil
             : WorkerOutput(text: failed ? "no" : "ok", isError: failed, costUSD: cost),
         errorTail: nil,
-        rating: score.map { Rating(score: $0, note: nil, rated: start) }
+        rating: score.map { Rating(score: $0, note: nil, rated: start) },
+        providerFailure: providerFailure
     )
 }
 
@@ -270,4 +275,40 @@ private func run(
     let history = [run(.claude, "haiku", kind: .review, effort: "low")]
     // haiku at low has run on review; haiku at high has not.
     #expect(Scoreboard.untriedLine(offers, history: history, kind: .review) == "  not tried yet: claude haiku (high)")
+}
+
+@Test func aRunThatDidNotRunBecauseOfItsProviderIsNeitherARunNorAFailure() {
+    let quota = ProviderFailure.quota("Free usage limit reached")
+    let scores = Scoreboard.scores([
+        run(.opencode, "opencode/a-free", failed: true, providerFailure: quota),
+        run(.opencode, "opencode/a-free", failed: true, providerFailure: .signedOut("Authentication required")),
+        run(.opencode, "opencode/a-free", score: 5),
+        run(.gemini, "gemini-3.8-flash", failed: true, providerFailure: .unavailable("503")),
+    ])
+    // The gemini worker has no runs at all, the opencode one has one, clean.
+    #expect(scores.map(\.model) == ["opencode/a-free"])
+    #expect(scores.first?.runs == 1)
+    #expect(scores.first?.failures == 0)
+
+    // ... where a failure of the worker's own is counted.
+    let own = Scoreboard.scores([run(.opencode, "opencode/a-free", failed: true), run(.opencode, "opencode/a-free", score: 5)])
+    #expect(own.first?.runs == 2)
+    #expect(own.first?.failures == 1)
+
+    // Nor is it "tried": the offered worker is still untried.
+    let offers = [ModelCatalog.Offer(cli: .gemini, model: "gemini-3.8-flash-low", effort: nil)]
+    let history = [run(.gemini, "gemini-3.8-flash-low", failed: true, kind: .review, providerFailure: quota)]
+    #expect(Scoreboard.untriedLine(offers, history: history, kind: .review) == "  not tried yet: gemini gemini-3.8-flash-low")
+}
+
+@Test func theDifficultyMixIsShownOnlyWhenSomePieceWasNotNormal() {
+    let plain = Scoreboard.summary(Scoreboard.scores([run(.claude, "haiku", kind: .review, effort: "low")]))
+    #expect(!plain.contains("easy") && !plain.contains("hard"))
+    let mixed = Scoreboard.summary(Scoreboard.scores([
+        run(.claude, "haiku", kind: .review, effort: "low", difficulty: .easy),
+        run(.claude, "haiku", kind: .review, effort: "low", difficulty: .easy),
+        run(.claude, "haiku", kind: .review, effort: "low", difficulty: .hard),
+        run(.claude, "haiku", kind: .review, effort: "low"),
+    ]))
+    #expect(mixed.contains(" · 2 easy, 1 normal, 1 hard"))
 }

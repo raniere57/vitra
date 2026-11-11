@@ -122,3 +122,50 @@ private let openCodeEvents = """
         #expect(WorkerOutput.parse("", cli: cli).isError)
     }
 }
+
+// MARK: Provider failures
+
+@Test("A provider's own words say why the run did not run", arguments: [
+    ("Free usage limit reached. Upgrade to continue.", "quota"),
+    ("Claude AI usage limit reached|1731000000", "quota"),
+    ("You have hit your rate limit", "quota"),
+    ("rate_limit_error: slow down", "quota"),
+    ("Error: 429 Too Many Requests", "quota"),
+    ("Your credit balance is too low to access the API", "quota"),
+    ("Quota exceeded for this model", "quota"),
+    ("Authentication required", "signed out"),
+    ("Not logged in · Please run /login", "signed out"),
+    ("You are not signed in", "signed out"),
+    ("Please log in to continue", "signed out"),
+    ("API Error: 529 overloaded_error", "unavailable"),
+    ("HTTP 503 Service Unavailable", "unavailable"),
+    ("upstream said: 502 Bad Gateway", "unavailable"),
+    ("status: 500", "unavailable"),
+])
+func aProviderFailureIsRecognisedFromItsWords(text: String, name: String) {
+    let failure = ProviderFailure.detect(text: text, errorTail: nil)
+    #expect(failure?.name == name)
+    #expect(failure?.reason == text)
+    // On stderr, when stdout said nothing, it is the same.
+    #expect(ProviderFailure.detect(text: "the agent printed nothing", errorTail: text)?.name == name)
+}
+
+@Test func aFailureThatIsAboutSomethingElseIsNotTheProvidersAndTheReasonIsTheMatchedLine() {
+    // A task about logins that failed, a line number, a long report: the
+    // worker ran and failed on its own.
+    #expect(ProviderFailure.detect(text: "3 tests failed in login.test.ts", errorTail: nil) == nil)
+    #expect(ProviderFailure.detect(text: "could not find the function on line 500", errorTail: nil) == nil)
+    #expect(ProviderFailure.detect(text: "the build broke", errorTail: "error: expected ';'") == nil)
+    let long = String(repeating: "the quota module is wrong. ", count: 60)
+    #expect(ProviderFailure.detect(text: long, errorTail: nil) == nil)
+    // Several lines: the one that matched is the reason.
+    let multi = ProviderFailure.detect(text: "starting\nFree usage limit reached\nbye", errorTail: nil)
+    #expect(multi == .quota("Free usage limit reached"))
+}
+
+@Test func howLongEachKindKeepsItsCLIOut() {
+    #expect(ProviderFailure.quota("x").stall == 3600)
+    #expect(ProviderFailure.unavailable("x").stall == 600)
+    // A sign-in lasts until a later run of the CLI works.
+    #expect(ProviderFailure.signedOut("x").stall == nil)
+}
