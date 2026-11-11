@@ -323,8 +323,11 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     // the maestro's sense of what counts as small.
     #expect(brief.contains("Do the small things yourself"))
     // Vitra picks the worker; the maestro tags the kind and passes commands.
-    #expect(brief.contains("Vitra picks the worker from the record"))
-    #expect(brief.contains("two deliveries"))
+    #expect(brief.contains("Vitra picks the worker from the user's lineup"))
+    // It never tells the maestro to name a worker or a model.
+    #expect(!brief.contains("cli and model"))
+    #expect(!brief.contains("agent_models"))
+    #expect(!brief.contains("Name a worker"))
     #expect(brief.contains("commands"))
     #expect(!brief.contains("override"))
     #expect(!brief.contains("call agent_scores"))

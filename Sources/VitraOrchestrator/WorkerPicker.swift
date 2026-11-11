@@ -172,7 +172,10 @@ public enum WorkerPicker {
     ) -> Choice {
         let worker = tier[index]
         let place = ordinal(index + 1)
-        guard let passed = tier.first, index > 0, let cause = why(passed) else {
+        // A worker that is not installed or cannot run this piece is not news;
+        // one that is out, resting or demoted is.
+        let skipped = tier.prefix(index).compactMap { worker in why(worker).map { (worker, $0) } }
+        guard let (passed, cause) = skipped.first(where: { $0.1 != .unavailable }) else {
             return Choice(offer: worker, pick: PickReason(
                 code: .lineup, text: "\(place) in your lineup for \(difficulty.rawValue) pieces", position: index + 1
             ))
