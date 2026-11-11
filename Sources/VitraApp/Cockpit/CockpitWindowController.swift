@@ -215,20 +215,20 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         views = [:]
     }
 
-    /// The project a tool call belongs to, brought to the front.
+    /// The project a tool call belongs to — never brought to the front.
     ///
     /// The one whose shell the call came from, when the helper could say; a
     /// call with no pane is a helper started outside the cockpit, and gets the
-    /// project on screen. Either way the project is shown: what a tool opens
-    /// is for the user to see, and a page loading in a tab nobody is looking
-    /// at reads as "the agent says it opened but nothing is here".
+    /// project on screen. The user stays where they are: an agent opening a
+    /// page in another project must not pull them out of the one they are
+    /// working in. What it opened is there when they go and look.
     private func project(for pane: String?) throws -> ProjectView {
-        let index = pane.flatMap { id in projects.firstIndex { views[$0.path]?.paneID == id } }
-        if let index, index != selected { select(index) }
+        if let pane, let view = views.values.first(where: { $0.paneID == pane }) {
+            return view
+        }
         guard projects.indices.contains(selected), let view = views[projects[selected].path] else {
             throw ToolError("Vitra has no project open")
         }
-        window?.orderFront(nil)
         return view
     }
 
