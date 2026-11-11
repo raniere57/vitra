@@ -7,6 +7,7 @@ import VitraPanel
 /// The cockpit's one window: a tab per project, and the project shown under them.
 final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     static let minSize = NSSize(width: 980, height: 600)
+    private static let filledOnceKey = "cockpitFilledScreenOnce"
 
     private let kit: TerminalKit
     private let feed: RunFeed
@@ -54,7 +55,17 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         window.appearance = NSAppearance(named: .darkAqua)
         window.minSize = Self.minSize
         window.setFrameAutosaveName("VitraCockpit")
-        if window.frame.origin == .zero { window.center() }
+        // By default the cockpit fills the screen — the whole visible area,
+        // under the menu bar and beside the Dock — as a plain window, not in
+        // full screen: all the room, and still free to be moved and resized.
+        // Applied once, so a size the user chose afterwards is the one kept.
+        if !UserDefaults.standard.bool(forKey: Self.filledOnceKey),
+           let screen = window.screen ?? NSScreen.main {
+            window.setFrame(screen.visibleFrame, display: false)
+            UserDefaults.standard.set(true, forKey: Self.filledOnceKey)
+        } else if window.frame.origin == .zero {
+            window.center()
+        }
         super.init(window: window)
         window.delegate = self
 
