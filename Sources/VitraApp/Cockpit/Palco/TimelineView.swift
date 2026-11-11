@@ -9,10 +9,18 @@ import VitraPanel
 final class TimelineView: NSView {
     private static let titleHeight: CGFloat = 26
     private static let axisHeight: CGFloat = 20
-    private static let labelColumn: CGFloat = 112
+    /// Lanes this tall or taller carry their name over the bar, at full
+    /// width; shorter ones (many workers at once) put a column of names
+    /// beside the bars instead.
+    private static let roomyLane: CGFloat = 24
+    private static let compactLabelColumn: CGFloat = 150
+    private static let stateColumn: CGFloat = 96
     private static let gutter: CGFloat = 10
-    private static let labelFont = CockpitStyle.meta
-    private static let auditFont = CockpitStyle.mono(9)
+    private static let dotSize: CGFloat = 6
+    /// Where the bars start: the content inset, or past the names when compact.
+    private var leftEdge: CGFloat = CockpitStyle.inset
+    private static let labelFont = CockpitStyle.caption
+    private static let auditFont = CockpitStyle.ui(10)
     private static let axisFont = CockpitStyle.mono(9)
     /// How far a bar may grow before its sheen's sweep is rebuilt to span it.
     private static let sweepSlack: CGFloat = 4
@@ -26,6 +34,10 @@ final class TimelineView: NSView {
 
     private final class Lane {
         let label: CATextLayer
+        /// What became of it, at the right: how long it has run, or "pronto 5/5".
+        let state = CATextLayer.line(CockpitStyle.meta, CockpitStyle.muted, alignment: .right)
+        /// The provider's tint, so the bar's colour is free to say the outcome.
+        let dot = CALayer()
         let bar = CALayer()
         let sheen = CAGradientLayer()
         let tick = CALayer()
@@ -82,9 +94,11 @@ final class TimelineView: NSView {
         self.nodes = nodes
         self.now = now
         guard bounds.width > 0 else { return }
-        let layout = TimelineLayout(nodes: nodes, now: now, width: barsWidth)
         let area = CGRect(x: 0, y: Self.axisHeight, width: bounds.width, height: max(bounds.height - Self.titleHeight - Self.axisHeight, 0))
-        let frames = TimelineLayout.lanes(nodes, height: area.height - 8)
+        let frames = TimelineLayout.lanes(nodes, height: area.height - 8, preferredRow: 30, gap: 8)
+        let isCompact = (frames.first { !$0.isAudit }?.height ?? Self.roomyLane) < Self.roomyLane
+        leftEdge = CockpitStyle.inset + (isCompact ? Self.compactLabelColumn + Self.gutter : 0)
+        let layout = TimelineLayout(nodes: nodes, now: now, width: barsWidth)
 
         CATransaction.begin()
         if glide && !reduceMotion {
@@ -95,8 +109,9 @@ final class TimelineView: NSView {
         }
         let live = Set(nodes.map(\.id))
         for (id, lane) in lanes where !live.contains(id) {
-            lane.label.removeFromSuperlayer()
-            lane.bar.removeFromSuperlayer()
+            // Every layer of it: a rating tick left behind is a green mark
+            // floating over nothing.
+            for layer in [lane.label, lane.state, lane.dot, lane.bar, lane.tick] { layer.removeFromSuperlayer() }
             lanes[id] = nil
         }
         for placed in frames {
@@ -104,8 +119,8 @@ final class TimelineView: NSView {
             let lane = lanes[node.id] ?? makeLane(node)
             // Top down: the first lane is the oldest run.
             let minY = area.maxY - 4 - placed.minY - placed.height
-            lane.frame = CGRect(x: Self.leftEdge, y: minY, width: bounds.width - Self.leftEdge - Self.rightEdge, height: placed.height)
-            paint(lane, node: node, layout: layout, height: placed.height, minY: minY)
+            lane.frame = CGRect(x: leftEdge, y: minY, width: bounds.width - leftEdge - Self.rightEdge, height: placed.height)
+            paint(lane, node: node, layout: layout, height: placed.height, minY: minY, isCompact: isCompact)
         }
         placeGrid(layout, area: area)
         emptyNote.isHidden = !nodes.isEmpty
@@ -114,9 +129,8 @@ final class TimelineView: NSView {
         refreshMotion()
     }
 
-    private static var leftEdge: CGFloat { CockpitStyle.inset + labelColumn + gutter }
     private static var rightEdge: CGFloat { CockpitStyle.inset }
-    private var barsWidth: CGFloat { max(bounds.width - Self.leftEdge - Self.rightEdge, 1) }
+    private var barsWidth: CGFloat { max(bounds.width - leftEdge - Self.rightEdge, 1) }
 
     private func makeLane(_ node: StageNode) -> Lane {
         let font = node.isAudit ? Self.auditFont : Self.labelFont
@@ -132,7 +146,12 @@ final class TimelineView: NSView {
         lane.bar.actions = ["backgroundColor": NSNull(), "borderColor": NSNull()]
         rootLayer.addSublayer(lane.bar)
         rootLayer.addSublayer(label)
-        rootLayer.addSublayer(lane.tick)
+        rootLayer.addSublayer(lane.state)
+        rootLayer.addSublayer(lane.dot)
+        lane.tick.isHidden = true
+        lane.state.contentsScale = contentsScale
+        lane.dot.cornerRadius = Self.dotSize / 2
+        lane.dot.actions = ["position": NSNull(), "bounds": NSNull(), "backgroundColor": NSNull()]
         lane.bar.contentsScale = contentsScale
         label.contentsScale = contentsScale
         lanes[node.id] = lane
@@ -141,48 +160,82 @@ final class TimelineView: NSView {
         return lane
     }
 
-    private func paint(_ lane: Lane, node: StageNode, layout: TimelineLayout, height: CGFloat, minY: CGFloat) {
+    /// The name a lane carries: what was asked, and of whom.
+    private static func caption(_ node: StageNode) -> String {
+        let worker = node.model + (node.effort.map { " (\($0))" } ?? "")
+        return (node.isAudit ? "↳ auditoria" : node.label) + "  ·  " + worker
+    }
+
+    private func paint(_ lane: Lane, node: StageNode, layout: TimelineLayout, height: CGFloat, minY: CGFloat, isCompact: Bool) {
         let previous = lane.node
         lane.node = node
         let font = node.isAudit ? Self.auditFont : Self.labelFont
-        lane.label.frame = CGRect(
-            x: CockpitStyle.inset, y: minY + (height - CATextLayer.lineHeight(font)) / 2 + 0.5,
-            width: Self.labelColumn, height: CATextLayer.lineHeight(font)
+        let textHeight = CATextLayer.lineHeight(font)
+        // The outcome is the colour: amber at work, green delivered, red failed.
+        let colour: NSColor
+        switch node.outcome {
+        case .running: colour = CockpitStyle.accent
+        case .done: colour = StagePalette.rating(node.score ?? 5)
+        case .failed: colour = CockpitStyle.danger
+        case .stopped: colour = CockpitStyle.muted
+        }
+
+        // Roomy: the name runs the full width over a thin bar. Compact: the
+        // name sits in a column at the left, centred on its bar.
+        let indent: CGFloat = node.isAudit ? 14 : 0
+        let textY = isCompact ? minY + (height - textHeight) / 2 + 0.5 : minY + height - textHeight
+        let textX = CockpitStyle.inset + indent + Self.dotSize + 6
+        let textWidth = isCompact
+            ? Self.compactLabelColumn - indent - Self.dotSize - 6
+            : bounds.width - 2 * CockpitStyle.inset - indent - Self.dotSize - 6 - Self.stateColumn
+        lane.label.frame = CGRect(x: textX, y: textY, width: max(textWidth, 20), height: textHeight)
+        let caption = isCompact ? (node.isAudit ? "↳ auditoria" : node.label) : Self.caption(node)
+        if lane.label.string as? String != caption { lane.label.string = caption }
+        lane.dot.backgroundColor = StagePalette.tint(node.provider).cgColor
+        lane.dot.frame = CGRect(
+            x: CockpitStyle.inset + indent, y: textY + (textHeight - Self.dotSize) / 2,
+            width: Self.dotSize, height: Self.dotSize
         )
-        if previous?.label != node.label { lane.label.string = node.label }
+        if previous?.stateText != node.stateText { lane.state.string = node.stateText }
+        lane.state.foregroundColor = colour.cgColor
 
         let bar = layout.bar(of: node, now: now)
-        let tint = StagePalette.tint(node.provider)
-        let fill: NSColor
-        switch node.outcome {
-        case .running: fill = tint.withAlphaComponent(0.8)
-        case .done: fill = tint.withAlphaComponent(0.62)
-        case .failed: fill = CockpitStyle.danger.withAlphaComponent(0.8)
-        case .stopped: fill = CockpitStyle.muted.withAlphaComponent(0.3)
-        }
+        let barHeight: CGFloat = isCompact ? height : (node.isAudit ? 3 : 6)
         // At least a dot: a bar of a few points is not a lens.
-        let barFrame = CGRect(x: Self.leftEdge + bar.minX, y: minY, width: max(bar.maxX - bar.minX, height), height: height)
+        let barFrame = CGRect(x: leftEdge + bar.minX, y: minY, width: max(bar.maxX - bar.minX, barHeight), height: barHeight)
         lane.bar.frame = barFrame
-        lane.bar.cornerRadius = height / 2
-        lane.bar.backgroundColor = fill.cgColor
+        lane.bar.cornerRadius = barHeight / 2
+        lane.bar.backgroundColor = colour.withAlphaComponent(node.outcome == .stopped ? 0.25 : 0.85).cgColor
         // A stopped run is outlined rather than filled, which reads as "not a result".
         lane.bar.borderWidth = node.outcome == .stopped ? 1 : 0
         lane.bar.borderColor = CockpitStyle.muted.withAlphaComponent(0.6).cgColor
-        lane.bar.opacity = Float(node.emphasis * (node.isSilent ? 0.6 : 1))
+        // What became of it: at the right of the name when roomy; when
+        // compact, beside its bar — after it, or before when the bar ends at "now".
+        let stateHeight = CATextLayer.lineHeight(CockpitStyle.meta)
+        if isCompact {
+            let fitsAfter = bounds.width - CockpitStyle.inset - barFrame.maxX >= Self.stateColumn * 0.7
+            lane.state.alignmentMode = fitsAfter ? .left : .right
+            lane.state.frame = CGRect(
+                x: fitsAfter ? barFrame.maxX + 6 : barFrame.minX - 6 - Self.stateColumn,
+                y: minY + (height - stateHeight) / 2 + 0.5, width: Self.stateColumn, height: stateHeight
+            )
+        } else {
+            lane.state.alignmentMode = .right
+            lane.state.frame = CGRect(
+                x: bounds.width - CockpitStyle.inset - Self.stateColumn, y: textY,
+                width: Self.stateColumn, height: stateHeight
+            )
+        }
+        let emphasis = Float(node.emphasis * (node.isSilent ? 0.6 : 1))
+        lane.bar.opacity = emphasis
         lane.label.opacity = Float(node.emphasis)
+        lane.state.opacity = Float(node.emphasis)
+        lane.dot.opacity = Float(node.emphasis)
 
         let sheenWidth = max(min(barFrame.width, 70), 1)
-        lane.sheen.frame = CGRect(x: 0, y: 0, width: sheenWidth, height: height)
+        lane.sheen.frame = CGRect(x: 0, y: 0, width: sheenWidth, height: barHeight)
         // With Reduce Motion there is no sheen at all, moving or not.
         lane.sheen.isHidden = node.outcome != .running || reduceMotion
-
-        if let score = node.score {
-            lane.tick.isHidden = false
-            lane.tick.backgroundColor = StagePalette.rating(score).cgColor
-            lane.tick.frame = CGRect(x: barFrame.maxX + 1, y: minY - 2, width: 2, height: height + 4)
-        } else {
-            lane.tick.isHidden = true
-        }
     }
 
     private func placeGrid(_ layout: TimelineLayout, area: CGRect) {
@@ -192,7 +245,7 @@ final class TimelineView: NSView {
         nowCap.isHidden = nodes.isEmpty
         let path = CGMutablePath()
         for line in lines {
-            let x = Self.leftEdge + line.x
+            let x = leftEdge + line.x
             path.move(to: CGPoint(x: x, y: area.minY))
             path.addLine(to: CGPoint(x: x, y: area.maxY))
         }
@@ -212,9 +265,9 @@ final class TimelineView: NSView {
             let line = lines[index]
             label.isHidden = false
             if label.string as? String != line.label { label.string = line.label }
-            label.frame = CGRect(x: Self.leftEdge + line.x - 22, y: 4, width: 44, height: CATextLayer.lineHeight(Self.axisFont))
+            label.frame = CGRect(x: leftEdge + line.x - 22, y: 4, width: 44, height: CATextLayer.lineHeight(Self.axisFont))
         }
-        let nowX = Self.leftEdge + layout.x(now)
+        let nowX = leftEdge + layout.x(now)
         nowLine.frame = CGRect(x: nowX - 0.5, y: area.minY - 2, width: 1, height: area.height + 2)
         nowCap.position = CGPoint(x: nowX, y: area.minY - 2)
         rule.frame = CGRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
