@@ -1,8 +1,10 @@
 // Draws Vitra's icon with Core Graphics and writes every size the .icns needs.
 //
-// The mark is a V read as a diagram: one lit node at the bottom — the maestro —
-// with two arms rising to the workers it delegates to. Graphite and amber, the
-// cockpit's own colours, with amber kept for the one thing that is live.
+// The mark is the cockpit's own stage, read as a V: one lit core at the bottom
+// — the maestro — with two beams rising to workers that sit on its orbit, and
+// other workers, in their providers' tints, travelling the same rings.
+// Graphite and amber, the cockpit's colours, with amber kept for the one
+// thing that is live.
 //
 // Core Graphics rather than SVG: the glow and the squircle are easier to
 // control directly, and one pass produces every size with the artwork
@@ -67,8 +69,8 @@ enum Detail {
     /// smallest sizes the arm's round end is all there is room for.
     var workerRadius: CGFloat? {
         switch self {
-        case .full: return 64
-        case .medium: return 70
+        case .full: return 54
+        case .medium: return 62
         case .small: return nil
         }
     }
@@ -116,7 +118,7 @@ func drawIcon(size: Int) -> CGImage {
     context.addPath(tile)
     context.clip()
     context.drawLinearGradient(
-        gradient([(0x2A2E36, 1, 0), (0x16181D, 1, 0.55), (0x0B0C0F, 1, 1)]),
+        gradient([(0x262B36, 1, 0), (0x141720, 1, 0.5), (0x090A0E, 1, 1)]),
         start: CGPoint(x: 512, y: body.maxY),
         end: CGPoint(x: 512, y: body.minY),
         options: []
@@ -137,6 +139,37 @@ func drawIcon(size: Int) -> CGImage {
             end: CGPoint(x: 512, y: body.maxY - 230),
             options: []
         )
+    }
+
+    // --- the orbits: the stage the cockpit draws, centred on the maestro.
+    // The outer one passes through the tips of the V, so the two workers it
+    // reaches are simply the nearest of those in orbit.
+    if detail != .small {
+        let outer = hypot(leftTip.x - vertex.x, leftTip.y - vertex.y)
+        let inner = outer * 0.58
+        context.setLineWidth(detail == .full ? 5 : 8)
+        context.setStrokeColor(color(0xFFFFFF, detail == .full ? 0.13 : 0.16))
+        context.strokeEllipse(in: circle(vertex, outer))
+        context.setStrokeColor(color(0xFFFFFF, detail == .full ? 0.09 : 0.12))
+        context.strokeEllipse(in: circle(vertex, inner))
+
+        // Workers that are not being spoken to right now: smaller, tinted.
+        let others: [(radius: CGFloat, degrees: CGFloat, tint: UInt32, size: CGFloat)] = [
+            (outer, 90, 0x7FB2E5, 30),
+            (inner, 158, 0xA596E8, 24),
+            (inner, 36, 0x86D0A6, 20),
+        ]
+        for other in others {
+            let angle = other.degrees * .pi / 180
+            let centre = CGPoint(x: vertex.x + cos(angle) * other.radius, y: vertex.y + sin(angle) * other.radius)
+            context.saveGState()
+            if detail == .full {
+                context.setShadow(offset: .zero, blur: 26, color: color(other.tint, 0.75))
+            }
+            context.setFillColor(color(other.tint))
+            context.fillEllipse(in: circle(centre, detail == .full ? other.size : other.size * 1.25))
+            context.restoreGState()
+        }
     }
 
     // --- the arms: maestro to workers
@@ -172,11 +205,6 @@ func drawIcon(size: Int) -> CGImage {
             context.setFillColor(color(0xFBF8F1))
             context.fillEllipse(in: circle(tip, radius))
             context.restoreGState()
-            if detail == .full {
-                // Hollow, where the maestro is solid: they wait to be told.
-                context.setFillColor(color(0x1B1E23))
-                context.fillEllipse(in: circle(tip, radius - 26))
-            }
         }
     }
 
@@ -205,6 +233,10 @@ func drawIcon(size: Int) -> CGImage {
         context.setStrokeColor(color(0x14161A, 0.9))
         context.setLineWidth(10)
         context.strokeEllipse(in: circle(vertex, detail.nodeRadius + 5))
+        // And the one the stage draws around a maestro at work.
+        context.setStrokeColor(color(0xE8A33D, 0.55))
+        context.setLineWidth(6)
+        context.strokeEllipse(in: circle(vertex, detail.nodeRadius + 34))
     }
     context.restoreGState()
 
