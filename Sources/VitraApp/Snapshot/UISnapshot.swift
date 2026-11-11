@@ -138,12 +138,18 @@ enum UISnapshot {
         let runs = fixtures.workerRuns()
         project.show(runs, now: fixtures.now)
 
+        // The selected tab asks for a permission and the next one waits; the
+        // third is quiet, so all three tab looks are in the picture.
+        let attention = fixtures.attention()
+        project.show(attention: AttentionPolicy.label(attention[fixtures.path], now: fixtures.now))
+
         let bar = CockpitTabBar()
         bar.show([
-            .init(name: "vitra", running: WorkerBoard.runningCount(runs)),
-            .init(name: "hapto", running: 0),
+            .init(name: "vitra", running: WorkerBoard.runningCount(runs), callsForYou: AttentionPolicy.isCalling(attention[fixtures.path], now: fixtures.now)),
+            .init(name: "hapto", running: 0, callsForYou: AttentionPolicy.isCalling(attention["hapto"], now: fixtures.now)),
             .init(name: "docs", running: 0),
         ], selected: 0)
+        bar.show(chips: ProviderChips.derive(runs: fixtures.chipRuns(), usage: fixtures.subscription, now: fixtures.now))
         bar.show(costToday: WorkerBoard.totals(runs, since: Calendar.current.startOfDay(for: fixtures.now)).cost)
 
         let window = NSView()

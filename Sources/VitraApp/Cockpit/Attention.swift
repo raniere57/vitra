@@ -96,7 +96,7 @@ enum AttentionHook {
     static func settingsHooks(binary: String) -> [String: Any] {
         var hooks: [String: Any] = [:]
         for event in events {
-            let command: [String: Any] = ["type": "command", "command": ShellQuote.quote(binary) + " hook " + event, "timeout": 5]
+            let command = ["type": "command", "command": ShellQuote.quote(binary) + " hook " + event]
             hooks[event] = [["hooks": [command]]]
         }
         return hooks
@@ -185,7 +185,7 @@ enum AttentionPolicy {
 }
 
 /// When to interrupt the user with a notification and a sound.
-struct AttentionThrottle {
+final class AttentionThrottle {
     /// No more than one alert per project in this time.
     static let interval: TimeInterval = 30
 
@@ -198,7 +198,7 @@ struct AttentionThrottle {
     /// working, or from nothing, or from waiting to a permission — while the
     /// user is not typing in that project's terminal, and not within
     /// `interval` of the last one.
-    mutating func shouldAlert(project: String, state: AttentionState?, now: Date, isWatching: Bool) -> Bool {
+    func shouldAlert(project: String, state: AttentionState?, now: Date, isWatching: Bool) -> Bool {
         let before = states[project]
         states[project] = state
         guard let state, state != .working, before != state else { return false }

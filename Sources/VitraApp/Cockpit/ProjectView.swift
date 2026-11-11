@@ -120,6 +120,8 @@ final class ProjectView: NSView {
     private(set) var terminal: TerminalView?
     private let usage = NSTextField.label(font: CockpitStyle.meta, color: CockpitStyle.muted)
     private lazy var usagePill = NSView.pill([usage])
+    private let attention = NSTextField.label(font: CockpitStyle.label, color: CockpitStyle.accent)
+    private lazy var attentionPill = NSView.pill([attention])
     private let model = NSTextField.label("claude", font: CockpitStyle.label, color: CockpitStyle.accent)
     private let effort = NSTextField.label(font: CockpitStyle.meta, color: CockpitStyle.muted)
     private let session = NSTextField.label(font: CockpitStyle.label, color: CockpitStyle.text)
@@ -138,6 +140,8 @@ final class ProjectView: NSView {
     /// The maestro's session name, when it has told one; what the header can
     /// hide is decided by `fitHeader`.
     private var sessionName: String?
+    /// Whether there is a usage figure; the plate is shown only if it also fits.
+    private var usageIsKnown = false
     private var headerWidth: CGFloat = 0
     /// Narrower than this the session name is cut to an ellipsis; narrower
     /// than what it takes to keep this and the path's minimum, it is hidden.
@@ -169,13 +173,21 @@ final class ProjectView: NSView {
     /// that is not known.
     func show(usage label: UsageLabel?) {
         usage.stringValue = label?.text ?? ""
-        usagePill.isHidden = label == nil
+        usageIsKnown = label != nil
         usage.textColor = switch label?.level {
         case .hot: CockpitStyle.dangerText
         case .warm: CockpitStyle.accent
         case .calm, nil: CockpitStyle.muted
         }
         usage.toolTip = "Uso semanal da assinatura Claude, como o maestro informou por último"
+        fitHeader()
+    }
+
+    /// Shows that the maestro waits on the user, and for how long, or nothing.
+    func show(attention text: String?) {
+        guard attention.stringValue != (text ?? "") else { return }
+        attention.stringValue = text ?? ""
+        attentionPill.isHidden = text == nil
         fitHeader()
     }
 
@@ -194,17 +206,29 @@ final class ProjectView: NSView {
     /// Shows the session plate only when the header has room for it at its
     /// minimum width beside everything that never gives way. Decided from the
     /// header's width, not from how the layout came out, so it cannot flap.
+    ///
+    /// What gives way, first to last: the session name, then the usage figure
+    /// (the tab bar's chip says it too once it is worth saying), and only then
+    /// the path. Model, effort, "waiting for you" and branch never clip.
     private func fitHeader() {
-        guard sessionName != nil else {
-            sessionPill.isHidden = true
-            return
+        let core = [titleLabel, modelPill, attentionPill, branchPill].filter { !$0.isHidden }
+        // Before the first layout there is no width to decide from.
+        let hasRoom = { (plates: [NSView], withSession: Bool) -> Bool in
+            self.headerWidth == 0 || self.headerWidth >= self.headerNeeds(plates, withSession: withSession)
         }
-        let fixed = [titleLabel, modelPill, usagePill, branchPill].filter { !$0.isHidden }
-        let visible = fixed.count + 3 // plus the session plate, the spacer and the path
-        let widths = fixed.map(\.fittingSize.width).reduce(0, +)
+        let showsUsage = usageIsKnown && hasRoom(core + [usagePill], false)
+        usagePill.isHidden = !showsUsage
+        let plates = showsUsage ? core + [usagePill] : core
+        sessionPill.isHidden = sessionName == nil || !hasRoom(plates, true)
+    }
+
+    /// The width the header needs for `plates`, the spacer, the path at its
+    /// minimum and, when asked, the session plate at its minimum.
+    private func headerNeeds(_ plates: [NSView], withSession: Bool) -> CGFloat {
+        let visible = plates.count + 2 + (withSession ? 1 : 0)
+        let widths = plates.map(\.fittingSize.width).reduce(0, +)
         let gaps = CGFloat(visible - 1) * CockpitStyle.Space.md + (CockpitStyle.Space.lg - CockpitStyle.Space.md)
-        let needed = 2 * CockpitStyle.inset + widths + gaps + Self.sessionMinWidth + Self.placeMinWidth
-        sessionPill.isHidden = headerWidth < needed
+        return 2 * CockpitStyle.inset + widths + gaps + Self.placeMinWidth + (withSession ? Self.sessionMinWidth : 0)
     }
 
     /// Hands the keyboard to the maestro.
@@ -666,7 +690,9 @@ final class ProjectView: NSView {
         effort.isHidden = true
         modelPill.toolTip = "Modelo e effort do maestro"
         usagePill.isHidden = true
-        for view in [title, usage, model, effort, branch, modelPill, usagePill, branchPill] as [NSView] {
+        attentionPill.isHidden = true
+        attentionPill.toolTip = "O maestro parou e espera por você"
+        for view in [title, usage, attention, model, effort, branch, modelPill, usagePill, attentionPill, branchPill] as [NSView] {
             view.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
         // What gives way, in this order: the path (head-truncated, lowest
@@ -681,7 +707,7 @@ final class ProjectView: NSView {
         sessionPill.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(300), for: .horizontal)
         sessionPill.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.sessionMinWidth).isActive = true
         sessionPill.isHidden = true
-        let header = MaestroHeader(views: [title, modelPill, usagePill, sessionPill, NSView(), place, branchPill])
+        let header = MaestroHeader(views: [title, modelPill, attentionPill, usagePill, sessionPill, NSView(), place, branchPill])
         header.spacing = CockpitStyle.Space.md
         header.setCustomSpacing(CockpitStyle.Space.lg, after: title)
         header.edgeInsets = NSEdgeInsets(top: 0, left: CockpitStyle.inset, bottom: 0, right: CockpitStyle.inset)

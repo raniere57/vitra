@@ -7,6 +7,8 @@ final class CockpitTabBar: NSView {
         let name: String
         /// How many workers are running in the project right now.
         let running: Int
+        /// The maestro is waiting on the user: the dot turns amber and pulses.
+        var callsForYou = false
     }
 
     var onSelect: ((Int) -> Void)?
@@ -17,7 +19,9 @@ final class CockpitTabBar: NSView {
     private let add = NSButton(title: "", target: nil, action: nil)
     private let today = NSTextField.label("hoje", font: CockpitStyle.meta, color: CockpitStyle.muted)
     private let cost = NSTextField.label("$0.00", font: CockpitStyle.meta, color: CockpitStyle.text)
+    private let chipRow = NSStackView()
     private var shown: [Tab] = []
+    private var shownChips: [ProviderChip] = []
     private var selected = -1
 
     override init(frame: NSRect) {
@@ -52,6 +56,15 @@ final class CockpitTabBar: NSView {
         cost.stringValue = WorkerBoard.money(costToday)
     }
 
+    /// Provider facts worth a glance, left of the day's cost; none when all is well.
+    func show(chips: [ProviderChip]) {
+        guard chips != shownChips else { return }
+        shownChips = chips
+        chipRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        chips.map(ChipView.init).forEach(chipRow.addArrangedSubview)
+        chipRow.isHidden = chips.isEmpty
+    }
+
     @objc private func addProject(_ sender: Any?) { onAdd?() }
 
     private func build() {
@@ -66,8 +79,11 @@ final class CockpitTabBar: NSView {
         add.heightAnchor.constraint(equalToConstant: CockpitStyle.rowHeight).isActive = true
 
         tabs.spacing = CockpitStyle.Space.xs
-        let spend = NSStackView(views: [today, cost])
+        chipRow.spacing = CockpitStyle.Space.sm
+        chipRow.isHidden = true
+        let spend = NSStackView(views: [chipRow, today, cost])
         spend.spacing = CockpitStyle.Space.md
+        spend.setCustomSpacing(CockpitStyle.Space.lg, after: chipRow)
         let rule = NSView.rule(CockpitStyle.line)
         for view in [tabs, spend, rule] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -94,6 +110,7 @@ private final class TabView: NSView {
 
     private let isSelected: Bool
     private var isHovered = false
+    private var pulsingDot: NSView?
 
     init(_ tab: CockpitTabBar.Tab, isSelected: Bool) {
         self.isSelected = isSelected
@@ -109,12 +126,17 @@ private final class TabView: NSView {
         )
         name.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         var views: [NSView] = [name]
-        if tab.running > 0 {
+        if tab.running > 0 || tab.callsForYou {
+            // Amber both for "workers running" and "waiting for you"; only the
+            // second pulses.
             let dot = NSView.filled(CockpitStyle.accent, cornerRadius: CockpitStyle.Radius.dot)
             dot.widthAnchor.constraint(equalToConstant: 2 * CockpitStyle.Radius.dot).isActive = true
             dot.heightAnchor.constraint(equalToConstant: 2 * CockpitStyle.Radius.dot).isActive = true
-            let count = NSTextField.label("\(tab.running)", font: CockpitStyle.meta, color: CockpitStyle.muted)
-            views = [dot, name, count]
+            views = [dot, name]
+            if tab.running > 0 {
+                views.append(NSTextField.label("\(tab.running)", font: CockpitStyle.meta, color: CockpitStyle.muted))
+            }
+            if tab.callsForYou { pulsingDot = dot }
         }
         let row = NSStackView(views: views)
         row.spacing = CockpitStyle.Space.md
@@ -136,8 +158,59 @@ private final class TabView: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         let running = tab.running > 0 ? ", \(tab.running) rodando" : ""
-        setAccessibilityLabel(tab.name + running)
+        let waiting = tab.callsForYou ? ", aguardando você" : ""
+        setAccessibilityLabel(tab.name + running + waiting)
         paint()
+    }
+
+    // MARK: Pulse
+
+    private static let pulseKey = "attention-pulse"
+    private static let pulseDuration: CFTimeInterval = 0.9
+    private static let pulseLow: Float = 0.25
+
+    /// Pulses while the window can be seen and Reduce Motion is off; otherwise
+    /// the dot is simply solid amber.
+    private func updatePulse() {
+        guard let layer = pulsingDot?.layer else { return }
+        let isVisible = window?.occlusionState.contains(.visible) ?? false
+        guard isVisible, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            layer.removeAnimation(forKey: Self.pulseKey)
+            return
+        }
+        guard layer.animation(forKey: Self.pulseKey) == nil else { return }
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 1
+        pulse.toValue = Self.pulseLow
+        pulse.duration = Self.pulseDuration
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(pulse, forKey: Self.pulseKey)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self)
+        guard pulsingDot != nil else { return }
+        if let window {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(pulseConditionsChanged),
+                name: NSWindow.didChangeOcclusionStateNotification, object: window
+            )
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(pulseConditionsChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil
+        )
+        updatePulse()
+    }
+
+    @objc private func pulseConditionsChanged(_ notification: Notification) { updatePulse() }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
     @available(*, unavailable)
@@ -179,4 +252,40 @@ private final class TabView: NSView {
         isHovered = false
         paint()
     }
+}
+
+/// A provider fact on a small plate: amber when notable, red when nearly out,
+/// muted for a CLI that has hit its limit.
+private final class ChipView: NSView {
+    init(_ chip: ProviderChip) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
+        layer?.cornerRadius = CockpitStyle.Radius.control
+        layer?.borderWidth = 1
+        layer?.backgroundColor = CockpitStyle.raised.cgColor
+        let color: NSColor
+        switch chip.level {
+        case .muted: color = CockpitStyle.muted
+        case .warm: color = CockpitStyle.accent
+        case .hot: color = CockpitStyle.dangerText
+        }
+        layer?.borderColor = (chip.level == .muted ? CockpitStyle.raisedLine : color.withAlphaComponent(0.5)).cgColor
+        let label = NSTextField.label(chip.text, font: CockpitStyle.meta, color: color)
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CockpitStyle.Space.md),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CockpitStyle.Space.md),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: CockpitStyle.Space.xs),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -CockpitStyle.Space.xs),
+        ])
+        toolTip = chip.tooltip
+        setAccessibilityElement(true)
+        setAccessibilityLabel(chip.text)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override var mouseDownCanMoveWindow: Bool { true }
 }

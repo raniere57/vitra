@@ -117,8 +117,34 @@ struct SnapshotFixtures {
         MaestroModel(name: "Opus 5.5", effort: "high", session: "vitra · snapshots da interface")
     }
 
+    /// Past the tab bar's 80% mark, so its chip shows.
+    var subscription: SubscriptionUsage {
+        SubscriptionUsage(sevenDay: 87, fiveHour: 18, updated: now)
+    }
+
     var usage: UsageLabel? {
-        MaestroStatus.label(SubscriptionUsage(sevenDay: 62, fiveHour: 18, updated: now), now: now)
+        MaestroStatus.label(subscription, now: now)
+    }
+
+    /// The workers' runs plus an opencode run that hit its limit 12 minutes
+    /// ago, in 4 seconds: what the tab bar's provider chips are derived from.
+    func chipRuns() -> [Run] {
+        workerRuns() + [
+            run("0f1e2d3c", "opencode/deepseek-v4.1-flash-free", .opencode, label: "Resumir o diff do GitPanel",
+                kind: .review, state: .finished(exitCode: 1), ago: 12 * 60, took: 4, isError: true,
+                answer: "Error: usage limit reached for the free tier"),
+        ]
+    }
+
+    // MARK: - Waiting for you
+
+    /// The selected project's maestro asks for a permission; the second tab's
+    /// has been waiting for the next instruction.
+    func attention() -> [String: AttentionRecord] {
+        [
+            path: AttentionRecord(state: .needsPermission, message: "Claude precisa de permissão para usar Bash", since: now.addingTimeInterval(-125), path: path),
+            "hapto": AttentionRecord(state: .waiting, message: nil, since: now.addingTimeInterval(-47), path: "hapto"),
+        ]
     }
 
     // MARK: - Files

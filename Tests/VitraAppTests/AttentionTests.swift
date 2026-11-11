@@ -24,7 +24,7 @@ private func update(_ event: String, type: String? = nil, message: String? = nil
 }
 
 @Test func promptSubmitMeansWorking() {
-    guard case let .write(record) = update("UserPromptSubmit") else { return Issue.record("expected a write") }
+    guard case let .write(record) = update("UserPromptSubmit") else { Issue.record("expected a write"); return }
     #expect(record.state == .working)
 }
 
@@ -39,7 +39,7 @@ private func update(_ event: String, type: String? = nil, message: String? = nil
 
 @Test func idleNotificationMeansWaiting() {
     guard case let .write(record) = update("Notification", type: "idle_prompt", message: "Claude is waiting for your input") else {
-        return Issue.record("expected a write")
+        Issue.record("expected a write"); return
     }
     #expect(record.state == .waiting)
 }
@@ -47,7 +47,7 @@ private func update(_ event: String, type: String? = nil, message: String? = nil
 @Test func notificationWithoutATypeIsToldByItsWords() {
     guard case let .write(permission) = update("Notification", message: "Claude needs your permission to use Edit"),
           case let .write(idle) = update("Notification", message: "Claude is waiting for your input")
-    else { return Issue.record("expected writes") }
+    else { Issue.record("expected writes"); return }
     #expect(permission.state == .needsPermission)
     #expect(idle.state == .waiting)
 }
@@ -79,7 +79,7 @@ private func update(_ event: String, type: String? = nil, message: String? = nil
 
 @Test func longMessagesAreCut() {
     guard case let .write(record) = update("Notification", type: "permission_prompt", message: String(repeating: "x", count: 500)) else {
-        return Issue.record("expected a write")
+        Issue.record("expected a write"); return
     }
     #expect(record.message?.count == 200)
 }
@@ -120,8 +120,8 @@ private func update(_ event: String, type: String? = nil, message: String? = nil
     let hooks = try #require(settings["hooks"] as? [String: Any])
     #expect(Set(hooks.keys) == Set(["SessionStart"] + AttentionHook.events))
     let stop = try #require(((hooks["Stop"] as? [[String: Any]])?.first?["hooks"] as? [[String: Any]])?.first)
-    #expect(stop["command"] as? String == "/Apps/Vitra hook Stop")
-    #expect((settings["statusLine"] as? [String: Any])?["command"] as? String == "/Apps/Vitra maestro-status")
+    #expect(stop["command"] as? String == "'/Apps/Vitra' hook Stop")
+    #expect((settings["statusLine"] as? [String: Any])?["command"] as? String == "'/Apps/Vitra' maestro-status")
 }
 
 // MARK: - Policy
@@ -152,20 +152,20 @@ private func update(_ event: String, type: String? = nil, message: String? = nil
 // MARK: - Notification throttle
 
 @Test func alertsOnTheTransitionIntoWaitingOnce() {
-    var throttle = AttentionThrottle()
+    let throttle = AttentionThrottle()
     #expect(!throttle.shouldAlert(project: "a", state: .working, now: t0, isWatching: false))
     #expect(throttle.shouldAlert(project: "a", state: .waiting, now: t0, isWatching: false))
     #expect(!throttle.shouldAlert(project: "a", state: .waiting, now: t0.addingTimeInterval(1), isWatching: false))
 }
 
 @Test func neverAlertsWhileTheUserIsTypingThere() {
-    var throttle = AttentionThrottle()
+    let throttle = AttentionThrottle()
     #expect(!throttle.shouldAlert(project: "a", state: .waiting, now: t0, isWatching: true))
     #expect(!throttle.shouldAlert(project: "a", state: .waiting, now: t0.addingTimeInterval(60), isWatching: false))
 }
 
 @Test func atMostOneAlertPerProjectEveryThirtySeconds() {
-    var throttle = AttentionThrottle()
+    let throttle = AttentionThrottle()
     #expect(throttle.shouldAlert(project: "a", state: .waiting, now: t0, isWatching: false))
     _ = throttle.shouldAlert(project: "a", state: .working, now: t0.addingTimeInterval(5), isWatching: false)
     #expect(!throttle.shouldAlert(project: "a", state: .waiting, now: t0.addingTimeInterval(10), isWatching: false))
@@ -176,14 +176,14 @@ private func update(_ event: String, type: String? = nil, message: String? = nil
 }
 
 @Test func permissionAfterWaitingAlertsButWaitingAfterPermissionDoesNot() {
-    var throttle = AttentionThrottle()
+    let throttle = AttentionThrottle()
     #expect(throttle.shouldAlert(project: "a", state: .waiting, now: t0, isWatching: false))
     #expect(throttle.shouldAlert(project: "a", state: .needsPermission, now: t0.addingTimeInterval(40), isWatching: false))
     #expect(!throttle.shouldAlert(project: "a", state: .waiting, now: t0.addingTimeInterval(90), isWatching: false))
 }
 
 @Test func aClearedFileIsNotAnAlertAndTheNextWaitingIs() {
-    var throttle = AttentionThrottle()
+    let throttle = AttentionThrottle()
     #expect(throttle.shouldAlert(project: "a", state: .waiting, now: t0, isWatching: false))
     #expect(!throttle.shouldAlert(project: "a", state: nil, now: t0.addingTimeInterval(1), isWatching: false))
     #expect(throttle.shouldAlert(project: "a", state: .waiting, now: t0.addingTimeInterval(100), isWatching: false))

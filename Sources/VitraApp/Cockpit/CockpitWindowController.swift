@@ -22,6 +22,13 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     private var runs: [Run] = []
     private var usageWatch: DispatchSourceFileSystemObject?
     private var usageDebounce: DispatchWorkItem?
+    /// What each started project's maestro last said about waiting on the user.
+    private var attention: [String: AttentionRecord] = [:]
+    private let throttle = AttentionThrottle()
+    private let alerts = AttentionAlerts()
+    private var attentionTick: DispatchWorkItem?
+    /// The longest a waiting label goes without being redrawn.
+    private static let attentionTickLimit: TimeInterval = 30
 
     init(kit: TerminalKit, feed: RunFeed, store: URL = CockpitState.defaultURL) {
         self.kit = kit
@@ -56,6 +63,11 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         tabBar.onClose = { [weak self] in self?.close(at: $0) }
         tabBar.onAdd = { [weak self] in self?.openProject(nil) }
         feed.onChange = { [weak self] runs in self?.show(runs) }
+        alerts.onOpen = { [weak self] path in
+            guard let self, let index = projects.firstIndex(where: { $0.path == path }) else { return }
+            self.window?.makeKeyAndOrderFront(nil)
+            select(index)
+        }
         // Covered, minimised, on another space or hidden with the app: the
         // window's own word for "nobody is looking", and the feed stops
         // reading the runs until somebody is.
@@ -167,6 +179,8 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func makeView(_ project: CockpitProject) -> ProjectView {
+        // A file left by a maestro from an earlier launch is not this one's word.
+        Attention.remove(for: project.path)
         let view = ProjectView(project: project, kit: kit)
         view.workers.onStopAll = { [weak self] ids in self?.feed.cancel(ids) }
         view.loadRanking = { [weak self] done in self?.feed.scores(done) }
@@ -218,17 +232,83 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     private func refresh() {
         let now = Date()
-        tabBar.show(
-            projects.map { CockpitTabBar.Tab(name: $0.name, running: WorkerBoard.runningCount(WorkerBoard.runs(runs, in: $0))) },
-            selected: selected
-        )
+        let usage = MaestroStatus.load()
+        tabBar.show(tabs(now: now), selected: selected)
+        tabBar.show(chips: ProviderChips.derive(runs: runs, usage: usage, now: now))
         tabBar.show(costToday: WorkerBoard.totals(runs, since: Calendar.current.startOfDay(for: now)).cost)
         // Only the project on screen is redrawn; the others catch up when shown.
         if projects.indices.contains(selected), let view = views[projects[selected].path] {
-            view.show(usage: MaestroStatus.label(MaestroStatus.load(), now: now))
+            view.show(usage: MaestroStatus.label(usage, now: now))
             view.show(model: MaestroStatus.model(for: projects[selected].path))
+            view.show(attention: AttentionPolicy.label(attention[projects[selected].path], now: now))
             view.show(WorkerBoard.runs(runs, in: projects[selected]), now: now)
         }
+        scheduleAttentionTick(now: now)
+    }
+
+    private func tabs(now: Date) -> [CockpitTabBar.Tab] {
+        projects.map {
+            CockpitTabBar.Tab(
+                name: $0.name,
+                running: WorkerBoard.runningCount(WorkerBoard.runs(runs, in: $0)),
+                callsForYou: AttentionPolicy.isCalling(attention[$0.path], now: now)
+            )
+        }
+    }
+
+    // MARK: - Waiting for the user
+
+    /// Reads each started project's attention file, alerts on a new wait, and
+    /// redraws the labels. Small files, no run list: cheap enough to follow
+    /// every write to the maestro folder.
+    private func refreshAttention() {
+        let now = Date()
+        var records: [String: AttentionRecord] = [:]
+        for project in projects where views[project.path] != nil {
+            records[project.path] = Attention.load(for: project.path)
+        }
+        attention = records
+
+        // Typing in that project's terminal: the app is in front, on that tab.
+        let isInFront = NSApp.isActive && window?.isKeyWindow == true
+        for (index, project) in projects.enumerated() {
+            guard let record = records[project.path] else {
+                _ = throttle.shouldAlert(project: project.path, state: nil, now: now, isWatching: false)
+                continue
+            }
+            let isWatching = isInFront && index == selected
+            if throttle.shouldAlert(project: project.path, state: record.state, now: now, isWatching: isWatching) {
+                alerts.alert(project: project.path, name: project.name, body: AttentionPolicy.body(record))
+            }
+        }
+        showAttention(now: now)
+    }
+
+    /// Redraws what depends on the attention records and the clock.
+    private func showAttention(now: Date) {
+        tabBar.show(tabs(now: now), selected: selected)
+        if projects.indices.contains(selected), let view = views[projects[selected].path] {
+            view.show(attention: AttentionPolicy.label(attention[projects[selected].path], now: now))
+        }
+        let calling = projects.filter { AttentionPolicy.isCalling(attention[$0.path], now: now) }.count
+        NSApp.dockTile.badgeLabel = calling > 0 ? "\(calling)" : nil
+        scheduleAttentionTick(now: now)
+    }
+
+    /// One look at the clock when it next matters: when a fresh wait crosses
+    /// into calling, and every so often to keep the "há quanto tempo" honest.
+    /// Nothing is scheduled while nobody waits or nobody can see the window.
+    private func scheduleAttentionTick(now: Date) {
+        attentionTick?.cancel()
+        attentionTick = nil
+        guard window?.occlusionState.contains(.visible) == true else { return }
+        let waiting = projects.compactMap { attention[$0.path] }.filter { $0.state != .working }
+        guard !waiting.isEmpty else { return }
+        let untilCalling = waiting.compactMap { AttentionPolicy.untilCalling($0, now: now) }.min()
+        let delay = min(untilCalling ?? Self.attentionTickLimit, Self.attentionTickLimit)
+        let work = DispatchWorkItem { [weak self] in self?.showAttention(now: Date()) }
+        attentionTick = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// Usage and model labels only: the maestro folder is rewritten many times
@@ -237,8 +317,10 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     private func refreshMaestroStatus() {
         guard projects.indices.contains(selected), let view = views[projects[selected].path] else { return }
         let now = Date()
-        view.show(usage: MaestroStatus.label(MaestroStatus.load(), now: now))
+        let usage = MaestroStatus.load()
+        view.show(usage: MaestroStatus.label(usage, now: now))
         view.show(model: MaestroStatus.model(for: projects[selected].path))
+        tabBar.show(chips: ProviderChips.derive(runs: runs, usage: usage, now: now))
     }
 
     /// Redraws the usage figure whenever the maestro's status line writes a
@@ -264,6 +346,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         let work = DispatchWorkItem { [weak self] in
             self?.usageDebounce = nil
             self?.refreshMaestroStatus()
+            self?.refreshAttention()
         }
         usageDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
@@ -273,9 +356,12 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func occlusionChanged(_ notification: Notification) {
         feed.setVisible(window?.occlusionState.contains(.visible) ?? false)
+        showAttention(now: Date())
     }
 
     func windowWillClose(_ notification: Notification) {
+        attentionTick?.cancel()
+        attentionTick = nil
         usageDebounce?.cancel()
         usageDebounce = nil
         feed.setVisible(false)
