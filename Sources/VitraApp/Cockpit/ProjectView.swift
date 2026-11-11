@@ -56,6 +56,14 @@ final class ProjectView: NSView {
     private let tabs = SideTabs()
     private let tabSlot = NSView()
     private let ranking = RankingView()
+    /// Works out the Resumo tab off the main thread, for this project.
+    var loadResumo: ((@escaping @MainActor @Sendable (Resumo) -> Void) -> Void)?
+    private let resumo = ResumoView()
+    /// What the runs looked like when the Resumo was last worked out: a clock
+    /// that moves is no reason to read 2,000 runs again, a run that ends is.
+    private var resumoSignature: Int?
+    private var resumoReload: DispatchWorkItem?
+    private static let resumoDelay: TimeInterval = 0.5
     private lazy var git: GitPanel = {
         let panel = GitPanel(path: project.path)
         panel.onOpenURL = { [weak self] url in self?.usersBrowser().load(url) { _ in } }
@@ -354,6 +362,10 @@ final class ProjectView: NSView {
             // ponytail: read when the tab is opened, not live; reopen the tab
             // to refresh. Follow the run feed if that ever matters.
             loadRanking? { [weak self] scores in self?.ranking.show(WorkerBoard.ranking(scores)) }
+        case .resumo:
+            content = resumo
+            resumoSignature = nil
+            reloadResumo()
         case .browser:
             // Opened by hand with nothing in it: a tab of the user's own.
             if browserTabs.current == nil { _ = browserTabs.openUsers(now: Date()) }
@@ -384,6 +396,32 @@ final class ProjectView: NSView {
         // Off before on: both held at once cannot be satisfied.
         (tab.isWide ? sideNarrow : sideWide)?.isActive = false
         (tab.isWide ? sideWide : sideNarrow)?.isActive = true
+    }
+
+    /// The run feed changed. While the Resumo is on screen it is worked out
+    /// again, half a second after the last change that matters to it; it is
+    /// never worked out on a timer, nor while another tab is shown.
+    func runsChanged(_ runs: [Run]) {
+        var hasher = Hasher()
+        for run in runs {
+            hasher.combine(run.id)
+            hasher.combine(String(describing: run.state))
+            hasher.combine(run.rating?.score)
+        }
+        let signature = hasher.finalize()
+        guard tabs.selected == .resumo, signature != resumoSignature else { return }
+        resumoSignature = signature
+        resumoReload?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.reloadResumo() }
+        resumoReload = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.resumoDelay, execute: work)
+    }
+
+    private func reloadResumo() {
+        loadResumo? { [weak self] made in
+            guard let self, self.tabs.selected == .resumo else { return }
+            self.resumo.show(made)
+        }
     }
 
     /// Comments written on deliveries, kept for the session: a review is

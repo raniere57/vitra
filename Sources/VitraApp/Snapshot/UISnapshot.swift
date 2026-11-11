@@ -60,6 +60,17 @@ enum UISnapshot {
             view.show(WorkerBoard.ranking(context.fixtures.rankingScores()))
             return view
         }),
+        Shot(name: "resumo", size: NSSize(width: 420, height: 1100), build: { context in
+            let view = ResumoView()
+            view.show(context.fixtures.resumo())
+            return view
+        }),
+        Shot(name: "resumo-expanded", size: NSSize(width: 420, height: 1100), build: { context in
+            let view = ResumoView()
+            view.show(context.fixtures.resumo())
+            view.expand(SnapshotFixtures.resumoExpanded)
+            return view
+        }),
         Shot(name: "git", size: NSSize(width: 420, height: 720), build: { context in
             let panel = GitPanel(path: context.fixtures.path)
             panel.show(context.fixtures.gitEvents())

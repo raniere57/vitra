@@ -443,7 +443,7 @@ public enum WorkerPicker {
     /// hour from the last. A run that delivered, even one rated poorly, closes
     /// it, as does the time passing. A run stopped by the user, one still
     /// going and one whose provider failed are not verdicts either way.
-    static func resting(_ history: [Run], now: Date) -> [ModelCatalog.Offer: Date] {
+    public static func resting(_ history: [Run], now: Date) -> [ModelCatalog.Offer: Date] {
         let judged = history.filter { run in
             guard run.providerFailure == nil else { return false }
             switch run.state {

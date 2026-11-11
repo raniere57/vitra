@@ -95,11 +95,13 @@ struct SnapshotFixtures {
         )
     }
 
-    private func run(
+    func run(
         _ id: String, _ model: String, _ cli: WorkerCLI, effort: String? = nil, label: String?, kind: TaskKind,
         access: WorkerAccess = .read, state: Run.State = .finished(exitCode: 0), ago: TimeInterval, took: TimeInterval = 0,
         cost: Double = 0, tokens: (Int, Int) = (0, 0), score: Int? = nil, note: String? = nil, isError: Bool = false,
-        answer: String? = nil, branch: String? = nil, silent: TimeInterval? = nil, difficulty: Difficulty? = nil
+        answer: String? = nil, branch: String? = nil, silent: TimeInterval? = nil, difficulty: Difficulty? = nil,
+        project: String? = nil, pick: PickReason? = nil, providerFailure: ProviderFailure? = nil,
+        redoOf: String? = nil, retryOf: String? = nil
     ) -> Run {
         let started = now.addingTimeInterval(-ago)
         let isRunning = state == .running
@@ -109,7 +111,7 @@ struct SnapshotFixtures {
             id: id,
             spec: WorkerSpec(
                 cli: cli, model: model, prompt: label ?? "tarefa", directory: path, access: access,
-                label: label, kind: kind, effort: effort, project: path, difficulty: difficulty
+                label: label, kind: kind, effort: effort, project: project ?? path, difficulty: difficulty
             ),
             state: state,
             pid: isRunning ? 4242 : nil,
@@ -121,7 +123,12 @@ struct SnapshotFixtures {
             errorTail: nil,
             branch: branch,
             rating: score.map { Rating(score: $0, note: note, rated: started.addingTimeInterval(took + 30)) },
-            silentFor: isRunning ? silent : nil
+            silentFor: isRunning ? silent : nil,
+            providerFailure: providerFailure,
+            wasPicked: pick != nil,
+            pick: pick,
+            retryOf: retryOf,
+            redoOf: redoOf
         )
     }
 

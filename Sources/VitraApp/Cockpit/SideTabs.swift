@@ -2,13 +2,14 @@ import AppKit
 
 /// What the right side of a project can show.
 enum SideTab: String, CaseIterable {
-    case palco, workers, ranking, browser, files, git, terminal
+    case palco, workers, ranking, resumo, browser, files, git, terminal
 
     var title: String {
         switch self {
         case .palco: return "Palco"
         case .workers: return "Workers"
         case .ranking: return "Ranking"
+        case .resumo: return "Resumo"
         case .browser: return "Navegador"
         case .files: return "Arquivos"
         case .git: return "Git"
@@ -16,13 +17,14 @@ enum SideTab: String, CaseIterable {
         }
     }
 
-    /// The tab's picture: seven names do not fit the narrow panel with any
+    /// The tab's picture: eight names do not fit the narrow panel with any
     /// air, so only the selected tab spells its name out.
     var symbol: String {
         switch self {
         case .palco: return "atom"
         case .workers: return "person.2"
         case .ranking: return "list.number"
+        case .resumo: return "chart.bar"
         case .browser: return "globe"
         case .files: return "folder"
         case .git: return "arrow.triangle.branch"

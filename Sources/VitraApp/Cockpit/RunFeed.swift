@@ -80,6 +80,18 @@ final class RunFeed: @unchecked Sendable {
         }
     }
 
+    /// Works out the Resumo tab for `project` from the whole history on disk
+    /// and the subscription's usage, on the feed's queue: like the ranking it
+    /// reads every run there is, so only when the tab is looked at.
+    func resumo(for project: CockpitProject, _ completion: @escaping @MainActor @Sendable (Resumo) -> Void) {
+        queue.async { [self] in
+            let resumo = Resumo.make(
+                runs: orchestrator.recent(limit: Self.scored), project: project, usage: MaestroStatus.load(), now: Date()
+            )
+            DispatchQueue.main.async { MainActor.assumeIsolated { completion(resumo) } }
+        }
+    }
+
     /// Stops the given workers, then reports what is left.
     func cancel(_ ids: [String]) {
         queue.async { [self] in

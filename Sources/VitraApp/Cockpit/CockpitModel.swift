@@ -310,7 +310,7 @@ enum WorkerBoard {
     }
 
     /// A model as a row has room for it: without its provider, with its effort.
-    private static func shortName(_ model: String, effort: String?) -> String {
+    static func shortName(_ model: String, effort: String?) -> String {
         (model.split(separator: "/").last.map(String.init) ?? model) + (effort.map { " (\($0))" } ?? "")
     }
 
@@ -367,7 +367,7 @@ enum WorkerBoard {
         }
     }
 
-    private static func firstLine(_ text: String) -> String {
+    static func firstLine(_ text: String) -> String {
         let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
         return line.trimmingCharacters(in: .whitespaces)
     }

@@ -530,7 +530,7 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
 }
 
 @Test @MainActor func theTabsOfTheSideAreNamedAndOnlyAPageOrAFileTakesHalfTheWindow() {
-    #expect(SideTab.allCases.map(\.title) == ["Palco", "Workers", "Ranking", "Navegador", "Arquivos", "Git", "Terminal"])
+    #expect(SideTab.allCases.map(\.title) == ["Palco", "Workers", "Ranking", "Resumo", "Navegador", "Arquivos", "Git", "Terminal"])
     #expect(SideTab.allCases.filter(\.isWide) == [.browser, .files, .terminal])
     _ = NSApplication.shared
     let tabs = SideTabs()

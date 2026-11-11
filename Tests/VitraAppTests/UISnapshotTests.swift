@@ -18,7 +18,7 @@ import Testing
 
     let expected = [
         "window-1440", "window-min", "workers", "ranking", "git", "files", "recent-images", "browser-tabs", "preview-header", "quit-hold",
-        "stage", "stage-empty", "stage-reduced-motion",
+        "stage", "stage-empty", "stage-reduced-motion", "resumo", "resumo-expanded",
     ]
     #expect(Set(expected).isSubset(of: Set(UISnapshot.shots.map(\.name))))
     #expect(files.count == UISnapshot.shots.count)
