@@ -137,7 +137,7 @@ enum UISnapshot {
             QuitHold().show(in: context.window)
             return nil
         }),
-    ]
+    ] + leituraShots
 
     /// Writes every picture into `directory`, which is created if need be, and
     /// returns the files in the order of `shots`.

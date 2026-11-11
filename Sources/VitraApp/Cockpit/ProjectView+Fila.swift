@@ -1,5 +1,6 @@
 import AppKit
 import os
+import VitraCore
 
 /// The Fila: prompts lined up for the maestro, sent one per finished turn.
 ///
@@ -76,16 +77,31 @@ extension ProjectView {
     /// queue only once it has gone: with no program to take it, it stays.
     private func sendHead(to terminal: TerminalView) {
         guard let prompt = promptQueue.first, terminal.session.isRunningProgram else { return }
-        let session = terminal.session
-        session.paste(prompt.text)
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.submitDelay) {
-            session.send(text: "\r")
-        }
+        submit(prompt.text, to: terminal.session)
         promptQueue.remove(prompt.id)
         saveQueue()
         queueDrawer.show(promptQueue)
         queueDrawer.showSent(prompt)
         onQueueChange?()
+    }
+
+    /// `text` into the maestro's input as a paste — a multi-line message
+    /// arrives whole — and Return a moment later. The one way anything is
+    /// typed to the maestro on the user's behalf: the Fila and Leitura's
+    /// composer both go through it.
+    func submit(_ text: String, to session: TerminalSession) {
+        session.paste(text)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.submitDelay) {
+            session.send(text: "\r")
+        }
+    }
+
+    /// Leitura's "pôr na Fila": the message at the end of the queue, sent
+    /// when a turn ends like any other.
+    func enqueue(_ text: String) {
+        guard promptQueue.add(text, now: Date()) != nil else { return }
+        queueEdited(promptQueue)
+        queueDrawer.show(promptQueue)
     }
 
     /// The queue as given, for the snapshot tool: never saved.

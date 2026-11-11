@@ -85,6 +85,7 @@ extension ProjectView {
             return
         }
         offerQueue(.transition(from: previous, to: state))
+        leituraAttentionChanged(to: state)
     }
 
     /// Ends the maestro and starts it again in the same conversation, told

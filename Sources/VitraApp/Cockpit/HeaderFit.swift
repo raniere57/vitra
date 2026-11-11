@@ -6,14 +6,18 @@ import AppKit
 /// The header must never be wider than its pane, or it pushes the side panel
 /// off the window. What gives way, first to last: the session name, the usage
 /// figure (the tab bar's chip says it too), the path, the long label of the
-/// mode switch, the branch, and last the words of the update pill — its
-/// button stays. Title, mode switch, model and "waiting for you" never go.
+/// mode switch, the words of the Terminal · Leitura switch (its two icons
+/// stay), the branch, and last the words of the update pill — its button
+/// stays. Title, both switches, model and "waiting for you" never go.
 struct HeaderFit: Equatable {
     /// Each plate's natural width; nil for one that has nothing to show.
     struct Widths {
         var title: CGFloat
         var modeFull: CGFloat
         var modeShort: CGFloat
+        /// The Terminal · Leitura switch with its words, and as two icons.
+        var readingFull: CGFloat = 0
+        var readingCompact: CGFloat = 0
         var model: CGFloat
         var attention: CGFloat?
         /// The update pill with its words, and with its button alone.
@@ -25,11 +29,13 @@ struct HeaderFit: Equatable {
     }
 
     var abbreviatesMode = false
+    var compactsReading = false
     var compactsUpdate = false
     var showsUsage = true
     var showsSession = true
     var showsPlace = true
     var showsBranch = true
+    var showsTitle = true
 
     static let sessionMinWidth: CGFloat = 96
     static let placeMinWidth: CGFloat = 56
@@ -51,8 +57,10 @@ struct HeaderFit: Equatable {
             { $0.showsUsage = false },
             { $0.showsPlace = false },
             { $0.abbreviatesMode = true },
+            { $0.compactsReading = true },
             { $0.showsBranch = false },
             { $0.compactsUpdate = true },
+            { $0.showsTitle = false },
         ]
         for step in steps where fit.needs(widths) > width {
             step(&fit)
@@ -75,7 +83,10 @@ struct HeaderFit: Equatable {
     /// The width these choices take: the plates, the gaps between those
     /// shown, the spacer, and the path and session at their minimum.
     func needs(_ widths: Widths) -> CGFloat {
-        var plates: [CGFloat] = [widths.title, abbreviatesMode ? widths.modeShort : widths.modeFull, widths.model]
+        var plates: [CGFloat] = showsTitle ? [widths.title] : []
+        plates.append(abbreviatesMode ? widths.modeShort : widths.modeFull)
+        if widths.readingFull > 0 { plates.append(compactsReading ? widths.readingCompact : widths.readingFull) }
+        plates.append(widths.model)
         if let attention = widths.attention { plates.append(attention) }
         if let update = compactsUpdate ? widths.updateCompact : widths.update { plates.append(update) }
         if showsUsage, let usage = widths.usage { plates.append(usage) }
@@ -83,7 +94,7 @@ struct HeaderFit: Equatable {
         plates.append(0) // the spacer
         if showsPlace { plates.append(Self.placeMinWidth) }
         if showsBranch, let branch = widths.branch { plates.append(branch) }
-        let gaps = CGFloat(plates.count - 1) * Self.gap + (Self.titleGap - Self.gap)
+        let gaps = CGFloat(plates.count - 1) * Self.gap + (showsTitle ? Self.titleGap - Self.gap : 0)
         return 2 * Self.inset + plates.reduce(0, +) + gaps
     }
 }

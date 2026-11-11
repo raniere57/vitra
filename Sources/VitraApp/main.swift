@@ -71,6 +71,14 @@ if CommandLine.arguments.dropFirst().first == "snapshot" {
     }
 }
 
+// `VITRA_LEITURA_CHECK=1 Vitra leitura-check <file.jsonl>…`: the transcript
+// reader over real files, printing only numbers. A developer's tool, so it
+// answers only with the variable set.
+if CommandLine.arguments.dropFirst().first == "leitura-check", ProcessInfo.processInfo.environment["VITRA_LEITURA_CHECK"] == "1" {
+    MainActor.assumeIsolated { LeituraCheck.run(Array(CommandLine.arguments.dropFirst(2))) }
+    exit(0)
+}
+
 // The cockpit is the app now. The classic terminal is still in the binary for
 // whoever needs it, behind a flag, until nothing misses it.
 let application = NSApplication.shared

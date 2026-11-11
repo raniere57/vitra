@@ -135,6 +135,8 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     @objc func focusMaestro(_ sender: Any?) { current?.focusTerminal() }
     @objc func focusSidePanel(_ sender: Any?) { current?.focusSidePanel() }
     @objc func toggleSideWidth(_ sender: Any?) { current?.toggleSideWidth() }
+    /// ⌘L: the maestro's pane as the terminal or as Leitura.
+    @objc func toggleReading(_ sender: Any?) { current?.toggleReading() }
 
     @objc func toggleSidePanel(_ sender: Any?) {
         guard let current else { return }
@@ -241,6 +243,11 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         view.onSideHiddenChange = { [weak self] hidden in
             guard let self, let index = self.projects.firstIndex(where: { $0.path == project.path }) else { return }
             self.projects[index].sidePanelHidden = hidden
+            self.save()
+        }
+        view.onReadingChange = { [weak self] reading in
+            guard let self, let index = self.projects.firstIndex(where: { $0.path == project.path }) else { return }
+            self.projects[index].isReading = reading
             self.save()
         }
         view.onQueueChange = { [weak self] in

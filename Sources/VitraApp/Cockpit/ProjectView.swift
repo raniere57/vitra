@@ -206,6 +206,18 @@ final class ProjectView: NSView {
     /// The header row, for the tests that hold it inside its pane.
     private(set) var header: NSStackView?
 
+    // MARK: Leitura
+
+    /// The maestro's pane shows Leitura instead of the terminal (⌘L).
+    var isReading: Bool
+    /// Called when the pane switches between Terminal and Leitura; persisted.
+    var onReadingChange: ((Bool) -> Void)?
+    /// Made the first time it is shown; the terminal never waits on it.
+    lazy var leitura: LeituraView = makeLeitura()
+    lazy var readingSwitch: NSSegmentedControl = makeReadingSwitch()
+    /// The switch with its words and as two icons, measured once.
+    lazy var readingWidths: (full: CGFloat, compact: CGFloat) = measureReadingSwitch()
+
     // MARK: Bringing a surviving maestro up to the new build
 
     /// Where the maestro stands against the installed build.
@@ -240,6 +252,7 @@ final class ProjectView: NSView {
         self.project = project
         self.mode = project.mode
         self.isSideHidden = project.sidePanelHidden
+        self.isReading = project.isReading
         self.kit = kit
         // The snapshot tool must neither read nor write the user's queues.
         self.queueStore = startsTerminal ? PromptQueueStore.directory : nil
@@ -250,6 +263,7 @@ final class ProjectView: NSView {
         build()
         if showsHint ?? !FirstRunHint().isDismissed { addHint() }
         applySideWidth()
+        if isReading { applyReading() }
         guard startsTerminal else { return }
         startHousekeeping()
         startTerminal(launchingMaestro: true)
@@ -294,6 +308,7 @@ final class ProjectView: NSView {
         session.toolTip = current?.session
         sessionName = current?.session
         palco.show(model: current)
+        if isReading { leitura.sessionMayHaveChanged() }
         fitHeader()
     }
 
@@ -309,6 +324,8 @@ final class ProjectView: NSView {
         // The mode switch never clips, but it can say less: at the narrowest
         // window its first segment is abbreviated.
         modeControl.setLabel(fit.abbreviatesMode ? "Orq." : "Orquestrador", forSegment: 0)
+        showReadingSwitch(compact: fit.compactsReading)
+        titleLabel.isHidden = !fit.showsTitle
         usagePill.isHidden = !fit.showsUsage
         sessionPill.isHidden = !fit.showsSession
         place.isHidden = !fit.showsPlace
@@ -322,6 +339,8 @@ final class ProjectView: NSView {
             title: titleLabel.fittingSize.width,
             modeFull: modeWidths.full,
             modeShort: modeWidths.short,
+            readingFull: readingWidths.full,
+            readingCompact: readingWidths.compact,
             model: modelPill.fittingSize.width,
             attention: attention.stringValue.isEmpty ? nil : attentionPill.fittingSize.width,
             update: updateState.phase == .current ? nil : updatePill.widths.full,
@@ -346,6 +365,8 @@ final class ProjectView: NSView {
 
     /// Hands the keyboard to the maestro.
     func focusTerminal() {
+        // In Leitura, "the maestro" is the composer that talks to it.
+        if isReading { return leitura.focusComposer() }
         guard let terminal else { return }
         window?.makeFirstResponder(terminal)
     }
@@ -353,7 +374,8 @@ final class ProjectView: NSView {
     /// Stops or resumes drawing, for a project whose tab is not the one shown.
     /// The maestro keeps running either way.
     func setShown(_ shown: Bool) {
-        terminal?.setDrawingActive(shown)
+        terminal?.setDrawingActive(shown && !isReading)
+        if isReading { leitura.setVisible(shown) }
         if shown { refreshPlace() }
         // The Git tab re-reads the repository on a timer; not for a project
         // nobody is looking at.
@@ -539,12 +561,14 @@ final class ProjectView: NSView {
 
     /// ⌘F: the find bar over the maestro's terminal.
     func showFind() {
+        if isReading { return leitura.showFind() }
         guard let terminal else { return }
         find.open(over: terminal, in: terminalSlot)
     }
 
     /// ⌘G and ⌘⇧G; the bar is opened first if it was put away.
     func findStep(forward: Bool) {
+        if isReading { return leitura.findStep(forward: forward) }
         guard find.isOpen else {
             showFind()
             return
@@ -870,6 +894,8 @@ final class ProjectView: NSView {
             view.layoutSubtreeIfNeeded()
             terminalSlot.addFilling(view)
             terminal = view
+            // Under Leitura, a fresh terminal is not drawn.
+            if isReading { view.setDrawingActive(false) }
 
             if let hosted {
                 // Only a shell that is new gets the maestro typed into it. One
@@ -889,7 +915,7 @@ final class ProjectView: NSView {
             }
             session.start()
             if hosted == nil, launchingMaestro { launchMaestro(in: session) }
-            if window != nil { focusTerminal() }
+            if window != nil, !isReading { focusTerminal() }
         } catch {
             showFailure("Não deu para abrir o terminal: \(error.localizedDescription)")
         }
@@ -994,7 +1020,7 @@ final class ProjectView: NSView {
     /// A click in either of this project's terminals: a file into Arquivos,
     /// a folder into the file list, a page into Navegador. Command skips the
     /// panel and opens whatever it is in the system default.
-    private func openTerminalLink(_ url: URL, external: Bool) {
+    func openTerminalLink(_ url: URL, external: Bool) {
         if external {
             NSWorkspace.shared.open(url)
             return
@@ -1143,7 +1169,8 @@ final class ProjectView: NSView {
         modeControl.setContentCompressionResistancePriority(.required, for: .horizontal)
         updatePill.onUpdate = { [weak self] in self?.updateMaestro(asking: true) }
         updatePill.onCancel = { [weak self] in self?.cancelArmedUpdate() }
-        let header = MaestroHeader(views: [title, modeControl, modelPill, attentionPill, updatePill, usagePill, sessionPill, NSView(), place, branchPill])
+        readingSwitch.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let header = MaestroHeader(views: [title, modeControl, readingSwitch, modelPill, attentionPill, updatePill, usagePill, sessionPill, NSView(), place, branchPill])
         self.header = header
         header.spacing = CockpitStyle.Space.md
         header.setCustomSpacing(CockpitStyle.Space.lg, after: title)

@@ -122,7 +122,8 @@ struct Shortcut {
             Shortcut(menu: .go, title: "Focar o maestro", chord: chord("j"), action: #selector(CockpitWindowController.focusMaestro(_:)), separatorBefore: true),
             Shortcut(menu: .go, title: "Focar o painel lateral", chord: chord("j", [.command, .shift]), action: #selector(CockpitWindowController.focusSidePanel(_:))),
 
-            Shortcut(menu: .view, title: "Alternar largura do painel", chord: chord("\\"), action: #selector(CockpitWindowController.toggleSideWidth(_:))),
+            Shortcut(menu: .view, title: "Alternar Terminal e Leitura", chord: chord("l"), action: #selector(CockpitWindowController.toggleReading(_:))),
+            Shortcut(menu: .view, title: "Alternar largura do painel", chord: chord("\\"), action: #selector(CockpitWindowController.toggleSideWidth(_:)), separatorBefore: true),
             Shortcut(menu: .view, title: "Ocultar ou mostrar o painel", chord: chord("\\", [.command, .shift]), action: #selector(CockpitWindowController.toggleSidePanel(_:))),
 
             Shortcut(menu: .window, title: "Minimizar", chord: chord("m"), action: #selector(NSWindow.performMiniaturize(_:))),

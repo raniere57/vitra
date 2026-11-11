@@ -120,7 +120,7 @@ struct MaestroUpdateStateTests {
 struct HeaderFitTests {
     /// Every plate present, the update pill among them.
     private let crowded = HeaderFit.Widths(
-        title: 52, modeFull: 140, modeShort: 92, model: 100, attention: 150,
+        title: 52, modeFull: 140, modeShort: 92, readingFull: 130, readingCompact: 62, model: 100, attention: 150,
         update: 160, updateCompact: 76, usage: 82, hasSession: true, branch: 64
     )
 
@@ -137,6 +137,19 @@ struct HeaderFitTests {
         // Narrower and narrower: the update pill's words are the very last.
         let narrow = HeaderFit.fit(width: 400, crowded)
         #expect(narrow.compactsUpdate && !narrow.showsBranch && !narrow.showsUsage && narrow.abbreviatesMode)
+        #expect(narrow.compactsReading)
+    }
+
+    /// The Terminal · Leitura switch gives way to icons after the mode's
+    /// long label, and before the branch.
+    @Test func readingSwitchBecomesIconsAfterTheModeLabel() {
+        var fit = HeaderFit(showsUsage: false, showsSession: false, showsPlace: false)
+        fit.abbreviatesMode = true
+        let justBeforeIcons = fit.needs(crowded)
+        let icons = HeaderFit.fit(width: justBeforeIcons - 1, crowded)
+        #expect(icons.abbreviatesMode && icons.compactsReading && icons.showsBranch)
+        let words = HeaderFit.fit(width: justBeforeIcons, crowded)
+        #expect(!words.compactsReading)
     }
 
     @Test func fitsTheMinimumPaneWithTheUpdatePill() {

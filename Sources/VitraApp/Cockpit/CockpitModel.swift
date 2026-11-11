@@ -26,16 +26,21 @@ struct CockpitProject: Codable, Equatable {
     /// Kept per project: one is watched, another only talked to.
     var sidePanelHidden: Bool
 
-    init(path: String, session: String? = nil, mode: MaestroMode = .orchestrator, sidePanelHidden: Bool = false) {
+    /// The maestro's pane shows Leitura, the conversation rendered to be
+    /// read, instead of the terminal (⌘L). Kept per project, like the panel.
+    var isReading: Bool
+
+    init(path: String, session: String? = nil, mode: MaestroMode = .orchestrator, sidePanelHidden: Bool = false, isReading: Bool = false) {
         // One spelling per directory, so a trailing slash never makes a
         // second tab for the same place.
         self.path = path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
         self.session = session
         self.mode = mode
         self.sidePanelHidden = sidePanelHidden
+        self.isReading = isReading
     }
 
-    private enum CodingKeys: String, CodingKey { case path, session, mode, sidePanelHidden }
+    private enum CodingKeys: String, CodingKey { case path, session, mode, sidePanelHidden, isReading }
 
     /// Files saved before the mode existed, or with one this build does not
     /// know, open in the orchestrator mode.
@@ -45,7 +50,8 @@ struct CockpitProject: Codable, Equatable {
             path: try container.decode(String.self, forKey: .path),
             session: try container.decodeIfPresent(String.self, forKey: .session),
             mode: (try? container.decodeIfPresent(MaestroMode.self, forKey: .mode)) ?? .orchestrator,
-            sidePanelHidden: (try? container.decodeIfPresent(Bool.self, forKey: .sidePanelHidden)) ?? false
+            sidePanelHidden: (try? container.decodeIfPresent(Bool.self, forKey: .sidePanelHidden)) ?? false,
+            isReading: (try? container.decodeIfPresent(Bool.self, forKey: .isReading)) ?? false
         )
     }
 

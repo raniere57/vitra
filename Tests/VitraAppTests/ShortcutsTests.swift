@@ -42,7 +42,7 @@ struct ShortcutsTests {
 
     @Test func requestedChordsArePresent() {
         let glyphs = Set(chords.map(\.glyphs))
-        for expected in ["⌃⇥", "⌃⇧⇥", "⌥⌘←", "⌥⌘→", "⌘J", "⇧⌘J", "⌘\\", "⇧⌘\\", "⌘K", "⌘/", "⌘F", "⌘G", "⇧⌘G", "⌘O", "⇧⌘⏎"] {
+        for expected in ["⌃⇥", "⌃⇧⇥", "⌥⌘←", "⌥⌘→", "⌘J", "⇧⌘J", "⌘\\", "⇧⌘\\", "⌘K", "⌘/", "⌘F", "⌘G", "⇧⌘G", "⌘O", "⇧⌘⏎", "⌘L"] {
             #expect(glyphs.contains(expected), "\(expected) is missing")
         }
     }

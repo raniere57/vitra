@@ -21,6 +21,7 @@ import Testing
         "stage", "stage-empty", "stage-reduced-motion", "resumo", "resumo-provider", "resumo-expanded",
         "welcome", "welcome-min", "shortcuts", "find", "window-hint",
         "update-outdated", "update-armed", "fila-expanded", "fila-collapsed",
+        "leitura", "leitura-min", "leitura-activity", "leitura-table", "leitura-empty", "leitura-permission",
     ]
     #expect(Set(expected).isSubset(of: Set(UISnapshot.shots.map(\.name))))
     #expect(files.count == UISnapshot.shots.count)
