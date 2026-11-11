@@ -316,15 +316,26 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func tabs(now: Date) -> [CockpitTabBar.Tab] {
-        projects.map {
-            CockpitTabBar.Tab(
+        // The project in front of the user is seen as it stands.
+        if window?.isKeyWindow == true, projects.indices.contains(selected) {
+            seenAt[projects[selected].path] = now
+        }
+        return projects.map {
+            let record = attention[$0.path]
+            return CockpitTabBar.Tab(
                 name: $0.name,
                 running: WorkerBoard.runningCount(WorkerBoard.runs(runs, in: $0)),
-                callsForYou: AttentionPolicy.isCalling(attention[$0.path], now: now),
+                callsForYou: record?.state == .needsPermission,
+                maestroWorking: record?.state == .working,
+                finishedUnseen: AttentionPolicy.isUnseen(record, seen: seenAt[$0.path], now: now),
                 queued: views[$0.path]?.promptQueue.count ?? 0
             )
         }
     }
+
+    /// When the user last had each project in front of them, so that a turn
+    /// that ended is news only until it has been looked at.
+    private var seenAt: [String: Date] = [:]
 
     // MARK: - Waiting for the user
 
@@ -433,6 +444,11 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     @objc private func occlusionChanged(_ notification: Notification) {
         feed.setVisible(window?.occlusionState.contains(.visible) ?? false)
         showAttention(now: Date())
+    }
+
+    /// Coming back to the window is looking at the project in front.
+    func windowDidBecomeKey(_ notification: Notification) {
+        refresh()
     }
 
     func windowWillClose(_ notification: Notification) {

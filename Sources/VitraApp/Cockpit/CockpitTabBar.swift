@@ -7,8 +7,15 @@ final class CockpitTabBar: NSView {
         let name: String
         /// How many workers are running in the project right now.
         let running: Int
-        /// The maestro is waiting on the user: the dot turns amber and pulses.
+        /// The maestro stopped for a permission: the dot pulses amber until
+        /// it is answered.
         var callsForYou = false
+        /// The maestro is in the middle of a turn: a steady amber dot, the
+        /// same as while workers run.
+        var maestroWorking = false
+        /// The maestro finished a turn the user has not looked at yet: the
+        /// dot pulses green, and goes out once the project is opened.
+        var finishedUnseen = false
         /// Prompts in the project's Fila: "+3" after the worker count, the
         /// first thing the bar gives up when tight.
         var queued = 0
@@ -151,17 +158,19 @@ private final class TabView: NSView {
         )
         name.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         var views: [NSView] = [name]
-        if tab.running > 0 || tab.callsForYou {
-            // Amber both for "workers running" and "waiting for you"; only the
-            // second pulses.
-            let dot = NSView.filled(CockpitStyle.accent, cornerRadius: CockpitStyle.Radius.dot)
+        if tab.running > 0 || tab.callsForYou || tab.maestroWorking || tab.finishedUnseen {
+            // One meaning per look: steady amber is work going on; pulsing
+            // amber is a permission asked; pulsing green is a turn that ended
+            // and has not been seen. A project that is idle and seen has no dot.
+            let isDone = tab.finishedUnseen && !tab.callsForYou
+            let dot = NSView.filled(isDone ? CockpitStyle.success : CockpitStyle.accent, cornerRadius: CockpitStyle.Radius.dot)
             dot.widthAnchor.constraint(equalToConstant: 2 * CockpitStyle.Radius.dot).isActive = true
             dot.heightAnchor.constraint(equalToConstant: 2 * CockpitStyle.Radius.dot).isActive = true
             views = [dot, name]
             if tab.running > 0 {
                 views.append(NSTextField.label("\(tab.running)", font: CockpitStyle.meta, color: CockpitStyle.muted))
             }
-            if tab.callsForYou { pulsingDot = dot }
+            if tab.callsForYou || tab.finishedUnseen { pulsingDot = dot }
         }
         if tab.queued > 0 {
             queueLabel.stringValue = "+\(tab.queued)"
@@ -189,7 +198,7 @@ private final class TabView: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         let running = tab.running > 0 ? ", \(tab.running) rodando" : ""
-        let waiting = tab.callsForYou ? ", aguardando você" : ""
+        let waiting = tab.callsForYou ? ", pede permissão" : (tab.finishedUnseen ? ", terminou e aguarda você" : (tab.maestroWorking ? ", trabalhando" : ""))
         let queued = tab.queued > 0 ? ", \(tab.queued) na fila" : ""
         setAccessibilityLabel(tab.name + running + waiting + queued)
         hasQueue = tab.queued > 0

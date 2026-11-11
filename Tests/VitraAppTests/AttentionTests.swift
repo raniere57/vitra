@@ -329,3 +329,19 @@ private let utc = TimeZone(identifier: "UTC")!
     #expect(Maestro.resumePrompt(mode: .orchestrator).contains("agent_wait"))
     #expect(!Maestro.resumePrompt(mode: .solo).contains("agent_wait"))
 }
+
+@Test func aFinishedTurnIsNewsOnlyUntilTheProjectIsLookedAt() {
+    let stopped = Date(timeIntervalSince1970: 9_000)
+    let waiting = AttentionRecord(state: .waiting, message: nil, since: stopped, path: "/p")
+    let later = stopped.addingTimeInterval(60)
+    // Never looked at, or looked at before it stopped: unseen.
+    #expect(AttentionPolicy.isUnseen(waiting, seen: nil, now: later))
+    #expect(AttentionPolicy.isUnseen(waiting, seen: stopped.addingTimeInterval(-30), now: later))
+    // Looked at since: seen.
+    #expect(!AttentionPolicy.isUnseen(waiting, seen: stopped.addingTimeInterval(10), now: later))
+    // Not yet past the quiet period, working, or asking: not this signal.
+    #expect(!AttentionPolicy.isUnseen(waiting, seen: nil, now: stopped.addingTimeInterval(1)))
+    let working = AttentionRecord(state: .working, message: nil, since: stopped, path: "/p")
+    #expect(!AttentionPolicy.isUnseen(working, seen: nil, now: later))
+    #expect(!AttentionPolicy.isUnseen(nil, seen: nil, now: later))
+}

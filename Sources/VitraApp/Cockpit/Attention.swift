@@ -206,6 +206,16 @@ enum AttentionPolicy {
         }
     }
 
+    /// Whether a turn ended that the user has not looked at: the maestro is
+    /// waiting, has been for the quiet period, and the project has not been
+    /// in front of the user since it stopped.
+    static func isUnseen(_ record: AttentionRecord?, seen: Date?, now: Date) -> Bool {
+        guard let record, record.state == .waiting,
+              now.timeIntervalSince(record.since) >= quietPeriod
+        else { return false }
+        return seen.map { $0 < record.since } ?? true
+    }
+
     /// Seconds until a `waiting` record starts calling, or nil when it never will.
     static func untilCalling(_ record: AttentionRecord?, now: Date) -> TimeInterval? {
         guard record?.state == .waiting, let since = record?.since else { return nil }

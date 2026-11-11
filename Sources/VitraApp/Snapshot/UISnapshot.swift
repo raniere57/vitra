@@ -195,7 +195,7 @@ enum UISnapshot {
         bar.show([
             .init(name: "vitra", running: WorkerBoard.runningCount(runs), callsForYou: AttentionPolicy.isCalling(attention[fixtures.path], now: fixtures.now),
                   queued: project.promptQueue.count),
-            .init(name: "hapto", running: 0, callsForYou: AttentionPolicy.isCalling(attention["hapto"], now: fixtures.now)),
+            .init(name: "hapto", running: 0, finishedUnseen: AttentionPolicy.isCalling(attention["hapto"], now: fixtures.now)),
             .init(name: "docs", running: 0),
         ], selected: 0)
         bar.show(chips: ProviderChips.derive(runs: fixtures.chipRuns(), usage: fixtures.subscription, now: fixtures.now))
