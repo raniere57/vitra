@@ -332,7 +332,7 @@ public enum WorkerPicker {
     }
 
     /// Whether `run` is `offer`: the same CLI, model and effort.
-    static func isRun(_ run: Run, of offer: ModelCatalog.Offer) -> Bool {
+    public static func isRun(_ run: Run, of offer: ModelCatalog.Offer) -> Bool {
         run.spec.cli == offer.cli && run.spec.model == offer.model && run.spec.effort == offer.effort
     }
 
@@ -341,7 +341,7 @@ public enum WorkerPicker {
     /// Whether `offer` is a worker for a hard piece: claude sonnet and opus at
     /// any effort, claude haiku only at high, and the Groks at high or xhigh.
     /// opencode's free models are never strong, and nor is gemini.
-    static func isStrong(_ offer: ModelCatalog.Offer) -> Bool {
+    public static func isStrong(_ offer: ModelCatalog.Offer) -> Bool {
         switch offer.cli {
         case .claude:
             return offer.model != "haiku" || offer.effort == "high"

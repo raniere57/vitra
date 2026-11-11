@@ -119,6 +119,33 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(meta(nil, picked: false) == "deepseek-v4.1-flash-free · 10:46 · 38s · só leitura")
 }
 
+@Test func theEscalacaoShowsEachTiersRecordAndItsDemotions() {
+    let opus = ModelCatalog.Offer(cli: .claude, model: "opus", effort: "low")
+    let sonnet = ModelCatalog.Offer(cli: .claude, model: "sonnet", effort: "high")
+    func rated(_ worker: ModelCatalog.Offer, _ score: Int, seconds: TimeInterval, _ difficulty: Difficulty) -> Run {
+        Run(
+            id: "0123abcd",
+            spec: WorkerSpec(cli: worker.cli, model: worker.model, prompt: "x", directory: "/w", kind: .implement,
+                             effort: worker.effort, difficulty: difficulty),
+            state: .finished(exitCode: 0), pid: 1, started: start, ended: start.addingTimeInterval(seconds),
+            output: WorkerOutput(text: "ok", isError: false, costUSD: 0), errorTail: nil,
+            rating: Rating(score: score, note: nil, rated: start)
+        )
+    }
+    let history = [rated(opus, 3, seconds: 60, .hard), rated(opus, 3, seconds: 80, .hard), rated(opus, 5, seconds: 10, .normal)]
+    let rows = LineupBoard.rows([opus, sonnet], difficulty: .hard, history: history)
+    #expect(rows.map(\.name) == ["opus (low)", "sonnet (high)"])
+    #expect(rows[0].score == "3.0")
+    #expect(rows[0].time == "1m 10s")
+    #expect(rows[0].demotion == "rebaixado: nota 3.7")
+    #expect(rows[1] == LineupRow(worker: sonnet, name: "sonnet (high)", score: "—", time: "—", demotion: nil))
+
+    #expect(LineupBoard.moved([opus, sonnet], from: 0, to: 2) == [sonnet, opus])
+    #expect(LineupBoard.moved([opus, sonnet], from: 1, to: 0) == [sonnet, opus])
+    #expect(LineupBoard.moved([opus, sonnet], from: 0, to: 1) == [opus, sonnet])
+    #expect(LineupBoard.addable([opus, sonnet], to: [opus]) == [sonnet])
+}
+
 @Test func aPickReasonSurvivesInTheRunRecord() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-pick-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: root) }

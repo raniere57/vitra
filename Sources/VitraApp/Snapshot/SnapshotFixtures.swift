@@ -64,11 +64,42 @@ struct SnapshotFixtures {
         return Scoreboard.scores(runs)
     }
 
+    /// The default lineup with a record on it: opus rated poorly on hard
+    /// implementation, so it shows demoted; the user added sonnet to easy.
+    func lineupData() -> LineupData {
+        let table: [(WorkerCLI, String, String?, Difficulty, [Int], Double)] = [
+            (.claude, "opus", "low", .hard, [3, 3], 240),
+            (.claude, "sonnet", "high", .hard, [5, 4, 5], 310),
+            (.cursor, "cursor-grok-4.6-low-fast", nil, .normal, [4, 5, 5, 4], 48),
+            (.claude, "haiku", "low", .normal, [4], 95),
+            (.opencode, "opencode/glm-5.3-flash-free", nil, .easy, [4, 5], 31),
+        ]
+        var history: [Run] = []
+        for (cli, model, effort, difficulty, scores, seconds) in table {
+            for (index, score) in scores.enumerated() {
+                history.append(run(
+                    "l\(history.count)", model, cli, effort: effort, label: nil, kind: .implement,
+                    ago: Double(index + 1) * 3_600, took: seconds + Double(index) * 4, score: score, difficulty: difficulty
+                ))
+            }
+        }
+        let sonnet = ModelCatalog.Offer(cli: .claude, model: "sonnet", effort: "high")
+        let listing = ModelCatalog.Listing(
+            claude: true, openCode: ["opencode/glm-5.3-flash-free", "opencode/deepseek-v4.1-flash-free"],
+            gemini: nil, cursor: ["cursor-grok-4.6-low-fast", "grok-4.7-low-fast", "grok-4.7-high-fast"]
+        )
+        return LineupData(
+            lineup: Lineup.standard.with(.easy, Lineup.standard.easy + [sonnet]),
+            history: history,
+            offers: ModelCatalog.offers(listing)
+        )
+    }
+
     private func run(
         _ id: String, _ model: String, _ cli: WorkerCLI, effort: String? = nil, label: String?, kind: TaskKind,
         access: WorkerAccess = .read, state: Run.State = .finished(exitCode: 0), ago: TimeInterval, took: TimeInterval = 0,
         cost: Double = 0, tokens: (Int, Int) = (0, 0), score: Int? = nil, note: String? = nil, isError: Bool = false,
-        answer: String? = nil, branch: String? = nil, silent: TimeInterval? = nil
+        answer: String? = nil, branch: String? = nil, silent: TimeInterval? = nil, difficulty: Difficulty? = nil
     ) -> Run {
         let started = now.addingTimeInterval(-ago)
         let isRunning = state == .running
@@ -78,7 +109,7 @@ struct SnapshotFixtures {
             id: id,
             spec: WorkerSpec(
                 cli: cli, model: model, prompt: label ?? "tarefa", directory: path, access: access,
-                label: label, kind: kind, effort: effort, project: path
+                label: label, kind: kind, effort: effort, project: path, difficulty: difficulty
             ),
             state: state,
             pid: isRunning ? 4242 : nil,

@@ -313,11 +313,11 @@ public enum Scoreboard {
     }
 
     /// Whether a run did not deliver: it was lost, or its result is an error.
-    static func hasFailed(_ run: Run) -> Bool {
+    public static func hasFailed(_ run: Run) -> Bool {
         run.state == .lost || run.output?.isError == true
     }
 
-    static func median(_ values: [TimeInterval]) -> TimeInterval? {
+    public static func median(_ values: [TimeInterval]) -> TimeInterval? {
         guard !values.isEmpty else { return nil }
         let sorted = values.sorted()
         let middle = sorted.count / 2
