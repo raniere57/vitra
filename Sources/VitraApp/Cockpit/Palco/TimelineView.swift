@@ -14,6 +14,8 @@ final class TimelineView: NSView {
     private static let labelFont = CockpitStyle.meta
     private static let auditFont = CockpitStyle.mono(9)
     private static let axisFont = CockpitStyle.mono(9)
+    /// How far a bar may grow before its sheen's sweep is rebuilt to span it.
+    private static let sweepSlack: CGFloat = 4
 
     var onSelect: ((String) -> Void)?
     var reduceMotion = false
@@ -29,6 +31,8 @@ final class TimelineView: NSView {
         let tick = CALayer()
         var node: StageNode?
         var frame = CGRect.zero
+        /// The bar width the running sweep was built for.
+        var sweptWidth: CGFloat = 0
 
         init(label: CATextLayer) { self.label = label }
     }
@@ -169,7 +173,8 @@ final class TimelineView: NSView {
 
         let sheenWidth = max(min(barFrame.width, 70), 1)
         lane.sheen.frame = CGRect(x: 0, y: 0, width: sheenWidth, height: height)
-        lane.sheen.isHidden = node.outcome != .running
+        // With Reduce Motion there is no sheen at all, moving or not.
+        lane.sheen.isHidden = node.outcome != .running || reduceMotion
 
         if let score = node.score {
             lane.tick.isHidden = false
@@ -242,8 +247,11 @@ final class TimelineView: NSView {
                 lane.sheen.removeAnimation(forKey: "slide")
                 continue
             }
-            guard lane.sheen.animation(forKey: "slide") == nil else { continue }
+            // The bar grows for as long as the run goes on: the sweep is
+            // rebuilt whenever it spans a width a few points off the bar's.
             let width = max(lane.bar.bounds.width, 1)
+            if lane.sheen.animation(forKey: "slide") != nil, abs(width - lane.sweptWidth) <= Self.sweepSlack { continue }
+            lane.sweptWidth = width
             let slide = CABasicAnimation(keyPath: "position.x")
             slide.fromValue = -lane.sheen.bounds.width / 2
             slide.toValue = width + lane.sheen.bounds.width / 2

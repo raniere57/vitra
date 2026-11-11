@@ -203,13 +203,27 @@ enum StageModel {
     }
 
     static func stateText(_ run: Run, _ outcome: StageNode.Outcome, now: Date) -> String {
-        let score = run.rating.map { " \($0.score)/5" } ?? ""
+        // An audit's line is too short for its rating; the card carries it.
+        let score = isAudit(run) ? "" : run.rating.map { " \($0.score)/5" } ?? ""
+        // An audit is a short disc beside its delivery: its verdict, when its
+        // answer's first line gives one, says more than "pronto".
+        if isAudit(run), outcome == .done, let verdict = auditVerdict(run.output?.text) { return verdict }
         switch outcome {
         case .running: return clock(now.timeIntervalSince(run.started))
         case .done: return "pronto" + score
         case .failed: return (run.state == .lost ? "perdido" : "falhou") + score
         case .stopped: return "cancelado"
         }
+    }
+
+    /// "ok", "corrigir" or "não" for an audit whose answer opens with ship,
+    /// ship after fixes, or do not ship; nil when the first line says none.
+    static func auditVerdict(_ answer: String?) -> String? {
+        guard let first = answer?.split(whereSeparator: \.isNewline).first?.lowercased() else { return nil }
+        if first.contains("do not ship") || first.contains("don't ship") || first.contains("not ship") { return "não" }
+        if first.contains("after fixes") || first.contains("with fixes") { return "corrigir" }
+        if first.contains("ship") { return "ok" }
+        return nil
     }
 
     /// "2:14", or "1:02:09" past the hour: narrow enough for under a node.

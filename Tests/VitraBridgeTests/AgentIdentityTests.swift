@@ -124,6 +124,21 @@ private func procargs2(argv: [String], exec: String = "/usr/bin/vitra", padding:
     #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_PANE": "pane-1", "VITRA_RUN": "/x/runs/abcd1234"]) == .worker)
 }
 
+@Test func theSoloRoleWinsOverThePaneAndLosesToAWorker() {
+    #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_ROLE": "solo", "VITRA_PANE": "pane-1"]) == .solo)
+    #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_ROLE": "solo"]) == .solo)
+    #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_ROLE": "solo", "VITRA_AGENT": "abcd1234"]) == .worker)
+}
+
+@Test func soloIsServedThePanelAndNotesWithoutAgents() {
+    let names = MCPTools.tools(for: .solo).compactMap { $0["name"]?.stringValue }
+    #expect(!names.contains { $0.hasPrefix("agent_") })
+    for name in ["browser_open", "terminal_read", "terminal_run", "screen_capture", "preview_file", "memory_read", "memory_add"] {
+        #expect(names.contains(name))
+    }
+    #expect(MCPTools.tools(for: .maestro).contains { $0["name"]?.stringValue == "agent_spawn" })
+}
+
 @Test func anUnknownCallerGetsTheWorkerSet() {
     #expect(AgentIdentity.ServedRole.decide(own: [:]) == .worker)
     #expect(AgentIdentity.ServedRole.decide(own: ["VITRA_ROLE": "something"]) == .worker)

@@ -98,6 +98,90 @@ struct StageGeometry: Equatable {
         return CGPoint(x: inside ? x : point.x - away * reach, y: point.y)
     }
 
+    // MARK: Where a node's words go
+
+    /// Which side of its disc a node carries its label, state and dots on.
+    enum TextSide: CaseIterable, Equatable {
+        case above, below, left, right
+    }
+
+    /// The block of a node's words: label, state line and rating dots.
+    static let textSize = CGSize(width: 84, height: 34)
+    /// From the disc's edge to its words.
+    static let textGap: CGFloat = 3
+    /// The least room between a node's words and any other node or words.
+    static let textClearance: CGFloat = 6
+    /// How far the core's dotted ring reaches past its disc.
+    static let coreRingReach: CGFloat = 12
+
+    /// Where the words of a node at `point` sit on `side`, top-left coordinates.
+    static func textRect(at point: CGPoint, side: TextSide, radius: CGFloat = nodeRadius) -> CGRect {
+        let size = textSize
+        let reach = radius + textGap
+        switch side {
+        case .above: return CGRect(x: point.x - size.width / 2, y: point.y - reach - size.height, width: size.width, height: size.height)
+        case .below: return CGRect(x: point.x - size.width / 2, y: point.y + reach, width: size.width, height: size.height)
+        case .left: return CGRect(x: point.x - reach - size.width, y: point.y - size.height / 2, width: size.width, height: size.height)
+        case .right: return CGRect(x: point.x + reach, y: point.y - size.height / 2, width: size.width, height: size.height)
+        }
+    }
+
+    /// The side each node's words go on, so that they keep `textClearance`
+    /// from every other disc and every other node's words, and stay on the
+    /// stage. A node prefers the side away from the core vertically (above in
+    /// the upper half), then the opposite, then outward, then inward; where
+    /// none is clear, the side with the most room. `discs` holds every disc on
+    /// the stage, audits included; `labelled` the ids that carry words, in the
+    /// order they choose.
+    func textSides(labelled: [String], discs: [(id: String, point: CGPoint, radius: CGFloat)]) -> [String: TextSide] {
+        let stage = CGRect(origin: .zero, size: CGSize(width: size.width, height: trunkY - 8))
+        var chosen: [String: CGRect] = [:]
+        var sides: [String: TextSide] = [:]
+        // The core and its dotted ring are in the way too.
+        let discs = discs + [(id: "", point: center, radius: Self.coreRadius + Self.coreRingReach)]
+        for id in labelled {
+            guard let me = discs.first(where: { $0.id == id }) else { continue }
+            let vertical: [TextSide] = me.point.y < center.y - 8 ? [.above, .below] : [.below, .above]
+            let horizontal: [TextSide] = me.point.x < center.x ? [.left, .right] : [.right, .left]
+            let room = { (side: TextSide) -> CGFloat in
+                let rect = Self.textRect(at: me.point, side: side, radius: me.radius)
+                var least = Self.inset(rect, within: stage)
+                for disc in discs where disc.id != id {
+                    least = min(least, Self.distance(from: rect, to: disc.point) - disc.radius)
+                }
+                for (other, placed) in chosen where other != id {
+                    least = min(least, Self.gap(rect, placed))
+                }
+                return least
+            }
+            let order = vertical + horizontal
+            let side = order.first { room($0) >= Self.textClearance }
+                ?? order.max { room($0) < room($1) }
+                ?? vertical[0]
+            sides[id] = side
+            chosen[id] = Self.textRect(at: me.point, side: side, radius: me.radius)
+        }
+        return sides
+    }
+
+    /// How far `rect` sits inside `bounds`: negative when it pokes out.
+    private static func inset(_ rect: CGRect, within bounds: CGRect) -> CGFloat {
+        min(rect.minX - bounds.minX, rect.minY - bounds.minY, bounds.maxX - rect.maxX, bounds.maxY - rect.maxY) + textClearance
+    }
+
+    static func distance(from rect: CGRect, to point: CGPoint) -> CGFloat {
+        let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
+        let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
+        return hypot(dx, dy)
+    }
+
+    /// The empty space between two rectangles; negative when they overlap.
+    static func gap(_ a: CGRect, _ b: CGRect) -> CGFloat {
+        let dx = max(b.minX - a.maxX, a.minX - b.maxX)
+        let dy = max(b.minY - a.maxY, a.minY - b.maxY)
+        return dx < 0 && dy < 0 ? max(dx, dy) : hypot(max(dx, 0), max(dy, 0))
+    }
+
     // MARK: The trunk
 
     var trunkY: CGFloat { size.height - 18 }
@@ -172,15 +256,24 @@ struct MergeTracker: Equatable {
     /// Notes which of `branches` (run id → branch) exist now, and returns the
     /// ids that were seen to exist before and no longer do. A branch never seen
     /// is not a merge: a worker listed after its branch was long gone is not news.
-    mutating func update(branches: [String: String], existing: Set<String>) -> [String] {
+    ///
+    /// `accepted` are finished editing runs the maestro rated 4 or more: one of
+    /// those whose branch is gone counts as merged even if its branch was never
+    /// seen — it was merged before the tab opened. Each id drops once.
+    mutating func update(branches: [String: String], existing: Set<String>, accepted: Set<String> = []) -> [String] {
         var news: [String] = []
         for (id, branch) in branches.sorted(by: { $0.key < $1.key }) {
             if existing.contains(branch) {
                 seen.insert(id)
-            } else if seen.remove(id) != nil, !merged.contains(id) {
+            } else if seen.remove(id) != nil || accepted.contains(id), !merged.contains(id) {
                 merged.append(id)
                 news.append(id)
             }
+        }
+        // An accepted run with no branch on record has nothing left to merge.
+        for id in accepted.sorted() where branches[id] == nil && !merged.contains(id) {
+            merged.append(id)
+            news.append(id)
         }
         return news
     }

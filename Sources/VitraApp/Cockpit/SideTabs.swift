@@ -84,7 +84,7 @@ private final class TabButton: NSButton {
     static let padding: CGFloat = 2
     /// Where the text really starts, measured from the plate's edge: less than
     /// `padding`, since the button brings a little room of its own.
-    static let textOffset: CGFloat = 0
+    static let textOffset: CGFloat = 4
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: super.intrinsicContentSize.width + 2 * Self.padding, height: 24)

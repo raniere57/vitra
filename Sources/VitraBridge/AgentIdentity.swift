@@ -101,12 +101,18 @@ struct AgentIdentity: Equatable, Sendable {
     /// from a config written before the role existed, or relaunched by hand,
     /// still gets its tools. Everything else gets the worker's set: a worker
     /// whose variables were dropped, or a caller that is not known at all.
+    ///
+    /// A maestro in solo mode says `VITRA_ROLE=solo` and gets the panel and
+    /// memory tools without the agent ones; it carries `VITRA_PANE` too, so
+    /// the role is read before the pane.
     enum ServedRole: Equatable, Sendable {
         case maestro
+        case solo
         case worker
 
         static func decide(own: [String: String]) -> ServedRole {
             let names = own.nonEmpty(agentKey) != nil || own.nonEmpty(runKey) != nil
+            if own[VitraMCPConfig.roleKey] == StdioBridge.soloRole { return names ? .worker : .solo }
             let saysMaestro = own[VitraMCPConfig.roleKey] == VitraMCPConfig.maestroRole
                 || own.nonEmpty(paneKey) != nil
             return saysMaestro && !names ? .maestro : .worker

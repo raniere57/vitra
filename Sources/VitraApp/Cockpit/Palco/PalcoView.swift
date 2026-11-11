@@ -124,7 +124,10 @@ final class PalcoView: NSView {
 
     /// Whether a finished worker's branch is still worth watching for.
     private var wantsBranchWatch: Bool {
-        isOnScreen && nodes.contains { $0.outcome != .running && $0.branch != nil && !merge.merged.contains($0.id) }
+        isOnScreen && (
+            nodes.contains { $0.outcome != .running && $0.branch != nil && !merge.merged.contains($0.id) }
+                || !acceptedEdits.subtracting(merge.merged).isEmpty
+        )
     }
 
     private func branchesRead(_ existing: Set<String>) {
@@ -132,8 +135,19 @@ final class PalcoView: NSView {
             runs.compactMap { run in run.branch.map { (run.id, $0) } },
             uniquingKeysWith: { first, _ in first }
         )
-        guard !merge.update(branches: branches, existing: existing).isEmpty, isOnScreen else { return }
+        guard !merge.update(branches: branches, existing: existing, accepted: acceptedEdits).isEmpty, isOnScreen else { return }
         render(animated: true)
+    }
+
+    /// Finished editing runs rated 4 or more: taken by the maestro, so merged
+    /// once their branch is gone, seen before or not.
+    private var acceptedEdits: Set<String> {
+        // Only those on the stage: older ones are not news.
+        let shown = Set(nodes.map(\.id))
+        return Set(runs.filter { run in
+            guard shown.contains(run.id), case .finished = run.state else { return false }
+            return run.spec.access == .edit && (run.rating?.score ?? 0) >= 4
+        }.map(\.id))
     }
 
     // MARK: Liveness
@@ -178,8 +192,9 @@ final class PalcoView: NSView {
         if onScreen {
             now = Date()
             render(animated: false)
-            stage.introduce()
+            stage.setVisible(!isStill)
         } else {
+            stage.setVisible(false)
             _ = refreshLiveness()
             expiry?.invalidate()
             expiry = nil

@@ -367,6 +367,38 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(Maestro.brief.contains("shared notes"))
 }
 
+@Test func soloIsLaunchedWithoutTheBriefAndWithTheSoloRole() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("maestro \(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let id = "0f3c1a52-9d2e-4b7a-8c11-5e6f7a8b9c0d"
+    let line = try Maestro.install(binary: "/b/Vitra", claude: "claude", conversation: .resume(id), mode: .solo, in: directory)
+    #expect(line == "claude --resume '\(id)' --mcp-config '\(directory.path)/mcp-solo.json' --settings '\(directory.path)/settings.json' --append-system-prompt-file '\(directory.path)/solo.md'\n")
+    #expect(!line.contains("brief.md"))
+    let solo = try String(contentsOf: directory.appendingPathComponent("solo.md"), encoding: .utf8)
+    #expect(solo.contains("do the work yourself"))
+    #expect(!solo.contains("agent_"))
+    let config = try String(contentsOf: directory.appendingPathComponent("mcp-solo.json"), encoding: .utf8)
+    #expect(config.contains(#""VITRA_ROLE":"solo""#))
+    // The orchestrator's files are not touched by a solo launch.
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("brief.md").path))
+}
+
+@Test func theModeIsRememberedPerProjectAndDefaultsToOrchestrator() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("cockpit-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: file) }
+    #expect(CockpitProject(path: "/a").mode == .orchestrator)
+    // A file from before the mode existed.
+    try Data(#"{"projects":[{"path":"/a","session":"not-a-uuid"}],"selected":0}"#.utf8).write(to: file)
+    #expect(CockpitState.load(from: file).projects[0].mode == .orchestrator)
+
+    let state = CockpitState(projects: [CockpitProject(path: "/a", mode: .solo), CockpitProject(path: "/b")], selected: 0)
+    try state.save(to: file)
+    let reopened = CockpitState.load(from: file)
+    #expect(reopened.projects.map(\.mode) == [.solo, .orchestrator])
+    #expect(MaestroMode.solo.title == "Solo")
+    #expect(MaestroMode.orchestrator.title == "Maestro")
+}
+
 @Test func theMaestroIsLaunchedWithVitrasToolsItsBriefAndItsConversation() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("maestro \(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: directory) }

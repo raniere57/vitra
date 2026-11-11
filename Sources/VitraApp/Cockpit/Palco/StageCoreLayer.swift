@@ -126,7 +126,25 @@ final class StageCoreLayer: CALayer {
         spin.add(turn, forKey: "turn")
     }
 
-    /// A couple of slow breaths, as the tab comes up with nothing running, and then still.
+    /// The empty stage's slow breath: one scale animation, played by the
+    /// render server for as long as it is attached, so the app itself stays idle.
+    func setIdleBreathing(_ on: Bool) {
+        guard on else {
+            body.removeAnimation(forKey: "idle")
+            return
+        }
+        guard body.animation(forKey: "idle") == nil else { return }
+        let grow = CABasicAnimation(keyPath: "transform.scale")
+        grow.fromValue = 1
+        grow.toValue = 1.035
+        grow.duration = 4.2
+        grow.autoreverses = true
+        grow.repeatCount = .infinity
+        grow.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        body.add(grow, forKey: "idle")
+    }
+
+    /// The breathing while workers run.
     func breathe(times: Float) {
         let grow = CABasicAnimation(keyPath: "transform.scale")
         grow.fromValue = 1

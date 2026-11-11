@@ -106,6 +106,9 @@ final class StageNodeLayer: CALayer {
     private static var labelFont: NSFont { CockpitStyle.ui(10, .medium) }
     private static var stateFont: NSFont { CockpitStyle.mono(9.5, .medium) }
     private static var glyphFont: NSFont { CockpitStyle.ui(11, .semibold) }
+    private static var auditStateFont: NSFont { CockpitStyle.mono(8, .medium) }
+    /// Narrow enough to stay clear of the delivery's disc beside it.
+    static let auditStateWidth: CGFloat = 46
 
     let radius: CGFloat
     let isAudit: Bool
@@ -119,7 +122,7 @@ final class StageNodeLayer: CALayer {
     private let label = CATextLayer.line(StageNodeLayer.labelFont, CockpitStyle.text)
     private let state = CATextLayer.line(StageNodeLayer.stateFont, CockpitStyle.muted)
     private var dots: [CALayer] = []
-    private var isTextAbove = false
+    private var textSide: StageGeometry.TextSide = .below
 
     init(radius: CGFloat, isAudit: Bool) {
         self.radius = radius
@@ -173,7 +176,14 @@ final class StageNodeLayer: CALayer {
         glyph.frame = CGRect(x: 0, y: box.midY - CATextLayer.lineHeight(Self.glyphFont) / 2 + 0.5, width: box.width, height: CATextLayer.lineHeight(Self.glyphFont))
         for layer in [halo, disc, track, ring, glyph] { addSublayer(layer) }
 
-        guard !isAudit else { return }
+        guard !isAudit else {
+            // An audit carries one compact state line, no label or dots.
+            state.font = Self.auditStateFont
+            state.fontSize = Self.auditStateFont.pointSize
+            addSublayer(state)
+            placeText(.below)
+            return
+        }
         addSublayer(label)
         addSublayer(state)
         for _ in 0..<5 {
@@ -184,22 +194,54 @@ final class StageNodeLayer: CALayer {
             dots.append(dot)
             addSublayer(dot)
         }
-        placeText(above: false)
+        placeText(.below)
     }
 
     /// Puts the label, the state and the rating dots below the disc, or above
     /// it. A worker in the upper half of the stage carries them above, so that
     /// its link, which arrives from the core, does not run through its words.
-    func placeText(above: Bool) {
-        guard !isAudit, above != isTextAbove || label.frame == .zero else { return }
-        isTextAbove = above
+    ///
+    /// Where crowding calls for it the stage puts them beside the disc instead
+    /// (`StageGeometry.textSides`). An audit has only its state line, above
+    /// or below, on the side the stage gives it.
+    func placeText(_ side: StageGeometry.TextSide) {
+        if isAudit {
+            let box = bounds
+            let height = CATextLayer.lineHeight(Self.auditStateFont)
+            let y = side == .above ? box.maxY + 2 : -height - 2
+            CALayer.instantly {
+                state.frame = CGRect(x: box.midX - Self.auditStateWidth / 2, y: y, width: Self.auditStateWidth, height: height)
+            }
+            return
+        }
+        guard side != textSide || label.frame == .zero else { return }
+        textSide = side
         let box = bounds
         let labelHeight = CATextLayer.lineHeight(Self.labelFont)
         let stateHeight = CATextLayer.lineHeight(Self.stateFont)
         let left = box.midX - Self.labelWidth / 2
         let gap: CGFloat = 3
         CALayer.instantly {
-            if above {
+            if side == .left || side == .right {
+                // Beside the disc, centred on it and aligned toward it.
+                let toRight = side == .right
+                let x = toRight ? box.maxX + gap : box.minX - gap - Self.labelWidth
+                let alignment: CATextLayerAlignmentMode = toRight ? .left : .right
+                label.alignmentMode = alignment
+                state.alignmentMode = alignment
+                let top = box.midY + StageGeometry.textSize.height / 2
+                label.frame = CGRect(x: x, y: top - labelHeight, width: Self.labelWidth, height: labelHeight)
+                state.frame = CGRect(x: x, y: label.frame.minY - stateHeight + 1, width: Self.labelWidth, height: stateHeight)
+                let dotY = state.frame.minY - Self.dotSize / 2 - 2
+                let firstX = toRight ? x + Self.dotSize / 2 : x + Self.labelWidth - Self.dotSize / 2 - 4 * (Self.dotSize + 3)
+                for (index, dot) in dots.enumerated() {
+                    dot.position = CGPoint(x: firstX + CGFloat(index) * (Self.dotSize + 3), y: dotY)
+                }
+                return
+            }
+            label.alignmentMode = .center
+            state.alignmentMode = .center
+            if side == .above {
                 // Reading down to the disc: label, state, dots.
                 let dotY = box.maxY + gap + Self.dotSize / 2
                 for (index, dot) in dots.enumerated() { dot.position = dotPosition(index, y: dotY) }
@@ -240,7 +282,14 @@ final class StageNodeLayer: CALayer {
             }
             if previous?.glyph != node.glyph { glyph.string = node.glyph }
             if previous?.label != node.label { label.string = node.label }
-            if previous?.stateText != node.stateText { state.string = node.stateText }
+            if previous?.stateText != node.stateText {
+                state.string = node.stateText
+                // An audit's verdict is coloured by what it asks for.
+                if isAudit, node.outcome == .done {
+                    let verdict = node.stateText == "não" ? CockpitStyle.dangerText : (node.stateText == "corrigir" ? CockpitStyle.accent : StagePalette.stateText(node))
+                    state.foregroundColor = verdict.cgColor
+                }
+            }
             if previous?.deadlineFraction != node.deadlineFraction { ring.strokeEnd = max(CGFloat(node.deadlineFraction), 0.012) }
             if previous?.score != node.score { showScore(node.score) }
             opacity = Float(node.emphasis * (node.isSilent ? 0.55 : 1))

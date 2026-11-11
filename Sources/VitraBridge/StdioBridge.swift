@@ -8,6 +8,9 @@ import Foundation
 /// the server to an agent works whether or not Vitra happens to be open. The
 /// agent tools need no window and run in this process.
 public enum StdioBridge {
+    /// The `VITRA_ROLE` of a maestro working alone: no agent tools.
+    public static let soloRole = "solo"
+
     public static func run() {
         // The worker set is the default: a helper serves the maestro's tools
         // only when the maestro said so in its own environment. A worker gets
@@ -17,8 +20,9 @@ public enum StdioBridge {
         // The notes are served here for both, so a worker reads what the
         // maestro and earlier workers left, and adds to it the same way.
         let memory = MemoryToolExecutor()
-        let server = role == .maestro
-            ? MCPServer(
+        let server = switch role {
+        case .maestro:
+            MCPServer(
                 executor: LocalToolRouter(
                     names: MemoryTools.names,
                     local: memory,
@@ -26,10 +30,12 @@ public enum StdioBridge {
                 ),
                 tools: MCPTools.all
             )
-            : MCPServer(
+        case .solo, .worker:
+            MCPServer(
                 executor: LocalToolRouter(names: MemoryTools.names, local: memory, otherwise: RemoteExecutor()),
-                tools: MCPTools.worker
+                tools: MCPTools.tools(for: role)
             )
+        }
         let out = OutputQueue()
         let group = DispatchGroup()
 
