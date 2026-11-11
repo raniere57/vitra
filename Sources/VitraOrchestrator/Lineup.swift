@@ -112,7 +112,7 @@ public struct PickReason: Codable, Equatable, Sendable {
 
     /// What kept the lineup's earlier worker out.
     public enum Cause: String, Codable, Sendable {
-        case quota, signedOut, down, resting, demoted, slow, unavailable
+        case quota, signedOut, down, resting, demoted, slow, unavailable, switchedOff
     }
 
     public let code: Code

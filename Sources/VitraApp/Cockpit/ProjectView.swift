@@ -1175,6 +1175,13 @@ final class ProjectView: NSView {
         tabs.onSelect = { [weak self] tab in self?.choose(tab) }
         tabSlot.addFilling(workers)
         workers.onReview = { [weak self] delivery in self?.review(delivery) }
+        // A provider's login or install command, typed into the shared
+        // terminal as terminal_run would; not into a program already running.
+        resumo.onRunCommand = { [weak self] command in
+            guard let self, let session = try? self.sharedTerminal(showing: true), !session.isRunningProgram else { return false }
+            session.send(text: command + "\n")
+            return true
+        }
 
         // The right side has two shapes: narrow for the lists, and half the
         // window for a page or a file.

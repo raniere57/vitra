@@ -73,6 +73,8 @@ public enum WorkerPicker {
     ///     one whose delivery is being redone.
     ///   - difficulty: how hard the piece is.
     ///   - lineup: the user's preference per difficulty.
+    ///   - switchedOff: CLIs the user switched off in the Projeto tab; read
+    ///     from `~/.vitra/providers.json` unless given.
     public static func pick(
         kind: TaskKind,
         access: WorkerAccess,
@@ -84,6 +86,7 @@ public enum WorkerPicker {
         excludedWorkers: Set<ModelCatalog.Offer> = [],
         difficulty: Difficulty = .normal,
         lineup: Lineup = .standard,
+        switchedOff: Set<WorkerCLI> = Set(ProviderSwitches.load().off),
         now: Date = Date()
     ) -> Choice? {
         // Not a verdict on anyone: a run the user stopped is not a try, and a
@@ -99,6 +102,7 @@ public enum WorkerPicker {
             guard offers.contains(offer), installed.contains(offer.cli), !excluded.contains(offer.cli),
                   !excludedWorkers.contains(offer)
             else { return .unavailable }
+            if switchedOff.contains(offer.cli) { return .switchedOff }
             switch offer.cli {
             case .claude, .opencode: break
             case .cursor: if needsCommands { return .unavailable }
@@ -194,10 +198,13 @@ public enum WorkerPicker {
             case nil: said = "is demoted"
             }
         case .unavailable: said = "cannot take this piece"
+        case .switchedOff: said = "is switched off"
         }
         let slow: Bool = if case .slow = demoted(passed) { true } else { false }
+        // A switch is the CLI's, not the model's: say which CLI.
+        let who = cause == .switchedOff ? passed.cli.rawValue : shortName(passed)
         return Choice(offer: worker, pick: PickReason(
-            code: .lineup, text: "\(place) in your lineup: \(shortName(passed)) \(said)", position: index + 1,
+            code: .lineup, text: "\(place) in your lineup: \(who) \(said)", position: index + 1,
             passed: passed.model.split(separator: "/").last.map(String.init) ?? passed.model,
             cause: cause == .demoted && slow ? .slow : cause
         ))

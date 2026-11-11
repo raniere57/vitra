@@ -18,7 +18,7 @@ import Testing
 
     let expected = [
         "window-1440", "window-min", "workers", "ranking", "git", "files", "recent-images", "browser-tabs", "preview-header", "quit-hold",
-        "stage", "stage-empty", "stage-reduced-motion", "resumo", "resumo-expanded",
+        "stage", "stage-empty", "stage-reduced-motion", "resumo", "resumo-provider", "resumo-expanded",
         "welcome", "welcome-min", "shortcuts", "find", "window-hint",
         "update-outdated", "update-armed", "fila-expanded", "fila-collapsed",
     ]

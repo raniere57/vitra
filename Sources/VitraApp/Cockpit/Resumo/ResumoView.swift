@@ -22,6 +22,21 @@ final class ResumoView: NSView {
 
     // Providers
     private var providerRows: [WorkerCLI: ProviderRowView] = [:]
+    private let providerSource: ProviderSource
+    private var providerSetup: ProviderSetup?
+    /// What each CLI listed, once it has been asked.
+    private var listed: [WorkerCLI: [String]] = [:]
+    /// The CLIs being asked for their models right now.
+    private var listing: Set<WorkerCLI> = []
+    private(set) var openProviders: Set<WorkerCLI> = []
+    private var openModels: Set<WorkerCLI> = []
+    private var refusal: (cli: WorkerCLI, text: String)?
+    private var commandNote: (cli: WorkerCLI, text: String)?
+    private lazy var refreshButton = ClosureButton(title: "Atualizar lista", font: CockpitStyle.label, color: CockpitStyle.accent) { [weak self] in
+        self?.relist(fresh: true)
+    }
+    /// Types a command into the project's shared terminal; nil hides the button.
+    var onRunCommand: ((String) -> Bool)?
 
     // Retrospective
     private let copyButton = NSButton(title: "Copiar retrospectiva", target: nil, action: nil)
@@ -36,8 +51,9 @@ final class ResumoView: NSView {
     /// The trabalho opened, whose steps are shown; nil when none is.
     private(set) var expanded: String?
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
+    init(providers: ProviderSource = .disk) {
+        providerSource = providers
+        super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = CockpitStyle.panel.cgColor
         build()
@@ -60,8 +76,10 @@ final class ResumoView: NSView {
             + "7 dias: \(WorkerBoard.tokens(resumo.allWeek.tokens)), \(Resumo.countsText(resumo.allWeek))"
         sparkline.show(resumo.days, calendar: resumo.calendar)
 
-        for row in resumo.providers {
-            providerRows[row.cli]?.show(row, subscription: row.cli == .claude ? resumo.subscription : nil, calendar: resumo.calendar)
+        showProviders()
+        providerSource.loadSetup { [weak self] setup in
+            self?.providerSetup = setup
+            self?.showProviders()
         }
 
         factsBox.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -78,6 +96,92 @@ final class ResumoView: NSView {
 
         emptyTrabalhos.isHidden = !resumo.trabalhos.isEmpty
         layoutTrabalhos()
+    }
+
+    // MARK: - Providers
+
+    /// Opens a provider's card, or closes it. The first card opened asks the
+    /// CLIs for their models, from the catalogue's cache when it has them.
+    func toggleProvider(_ cli: WorkerCLI) {
+        if openProviders.contains(cli) { openProviders.remove(cli) } else { openProviders.insert(cli) }
+        if !openProviders.isEmpty, listed.isEmpty, listing.isEmpty { relist(fresh: false) }
+        showProviders()
+    }
+
+    /// Opens or closes the list of models on a provider's card.
+    func toggleModels(_ cli: WorkerCLI) {
+        if openModels.contains(cli) { openModels.remove(cli) } else { openModels.insert(cli) }
+        showProviders()
+    }
+
+    /// Asks the CLIs for their models off the main thread, a spinner on each
+    /// row until its answer is in.
+    private func relist(fresh: Bool) {
+        guard listing.isEmpty else { return }
+        listing = providerSetup.map { Set($0.paths.keys) } ?? Set(WorkerCLI.allCases)
+        showProviders()
+        providerSource.list(fresh) { [weak self] cli, lines in
+            guard let self else { return }
+            self.listing.remove(cli)
+            self.listed[cli] = lines
+            self.showProviders()
+        }
+    }
+
+    private func card(_ row: ProviderRow) -> ProviderCard? {
+        guard let setup = providerSetup else { return nil }
+        return ProviderBoard.card(
+            row.cli, path: setup.paths[row.cli], lines: listed[row.cli], availability: row.availability,
+            deliveriesToday: row.deliveries, lineup: setup.lineup, isOn: setup.switches.isOn(row.cli)
+        )
+    }
+
+    private func showProviders() {
+        guard let resumo else { return }
+        refreshButton.isEnabled = listing.isEmpty
+        for row in resumo.providers {
+            providerRows[row.cli]?.show(
+                row, subscription: row.cli == .claude ? resumo.subscription : nil, calendar: resumo.calendar,
+                card: card(row), state: ProviderRowView.Open(
+                    isOpen: openProviders.contains(row.cli), isListing: listing.contains(row.cli),
+                    modelsOpen: openModels.contains(row.cli),
+                    refusal: refusal?.cli == row.cli ? refusal?.text : nil,
+                    note: commandNote?.cli == row.cli ? commandNote?.text : nil
+                )
+            )
+        }
+    }
+
+    /// The switch "usar como operário": saved at once, unless it would leave
+    /// no installed CLI on.
+    private func setProvider(_ cli: WorkerCLI, on: Bool) {
+        guard let setup = providerSetup else { return }
+        do {
+            let switches = try setup.switches.setting(cli, on: on, installed: Set(setup.paths.keys))
+            providerSetup = ProviderSetup(paths: setup.paths, lineup: setup.lineup, switches: switches)
+            refusal = nil
+            providerSource.saveSwitches(switches)
+        } catch {
+            refusal = (cli, error.text)
+        }
+        showProviders()
+    }
+
+    private func copyCommand(_ cli: WorkerCLI, _ command: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+        say("copiado", for: cli)
+    }
+
+    /// A word beside the command's buttons, gone after a moment.
+    private func say(_ text: String, for cli: WorkerCLI) {
+        commandNote = (cli, text)
+        showProviders()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, self.commandNote?.text == text else { return }
+            self.commandNote = nil
+            self.showProviders()
+        }
     }
 
     /// Opens a trabalho's steps, or closes them with nil.
@@ -172,12 +276,24 @@ final class ResumoView: NSView {
 
         // Providers.
         let providersHeading = heading("PROVEDORES · HOJE")
-        add(providersHeading)
-        column.setCustomSpacing(CockpitStyle.Space.md, after: providersHeading)
+        refreshButton.toolTip = "Pergunta de novo a cada CLI quais modelos ele oferece"
+        let providersBar = NSStackView(views: [providersHeading, NSView(), refreshButton])
+        providersBar.alignment = .centerY
+        add(providersBar)
+        column.setCustomSpacing(CockpitStyle.Space.md, after: providersBar)
         add(Self.providerHeader())
         for (index, cli) in WorkerCLI.allCases.enumerated() {
             if index > 0 { add(NSView.rule(CockpitStyle.softLine)) }
             let row = ProviderRowView(cli: cli)
+            row.onToggle = { [weak self] in self?.toggleProvider(cli) }
+            row.details.onToggleModels = { [weak self] in self?.toggleModels(cli) }
+            row.details.onSwitch = { [weak self] on in self?.setProvider(cli, on: on) }
+            row.details.onCopy = { [weak self] command in self?.copyCommand(cli, command) }
+            row.details.canRun = { [weak self] in self?.onRunCommand != nil }
+            row.details.onRun = { [weak self] command in
+                guard let self, let run = self.onRunCommand else { return }
+                self.say(run(command) ? "enviado ao Terminal" : "o Terminal está ocupado", for: cli)
+            }
             providerRows[cli] = row
             add(row)
             if index == WorkerCLI.allCases.count - 1 { column.setCustomSpacing(CockpitStyle.Space.xxl, after: row) }
@@ -315,6 +431,27 @@ final class ResumoView: NSView {
 /// One provider: its colour, its name and availability, and today's figures;
 /// for claude, the subscription's two windows under it.
 private final class ProviderRowView: NSStackView {
+    /// How the row is opened, and what its card shows.
+    struct Open {
+        let isOpen: Bool
+        let isListing: Bool
+        let modelsOpen: Bool
+        let refusal: String?
+        let note: String?
+    }
+
+    var onToggle: (() -> Void)?
+    let details = ProviderDetailsView()
+    private let spinner: NSProgressIndicator = {
+        let spinner = NSProgressIndicator()
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isDisplayedWhenStopped = false
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.widthAnchor.constraint(equalToConstant: 12).isActive = true
+        spinner.heightAnchor.constraint(equalToConstant: 12).isActive = true
+        return spinner
+    }()
     private let status = NSTextField.label(font: CockpitStyle.caption, color: CockpitStyle.muted)
     private let deliveries = RankingView.cell("", RankingView.Column.deliveries, .right, font: CockpitStyle.meta, color: CockpitStyle.text)
     private let cost = RankingView.cell("", RankingView.Column.cost, .right, font: CockpitStyle.meta, color: CockpitStyle.text)
@@ -350,15 +487,22 @@ private final class ProviderRowView: NSStackView {
         name.setContentCompressionResistancePriority(.required, for: .horizontal)
         name.setContentHuggingPriority(.required, for: .horizontal)
         status.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let who = NSStackView(views: [dot, name, status])
+        let who = NSStackView(views: [dot, name, status, spinner])
         who.spacing = CockpitStyle.Space.sm
         who.alignment = .centerY
         who.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let line = RankingView.line([who, deliveries, cost, median], height: CockpitStyle.rowHeight)
         addArrangedSubview(line)
         addArrangedSubview(bars)
+        addArrangedSubview(details)
         line.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+        // Under the name, as the bars are.
+        details.edgeInsets = NSEdgeInsets(top: 0, left: Self.nameIndent, bottom: CockpitStyle.Space.lg, right: 0)
+        details.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+        details.isHidden = true
         bars.isHidden = true
+        line.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(clicked)))
+        line.toolTip = "Clique para ver por que \(cli.rawValue) pode ou não trabalhar"
         setAccessibilityElement(true)
         setAccessibilityRole(.row)
     }
@@ -366,14 +510,29 @@ private final class ProviderRowView: NSStackView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func show(_ row: ProviderRow, subscription: SubscriptionBars?, calendar: Calendar) {
-        let text = Resumo.availabilityText(row.availability, calendar: calendar)
+    @objc private func clicked() { onToggle?() }
+
+    override func accessibilityPerformPress() -> Bool {
+        onToggle?()
+        return true
+    }
+
+    func show(_ row: ProviderRow, subscription: SubscriptionBars?, calendar: Calendar, card: ProviderCard? = nil, state: Open? = nil) {
+        let text = ProviderBoard.rowStatus(row.availability, card: card, calendar: calendar)
         status.stringValue = text
-        status.textColor = switch row.availability {
+        let byRuns: NSColor = switch row.availability {
         case .ok: CockpitStyle.success
         case .noQuota, .resting: CockpitStyle.accent
         case .down, .signedOut: CockpitStyle.dangerText
         }
+        status.textColor = card?.isOn == false ? CockpitStyle.muted : card.map { ProviderDetailsView.colour($0.state) } ?? byRuns
+        if state?.isListing == true { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
+        let isOpen = state?.isOpen == true
+        details.isHidden = !isOpen || card == nil
+        if isOpen, let card, let state {
+            details.show(card, calendar: calendar, refusal: state.refusal, modelsOpen: state.modelsOpen, note: state.note)
+        }
+        setAccessibilityExpanded(isOpen)
         if case let .resting(_, workers) = row.availability {
             status.toolTip = "Em pausa depois de 3 falhas seguidas: " + workers.joined(separator: ", ")
         } else {

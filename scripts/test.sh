@@ -7,5 +7,7 @@
 # one at a time the suite takes ~30s and passes. Pass --parallel to override.
 # Extra arguments go to `swift test`, e.g. scripts/test.sh --filter Orchestrator
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+# The picker reads the user's provider switches; the tests must not.
+export VITRA_PROVIDERS_FILE=/nonexistent/vitra-test-providers.json
 case " $* " in *" --parallel "*) ;; *) set -- --no-parallel "$@" ;; esac
 exec perl -e 'alarm 480; exec @ARGV' swift test "$@"

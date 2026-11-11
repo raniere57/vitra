@@ -104,4 +104,30 @@ extension SnapshotFixtures {
     func resumo() -> Resumo {
         Resumo.make(runs: resumoRuns(), project: CockpitProject(path: path), usage: subscription, now: now)
     }
+
+    /// The providers as the Resumo's cards see them: claude fine, opencode
+    /// switched off, cursor installed but signed out (it listed nothing), and
+    /// gemini not installed.
+    func providerSource() -> ProviderSource {
+        let setup = ProviderSetup(
+            paths: [
+                .claude: NSHomeDirectory() + "/.local/bin/claude",
+                .opencode: "/Applications/OpenCode.app/Contents/Resources/opencode-cli",
+                .cursor: NSHomeDirectory() + "/.local/bin/cursor-agent",
+            ],
+            lineup: .standard,
+            switches: ProviderSwitches(off: [.opencode])
+        )
+        let lines: [(WorkerCLI, [String]?)] = [
+            (.claude, []),
+            (.opencode, ["opencode/glm-5.3-flash-free", "opencode/deepseek-v4.1-flash-free", "opencode/big-pickle", "anthropic/claude-sonnet-4"]),
+            (.cursor, []),
+            (.gemini, nil),
+        ]
+        return ProviderSource(
+            loadSetup: { done in MainActor.assumeIsolated { done(setup) } },
+            list: { _, each in MainActor.assumeIsolated { lines.forEach { each($0.0, $0.1) } } },
+            saveSwitches: { _ in }
+        )
+    }
 }

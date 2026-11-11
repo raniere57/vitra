@@ -159,6 +159,19 @@ public enum ModelCatalog {
         return fresh
     }
 
+    /// What one CLI lists, asked afresh: nil when it is not installed, empty
+    /// when it answered with an error or nothing (signed out, most often).
+    /// Claude lists nothing; its workers are fixed. Blocks like `listing`.
+    public static func lines(of cli: WorkerCLI, _ executables: Executables) -> [String]? {
+        guard let path = executables.paths[cli] else { return nil }
+        return cli == .claude ? [] : modelLines(output(of: path, arguments: ["models"]))
+    }
+
+    /// Keeps `listing`, made from `lines(of:)`, as `cachedListing` would have.
+    public static func remember(_ listing: Listing, for executables: Executables, now: Date = Date()) {
+        if listing.isComplete { listingCache.store(listing, for: executables.paths, at: now) }
+    }
+
     /// Whether opencode may be asked for `model`.
     ///
     /// opencode reaches paid providers too, billed by the token. Until the

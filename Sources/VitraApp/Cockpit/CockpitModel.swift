@@ -257,7 +257,7 @@ enum WorkerBoard {
             if let passed = pick.passed, let cause = pick.cause {
                 let causes: [PickReason.Cause: String] = [
                     .quota: "sem cota", .signedOut: "sem login", .down: "fora do ar", .resting: "em pausa",
-                    .demoted: "rebaixado", .slow: "lento", .unavailable: "indisponível",
+                    .demoted: "rebaixado", .slow: "lento", .unavailable: "indisponível", .switchedOff: "desligado",
                 ]
                 why = "\(passed) \(causes[cause] ?? "indisponível")"
             } else {

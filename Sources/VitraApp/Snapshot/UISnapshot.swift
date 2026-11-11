@@ -61,12 +61,20 @@ enum UISnapshot {
             return view
         }),
         Shot(name: "resumo", size: NSSize(width: 420, height: 1100), build: { context in
-            let view = ResumoView()
+            let view = ResumoView(providers: context.fixtures.providerSource())
             view.show(context.fixtures.resumo())
             return view
         }),
+        Shot(name: "resumo-provider", size: NSSize(width: 420, height: 1100), build: { context in
+            let view = ResumoView(providers: context.fixtures.providerSource())
+            view.show(context.fixtures.resumo())
+            view.toggleProvider(.cursor)
+            view.toggleProvider(.opencode)
+            view.toggleModels(.opencode)
+            return view
+        }),
         Shot(name: "resumo-expanded", size: NSSize(width: 420, height: 1100), build: { context in
-            let view = ResumoView()
+            let view = ResumoView(providers: context.fixtures.providerSource())
             view.show(context.fixtures.resumo())
             view.expand(SnapshotFixtures.resumoExpanded)
             return view
