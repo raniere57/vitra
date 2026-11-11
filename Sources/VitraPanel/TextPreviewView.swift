@@ -63,8 +63,11 @@ final class TextPreviewView: NSScrollView, PreviewContentView {
     /// Cmd-F opens the find bar. The panel is not what the menu drives, so the
     /// key is read here and handed to the text view's own find machinery.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // Only while the keyboard is here: ⌘F in the maestro's terminal is
+        // a search of the conversation, not of this file.
         guard event.modifierFlags.contains(.command),
-              event.charactersIgnoringModifiers == "f"
+              event.charactersIgnoringModifiers == "f",
+              (window?.firstResponder as? NSView)?.isDescendant(of: self) == true
         else { return super.performKeyEquivalent(with: event) }
         let show = NSMenuItem()
         show.tag = Int(NSFindPanelAction.showFindPanel.rawValue)

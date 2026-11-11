@@ -35,7 +35,8 @@ final class CockpitAppDelegate: NSObject, NSApplicationDelegate {
 
         let config = Config.load().config
         Harness.launchFlags[.claudeCode] = config.claudeFlags
-        NSApp.mainMenu = makeMenu()
+        // Built from the one shortcut table the "Atalhos" sheet also reads.
+        NSApp.mainMenu = Shortcut.makeMenuBar()
 
         // VITRA_COCKPIT_STORE points the tabs at another file, so an automated
         // run can open a fixture project without touching the user's own list.
@@ -94,61 +95,5 @@ final class CockpitAppDelegate: NSObject, NSApplicationDelegate {
         feed.stop()
         bridge?.stop()
         controller?.shutDown()
-    }
-
-    /// Only what the cockpit has: there is no item here that does nothing.
-    private func makeMenu() -> NSMenu {
-        let main = NSMenu()
-
-        let app = NSMenu()
-        app.addItem(withTitle: "Sobre o Vitra", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
-        app.addItem(.separator())
-        app.addItem(withTitle: "Ocultar Vitra", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        app.addItem(.separator())
-        app.addItem(withTitle: "Encerrar Vitra", action: #selector(quitRequested(_:)), keyEquivalent: "q")
-        app.addItem(withTitle: "Encerrar todos os terminais e sair", action: #selector(endTerminalsAndQuit(_:)), keyEquivalent: "")
-
-        let file = NSMenu(title: "Arquivo")
-        file.addItem(withTitle: "Abrir projeto…", action: #selector(CockpitWindowController.openProject(_:)), keyEquivalent: "o")
-        file.addItem(withTitle: "Fechar projeto", action: #selector(CockpitWindowController.closeProject(_:)), keyEquivalent: "w")
-
-        // Every tab is reachable without the pointer.
-        let projects = NSMenu(title: "Projetos")
-        let next = projects.addItem(withTitle: "Próximo projeto", action: #selector(CockpitWindowController.nextProject(_:)), keyEquivalent: "]")
-        next.keyEquivalentModifierMask = [.command, .shift]
-        let previous = projects.addItem(withTitle: "Projeto anterior", action: #selector(CockpitWindowController.previousProject(_:)), keyEquivalent: "[")
-        previous.keyEquivalentModifierMask = [.command, .shift]
-        projects.addItem(.separator())
-        // The tabs of the right side: ⌃1 to ⌃5, beside ⌘1 to ⌘9 for projects.
-        for (index, tab) in SideTab.allCases.enumerated() {
-            let item = projects.addItem(withTitle: tab.title, action: #selector(CockpitWindowController.showSideTab(_:)), keyEquivalent: "\(index + 1)")
-            item.keyEquivalentModifierMask = [.control]
-            item.tag = index
-        }
-        projects.addItem(.separator())
-        for number in 1...9 {
-            let item = projects.addItem(withTitle: "Projeto \(number)", action: #selector(CockpitWindowController.showProject(_:)), keyEquivalent: "\(number)")
-            item.tag = number - 1
-        }
-
-        let edit = NSMenu(title: "Editar")
-        edit.addItem(withTitle: "Recortar", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        edit.addItem(withTitle: "Copiar", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        edit.addItem(withTitle: "Colar", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        edit.addItem(withTitle: "Selecionar tudo", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a")
-        edit.addItem(.separator())
-        edit.addItem(withTitle: "Limpar", action: #selector(TerminalView.clearScreen(_:)), keyEquivalent: "k")
-
-        let window = NSMenu(title: "Janela")
-        window.addItem(withTitle: "Minimizar", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        window.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
-        NSApp.windowsMenu = window
-
-        for menu in [app, file, projects, edit, window] {
-            let item = NSMenuItem()
-            item.submenu = menu
-            main.addItem(item)
-        }
-        return main
     }
 }

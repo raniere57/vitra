@@ -62,6 +62,7 @@ final class ProjectView: NSView {
 
     private let side = NSView()
     private let tabs = SideTabs()
+    private let tabsRule = NSView.rule(CockpitStyle.softLine)
     private let tabSlot = NSView()
     private let ranking = RankingView()
     /// Works out the Resumo tab off the main thread, for this project.
@@ -124,6 +125,23 @@ final class ProjectView: NSView {
     private lazy var filesArea = FilesArea(panel: filesPanel, root: URL(fileURLWithPath: project.path))
     private var sideNarrow: NSLayoutConstraint?
     private var sideWide: NSLayoutConstraint?
+    /// The panel put away: no width at all.
+    private var sideCollapsed: NSLayoutConstraint?
+    private let divider = NSView.rule(CockpitStyle.line, vertical: true)
+    /// ⌘\: the panel in the other of its two widths, until another tab is chosen.
+    private var isWidthFlipped = false
+    /// ⌘⇧\: the panel put away, the maestro given the whole window.
+    private(set) var isSideHidden: Bool
+    /// Called when the panel is put away or brought back; persisted by the window.
+    var onSideHiddenChange: ((Bool) -> Void)?
+    /// ⌘F over the maestro's terminal.
+    private lazy var find: ConversationFind = {
+        let find = ConversationFind()
+        find.onClose = { [weak self] in self?.focusTerminal() }
+        return find
+    }()
+    /// The one-time strip of shortcuts over the side panel's content.
+    private var hint: HintStrip?
 
     /// What the terminal is sized to until the window lays it out for real.
     private static let provisionalSize = NSSize(width: 800, height: 600)
@@ -196,15 +214,20 @@ final class ProjectView: NSView {
     /// `startsTerminal: false` builds the view without a shell, a timer or an
     /// event monitor; the UI snapshot tool uses it to lay the project out
     /// offscreen. The app always starts the terminal.
-    init(project: CockpitProject, kit: TerminalKit, startsTerminal: Bool = true, resumesInterruptedWork: Bool = false) {
+    /// `showsHint` nil reads whether the shortcut hint was dismissed from the
+    /// user's defaults; the snapshot tool says so outright.
+    init(project: CockpitProject, kit: TerminalKit, startsTerminal: Bool = true, resumesInterruptedWork: Bool = false, showsHint: Bool? = nil) {
         self.resumesInterruptedWork = resumesInterruptedWork
         self.project = project
         self.mode = project.mode
+        self.isSideHidden = project.sidePanelHidden
         self.kit = kit
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = CockpitStyle.ground.cgColor
         build()
+        if showsHint ?? !FirstRunHint().isDismissed { addHint() }
+        applySideWidth()
         guard startsTerminal else { return }
         startHousekeeping()
         startTerminal(launchingMaestro: true)
@@ -411,9 +434,128 @@ final class ProjectView: NSView {
             tabSlot.subviews.forEach { $0.removeFromSuperview() }
             tabSlot.addFilling(content)
         }
-        // Off before on: both held at once cannot be satisfied.
-        (tab.isWide ? sideNarrow : sideWide)?.isActive = false
-        (tab.isWide ? sideWide : sideNarrow)?.isActive = true
+        if tab != previous { isWidthFlipped = false }
+        applySideWidth()
+    }
+
+    // MARK: - Driving the side panel from the keyboard
+
+    /// A tab chosen by the user — click or chord: brought back if the panel
+    /// was put away, and the shared terminal given the keyboard.
+    func choose(_ tab: SideTab) {
+        setSideHidden(false)
+        select(tab)
+        if tab == .terminal, let view = sharedTerminalView { window?.makeFirstResponder(view) }
+    }
+
+    /// ⌥⌘→ and ⌥⌘←: the next tab or the one before, round the end.
+    func chooseSideTab(by offset: Int) {
+        let all = SideTab.allCases
+        let index = all.firstIndex(of: tabs.selected) ?? 0
+        choose(all[(index + offset + all.count) % all.count])
+    }
+
+    /// ⌘⇧J: the keyboard into the panel's content, so its list, diff or files
+    /// can be driven without the pointer.
+    func focusSidePanel() {
+        setSideHidden(false)
+        guard let window, let content = tabSlot.subviews.first else { return }
+        if let target = Self.firstKeyTarget(in: content) {
+            window.makeFirstResponder(target)
+        } else {
+            window.selectKeyView(following: tabs)
+        }
+    }
+
+    /// The first view under `view` that takes typing or arrows: a list, a
+    /// text, a page. Buttons are passed over: they take the keyboard only with
+    /// full keyboard access on, and are not what "the content" means.
+    private static func firstKeyTarget(in view: NSView) -> NSView? {
+        for child in view.subviews where !child.isHidden {
+            if child is NSTableView || child is NSTextView || child is NSCollectionView || child is TerminalView {
+                return child
+            }
+            if child.acceptsFirstResponder, !(child is NSControl) { return child }
+            if let found = firstKeyTarget(in: child) { return found }
+        }
+        return nil
+    }
+
+    /// ⌘\: narrow for a page, wide for a list — the other of the tab's two
+    /// widths, until another tab is chosen. A panel put away comes back.
+    func toggleSideWidth() {
+        guard !isSideHidden else {
+            setSideHidden(false)
+            return
+        }
+        isWidthFlipped.toggle()
+        applySideWidth()
+    }
+
+    /// ⌘⇧\: the panel put away, or brought back.
+    func setSideHidden(_ hidden: Bool) {
+        guard hidden != isSideHidden else { return }
+        isSideHidden = hidden
+        applySideWidth()
+        onSideHiddenChange?(hidden)
+        // The keyboard cannot stay in a panel nobody can see.
+        if hidden, (window?.firstResponder as? NSView)?.isDescendant(of: side) == true { focusTerminal() }
+    }
+
+    /// One of the panel's three widths: none, narrow for the lists, half the
+    /// window for a page or a file.
+    private func applySideWidth() {
+        let isWide = tabs.selected.isWide != isWidthFlipped
+        // Off before on: two held at once cannot be satisfied.
+        [sideNarrow, sideWide, sideCollapsed].forEach { $0?.isActive = false }
+        (isSideHidden ? sideCollapsed : (isWide ? sideWide : sideNarrow))?.isActive = true
+        side.isHidden = isSideHidden
+        divider.isHidden = isSideHidden
+    }
+
+    // MARK: - Find in the conversation
+
+    /// ⌘F: the find bar over the maestro's terminal.
+    func showFind() {
+        guard let terminal else { return }
+        find.open(over: terminal, in: terminalSlot)
+    }
+
+    /// ⌘G and ⌘⇧G; the bar is opened first if it was put away.
+    func findStep(forward: Bool) {
+        guard find.isOpen else {
+            showFind()
+            return
+        }
+        find.step(forward: forward)
+    }
+
+    /// The find bar, shown with a query, for the snapshot tool: there is no
+    /// terminal to search there.
+    func showFindBar(query: String, counter: String) {
+        find.bar.reveal(in: terminalSlot, top: CockpitStyle.Space.md)
+        find.bar.setQuery(query)
+        find.bar.report(count: counter)
+    }
+
+    // MARK: - The first-run hint
+
+    private func addHint() {
+        let strip = HintStrip()
+        strip.onDismiss = { [weak self] in
+            FirstRunHint().dismiss()
+            self?.hint?.removeFromSuperview()
+            self?.hint = nil
+        }
+        side.addSubview(strip)
+        NSLayoutConstraint.activate([
+            strip.topAnchor.constraint(equalTo: tabsRule.bottomAnchor),
+            strip.leadingAnchor.constraint(equalTo: side.leadingAnchor),
+            strip.trailingAnchor.constraint(equalTo: side.trailingAnchor),
+            // Goes when the strip does; the slot then falls back to the rule.
+            tabSlot.topAnchor.constraint(equalTo: strip.bottomAnchor),
+        ])
+        hint = strip
     }
 
     /// The run feed changed. While the Resumo is on screen it is worked out
@@ -987,21 +1129,15 @@ final class ProjectView: NSView {
         refreshPlace()
 
         let headerRule = NSView.rule(CockpitStyle.softLine)
-        let divider = NSView.rule(CockpitStyle.line, vertical: true)
         for view in [header, headerRule, terminalSlot, divider, side] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
-        let tabsRule = NSView.rule(CockpitStyle.softLine)
         for view in [tabs, tabsRule, tabSlot] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             side.addSubview(view)
         }
-        tabs.onSelect = { [weak self] tab in
-            guard let self else { return }
-            self.select(tab)
-            if tab == .terminal, let view = self.sharedTerminalView { self.window?.makeFirstResponder(view) }
-        }
+        tabs.onSelect = { [weak self] tab in self?.choose(tab) }
         tabSlot.addFilling(workers)
         workers.onReview = { [weak self] delivery in self?.review(delivery) }
 
@@ -1009,7 +1145,11 @@ final class ProjectView: NSView {
         // window for a page or a file.
         let narrow = side.widthAnchor.constraint(equalToConstant: CockpitStyle.workersWidth)
         let wide = side.widthAnchor.constraint(equalTo: widthAnchor, multiplier: Self.wideShare)
-        (sideNarrow, sideWide) = (narrow, wide)
+        let collapsed = side.widthAnchor.constraint(equalToConstant: 0)
+        (sideNarrow, sideWide, sideCollapsed) = (narrow, wide, collapsed)
+        // Under the tabs' rule, unless the hint strip sits there first.
+        let slotUnderRule = tabSlot.topAnchor.constraint(equalTo: tabsRule.bottomAnchor)
+        slotUnderRule.priority = .fittingSizeCompression
 
         NSLayoutConstraint.activate([
             side.topAnchor.constraint(equalTo: topAnchor),
@@ -1023,7 +1163,8 @@ final class ProjectView: NSView {
             tabsRule.topAnchor.constraint(equalTo: tabs.bottomAnchor),
             tabsRule.leadingAnchor.constraint(equalTo: side.leadingAnchor),
             tabsRule.trailingAnchor.constraint(equalTo: side.trailingAnchor),
-            tabSlot.topAnchor.constraint(equalTo: tabsRule.bottomAnchor),
+            slotUnderRule,
+            tabSlot.topAnchor.constraint(greaterThanOrEqualTo: tabsRule.bottomAnchor),
             tabSlot.leadingAnchor.constraint(equalTo: side.leadingAnchor),
             tabSlot.trailingAnchor.constraint(equalTo: side.trailingAnchor),
             tabSlot.bottomAnchor.constraint(equalTo: side.bottomAnchor),

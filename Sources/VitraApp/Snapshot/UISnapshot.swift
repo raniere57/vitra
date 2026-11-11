@@ -117,6 +117,11 @@ enum UISnapshot {
             panel.show(target)
             return panel
         }),
+        Shot(name: "welcome", size: NSSize(width: 1440, height: 900), build: { welcome($0) }),
+        Shot(name: "welcome-min", size: CockpitWindowController.minSize, build: { welcome($0) }),
+        Shot(name: "shortcuts", size: shortcutsSize, build: { _ in ShortcutsSheet.makeView {} }),
+        Shot(name: "find", size: CockpitWindowController.minSize, build: { try find($0) }),
+        Shot(name: "window-hint", size: CockpitWindowController.minSize, build: { try cockpit($0, showsHint: true) }),
         Shot(name: "quit-hold", size: NSSize(width: 480, height: 140), build: { context in
             context.window.contentView?.addFilling(placeholder("terminal"))
             QuitHold().show(in: context.window)
@@ -153,15 +158,22 @@ enum UISnapshot {
     /// The whole window, composed by hand: the tab bar over a `ProjectView`
     /// that never started its terminal. The controller itself starts a shell
     /// and reads the user's saved projects, so it is not used here.
-    private static func cockpit(_ context: Context) throws -> NSView {
+    ///
+    /// `showsHint` puts the one-time shortcut strip over the side panel;
+    /// `terminal` stands in the maestro's place; `configure` gets the project
+    /// once it is built.
+    static func cockpit(
+        _ context: Context, showsHint: Bool = false, terminal: NSView? = nil, configure: (ProjectView) -> Void = { _ in }
+    ) throws -> NSView {
         guard let device = MTLCreateSystemDefaultDevice() else { throw SnapshotError.render("no Metal device") }
         let fixtures = context.fixtures
         let project = ProjectView(
             project: CockpitProject(path: fixtures.path),
             kit: TerminalKit(device: device, config: Config()),
-            startsTerminal: false
+            startsTerminal: false,
+            showsHint: showsHint
         )
-        project.terminalArea.addFilling(placeholder("terminal"))
+        project.terminalArea.addFilling(terminal ?? placeholder("terminal"))
         project.show(usage: fixtures.usage)
         project.show(model: fixtures.maestro)
         let runs = fixtures.workerRuns()
@@ -196,6 +208,7 @@ enum UISnapshot {
             project.trailingAnchor.constraint(equalTo: window.trailingAnchor),
             project.bottomAnchor.constraint(equalTo: window.bottomAnchor),
         ])
+        configure(project)
         return window
     }
 

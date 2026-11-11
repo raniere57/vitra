@@ -157,6 +157,21 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// the eyes rather than guessed and undone.
     private let dropShade = PassthroughView()
 
+    /// The matches of a find in the conversation, painted over the text.
+    private let findOverlay = PassthroughView()
+
+    /// What the find overlay paints, in screen rows (scrollback included).
+    /// Only the rows in the viewport are drawn, and redrawn as it scrolls.
+    var findHighlights: [FindHighlight] = [] {
+        didSet {
+            drawnFindKey = nil
+            setNeedsRender()
+        }
+    }
+
+    /// The viewport and size the overlay was last drawn for.
+    private var drawnFindKey: [Int]?
+
     /// Whether the pane is being drawn at all. See `setDrawingActive`.
     private var isDrawingActive = true
 
@@ -223,6 +238,9 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         dropShade.layer?.borderWidth = 2
         dropShade.isHidden = true
         addSubview(dropShade)
+
+        findOverlay.wantsLayer = true
+        addSubview(findOverlay)
 
         focusBar.wantsLayer = true
         focusBar.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor
@@ -416,6 +434,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         tabButton.frame = zoomButton.frame.offsetBy(dx: -(PaneCornerButton.size + 4), dy: 0)
         gripButton.frame = tabButton.frame.offsetBy(dx: -(PaneCornerButton.size + 4), dy: 0)
         scrollIndicator.update(snapshot.scroll)
+        updateFindOverlay()
         guard showsCommandBlocks else { return }
         blockGutter.frame = bounds
         blockGutter.update(
@@ -1246,6 +1265,64 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
 
     /// How many rows away from the cursor an input is looked for.
     private static let longestInput = 40
+
+    // MARK: - Find in the conversation
+
+    /// Where the viewport is in the scrollback, as last drawn.
+    var scrollPosition: ScrollPosition { snapshot.scroll }
+
+    /// Scrolls so `screenRow` is in view, a third of the way down, unless it
+    /// already is.
+    func reveal(screenRow: Int) {
+        let scroll = snapshot.scroll
+        let rows = max(Int(snapshot.rows), 1)
+        guard screenRow < scroll.offset || screenRow >= scroll.offset + rows else { return }
+        let target = max(0, min(screenRow - rows / 3, scroll.total - rows))
+        session.scroll(lines: target - scroll.offset)
+    }
+
+    /// Puts the viewport back where `position` had it: at the live edge if it
+    /// was there, since output may have moved the edge since.
+    func restoreScroll(to position: ScrollPosition) {
+        if position.isAtBottom {
+            session.scrollToBottom()
+        } else {
+            session.scroll(lines: position.offset - snapshot.scroll.offset)
+        }
+    }
+
+    /// Paints the matches that are in the viewport: the current one in the
+    /// accent, solid, the others in a wash of it.
+    private func updateFindOverlay() {
+        findOverlay.frame = bounds
+        let scroll = snapshot.scroll
+        let key = [scroll.offset, Int(snapshot.rows), Int(bounds.width), Int(bounds.height), findHighlights.count]
+        guard key != drawnFindKey else { return }
+        drawnFindKey = key
+        let cellWidth = renderer.metrics.cellWidth / scale
+        let cellHeight = renderer.metrics.cellHeight / scale
+        let visible = scroll.offset ..< scroll.offset + Int(snapshot.rows)
+        // ponytail: walks every match each time the viewport moves; a binary
+        // search on row if a conversation ever has six-figure match counts.
+        let layers: [CALayer] = findHighlights.filter { visible.contains($0.span.row) }.map { highlight in
+            let layer = CALayer()
+            let row = CGFloat(highlight.span.row - scroll.offset)
+            // The overlay is not flipped: its layers count y from the bottom.
+            layer.frame = CGRect(
+                x: padding + gutterWidth + CGFloat(highlight.span.columns.lowerBound) * cellWidth - 1,
+                y: bounds.height - padding - (row + 1) * cellHeight,
+                width: CGFloat(highlight.span.columns.count) * cellWidth + 2,
+                height: cellHeight
+            )
+            layer.cornerRadius = 3
+            let accent = CockpitStyle.accent
+            layer.backgroundColor = accent.withAlphaComponent(highlight.isCurrent ? 0.42 : 0.16).cgColor
+            layer.borderColor = accent.withAlphaComponent(highlight.isCurrent ? 1 : 0.35).cgColor
+            layer.borderWidth = 1
+            return layer
+        }
+        findOverlay.layer?.sublayers = layers
+    }
 
     /// Clears the screen and the scrollback, the way Cmd-K does everywhere else
     /// on macOS.

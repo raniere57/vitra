@@ -22,15 +22,20 @@ struct CockpitProject: Codable, Equatable {
     /// Whether the maestro delegates to workers or works alone.
     var mode: MaestroMode
 
-    init(path: String, session: String? = nil, mode: MaestroMode = .orchestrator) {
+    /// The side panel put away (⌘⇧\), the maestro given the whole window.
+    /// Kept per project: one is watched, another only talked to.
+    var sidePanelHidden: Bool
+
+    init(path: String, session: String? = nil, mode: MaestroMode = .orchestrator, sidePanelHidden: Bool = false) {
         // One spelling per directory, so a trailing slash never makes a
         // second tab for the same place.
         self.path = path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
         self.session = session
         self.mode = mode
+        self.sidePanelHidden = sidePanelHidden
     }
 
-    private enum CodingKeys: String, CodingKey { case path, session, mode }
+    private enum CodingKeys: String, CodingKey { case path, session, mode, sidePanelHidden }
 
     /// Files saved before the mode existed, or with one this build does not
     /// know, open in the orchestrator mode.
@@ -39,7 +44,8 @@ struct CockpitProject: Codable, Equatable {
         self.init(
             path: try container.decode(String.self, forKey: .path),
             session: try container.decodeIfPresent(String.self, forKey: .session),
-            mode: (try? container.decodeIfPresent(MaestroMode.self, forKey: .mode)) ?? .orchestrator
+            mode: (try? container.decodeIfPresent(MaestroMode.self, forKey: .mode)) ?? .orchestrator,
+            sidePanelHidden: (try? container.decodeIfPresent(Bool.self, forKey: .sidePanelHidden)) ?? false
         )
     }
 
@@ -97,7 +103,7 @@ struct CockpitState: Codable, Equatable {
     private var repaired: CockpitState {
         let projects = projects.map { project in
             let isUUID = project.session.flatMap { UUID(uuidString: $0) } != nil
-            return isUUID ? project : CockpitProject(path: project.path, mode: project.mode)
+            return isUUID ? project : CockpitProject(path: project.path, mode: project.mode, sidePanelHidden: project.sidePanelHidden)
         }
         let last = max(projects.count - 1, 0)
         return CockpitState(projects: projects, selected: min(max(selected, 0), last))

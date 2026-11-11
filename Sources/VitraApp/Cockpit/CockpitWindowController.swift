@@ -14,7 +14,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     private let tabBar = CockpitTabBar()
     private let stage = NSView()
-    private let welcome = NSStackView()
+    private lazy var welcome = WelcomeView(target: self, action: #selector(openProject(_:)))
 
     private var projects: [CockpitProject]
     private var views: [String: ProjectView] = [:]
@@ -115,8 +115,34 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     /// Brings a tab of the right side to the front, in the project on screen.
     /// The menu item's tag says which.
     @objc func showSideTab(_ sender: NSMenuItem) {
-        guard projects.indices.contains(selected), SideTab.allCases.indices.contains(sender.tag) else { return }
-        views[projects[selected].path]?.select(SideTab.allCases[sender.tag])
+        guard SideTab.allCases.indices.contains(sender.tag) else { return }
+        current?.choose(SideTab.allCases[sender.tag])
+    }
+
+    @objc func nextSideTab(_ sender: Any?) { current?.chooseSideTab(by: 1) }
+    @objc func previousSideTab(_ sender: Any?) { current?.chooseSideTab(by: -1) }
+    @objc func focusMaestro(_ sender: Any?) { current?.focusTerminal() }
+    @objc func focusSidePanel(_ sender: Any?) { current?.focusSidePanel() }
+    @objc func toggleSideWidth(_ sender: Any?) { current?.toggleSideWidth() }
+
+    @objc func toggleSidePanel(_ sender: Any?) {
+        guard let current else { return }
+        current.setSideHidden(!current.isSideHidden)
+    }
+
+    @objc func findInConversation(_ sender: Any?) { current?.showFind() }
+    @objc func findNextInConversation(_ sender: Any?) { current?.findStep(forward: true) }
+    @objc func findPreviousInConversation(_ sender: Any?) { current?.findStep(forward: false) }
+
+    /// ⌘/: every chord, as a sheet over the window.
+    @objc func showShortcuts(_ sender: Any?) {
+        guard let window, window.attachedSheet == nil else { return }
+        window.beginSheet(ShortcutsSheet.makeWindow()) { _ in }
+    }
+
+    /// The project on screen, once its view is made.
+    private var current: ProjectView? {
+        projects.indices.contains(selected) ? views[projects[selected].path] : nil
     }
 
     @objc func nextProject(_ sender: Any?) { step(by: 1) }
@@ -191,6 +217,11 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         view.onModeChange = { [weak self] mode in
             guard let self, let index = self.projects.firstIndex(where: { $0.path == project.path }) else { return }
             self.projects[index].mode = mode
+            self.save()
+        }
+        view.onSideHiddenChange = { [weak self] hidden in
+            guard let self, let index = self.projects.firstIndex(where: { $0.path == project.path }) else { return }
+            self.projects[index].sidePanelHidden = hidden
             self.save()
         }
         views[project.path] = view
@@ -397,21 +428,6 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         content.wantsLayer = true
         content.layer?.backgroundColor = CockpitStyle.ground.cgColor
 
-        let headline = NSTextField.label("Abra seu primeiro projeto", font: CockpitStyle.ui(22, .semibold), color: CockpitStyle.text)
-        let body = NSTextField(wrappingLabelWithString: "Cada aba é uma pasta. Nela, o maestro planeja o trabalho e delega as partes a modelos mais baratos.")
-        body.font = CockpitStyle.ui(13)
-        body.textColor = CockpitStyle.muted
-        body.alignment = .center
-        body.preferredMaxLayoutWidth = 380
-        let open = NSButton(title: "Abrir projeto", target: self, action: #selector(openProject(_:)))
-        open.bezelStyle = .rounded
-        open.controlSize = .large
-        open.keyEquivalent = "\r"
-        welcome.orientation = .vertical
-        welcome.spacing = 12
-        welcome.setViews([headline, body, open], in: .center)
-        welcome.setCustomSpacing(20, after: body)
-
         for view in [tabBar, stage] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)
@@ -426,6 +442,26 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             stage.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             stage.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
+    }
+}
+
+extension CockpitWindowController: NSMenuItemValidation {
+    /// What needs a project is greyed out without one; "Projeto 7" without a
+    /// seventh. The panel item says which way it goes.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(openProject(_:)), #selector(closeProject(_:)), #selector(showShortcuts(_:)):
+            return true
+        case #selector(showProject(_:)):
+            return projects.indices.contains(item.tag)
+        case #selector(nextProject(_:)), #selector(previousProject(_:)):
+            return projects.count > 1
+        case #selector(toggleSidePanel(_:)):
+            item.title = current?.isSideHidden == true ? "Mostrar o painel" : "Ocultar o painel"
+            return current != nil
+        default:
+            return current != nil
+        }
     }
 }
 

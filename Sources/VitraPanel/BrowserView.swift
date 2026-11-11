@@ -31,7 +31,15 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     private var addressBeforeList = ""
     private let progress = NSProgressIndicator()
     private var pendingLoads: [(Result<Void, Error>) -> Void] = []
-    private lazy var findBar = FindBar(browser: self)
+    private lazy var findBar: FindBar = {
+        let bar = FindBar(placeholder: "find in page")
+        bar.onStep = { [weak self] query, forward in self?.find(query, forward: forward) }
+        bar.onClose = { [weak self] _ in
+            guard let self else { return }
+            self.window?.makeFirstResponder(self)
+        }
+        return bar
+    }()
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -498,8 +506,12 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
 
     /// The standard browser shortcuts the panel answers itself: find, and zoom.
     /// A panel is not a key window the menu drives, so the keys are read here.
+    ///
+    /// Only while the keyboard is in the panel: the window offers every view
+    /// the key, and ⌘F typed in the maestro's terminal beside a page is a
+    /// search of the conversation, not of the page.
     public override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard event.modifierFlags.contains(.command) else { return super.performKeyEquivalent(with: event) }
+        guard event.modifierFlags.contains(.command), hasKeyboard else { return super.performKeyEquivalent(with: event) }
         switch event.charactersIgnoringModifiers {
         case "f": showFind(); return true
         case "+", "=": zoom(by: Self.zoomStep); return true
@@ -510,7 +522,12 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     }
 
     private func showFind() {
-        findBar.reveal(in: self)
+        findBar.reveal(in: self, top: Theme.headerHeight + Theme.Space.md)
+        if !findBar.query.isEmpty { find(findBar.query, forward: true) }
+    }
+
+    private var hasKeyboard: Bool {
+        (window?.firstResponder as? NSView)?.isDescendant(of: self) == true
     }
 
     /// Runs a find and moves the selection, forwards or back.
