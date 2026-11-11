@@ -122,6 +122,13 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
     /// How hard the piece is. Nil in a record written before difficulty
     /// existed, which counts as normal.
     public let difficulty: Difficulty?
+    /// The audit's focuses: on an editing delivery, those the spawn forced
+    /// instead of the classifier's; on an auditor, those it audits, so the
+    /// record can tell who audits security well. Nil everywhere else.
+    public let auditFocus: [AuditFocus]?
+
+    /// Whether this run is an automatic audit of another's delivery.
+    public var isAudit: Bool { access == .read && auditFocus != nil }
 
     public init(
         cli: WorkerCLI,
@@ -136,8 +143,10 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
         commands: [String] = [],
         audit: Bool? = nil,
         minutes: Int? = nil,
-        difficulty: Difficulty? = nil
+        difficulty: Difficulty? = nil,
+        auditFocus: [AuditFocus]? = nil
     ) {
+        self.auditFocus = auditFocus
         self.cli = cli
         self.model = model
         self.prompt = prompt
@@ -156,7 +165,7 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
     // Runs recorded before a field existed must still load, and a field that
     // was never set must not be written as a pile of nulls and empty lists.
     private enum CodingKeys: String, CodingKey {
-        case cli, model, prompt, directory, access, label, kind, effort, project, commands, audit, minutes, difficulty
+        case cli, model, prompt, directory, access, label, kind, effort, project, commands, audit, minutes, difficulty, auditFocus
     }
 
     public init(from decoder: Decoder) throws {
@@ -174,6 +183,8 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
         audit = try values.decodeIfPresent(Bool.self, forKey: .audit)
         minutes = try values.decodeIfPresent(Int.self, forKey: .minutes)
         difficulty = try values.decodeIfPresent(Difficulty.self, forKey: .difficulty)
+        // A focus this version does not know is dropped, not a broken record.
+        auditFocus = try values.decodeIfPresent([String].self, forKey: .auditFocus)?.compactMap(AuditFocus.init(rawValue:))
     }
 
     static let mostCommands = 8

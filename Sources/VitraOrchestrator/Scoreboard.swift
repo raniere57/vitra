@@ -220,7 +220,7 @@ public enum Scoreboard {
             let extra = [
                 nextLine(offers, history: history, kind: each, lineup: lineup, now: now),
                 untriedLine(offers, history: history, kind: each),
-            ].compactMap { $0 }
+            ].compactMap { $0 } + (each == .review ? focusLines(history) : [])
             guard !ofKind.isEmpty || !extra.isEmpty else { continue }
             lines.append(each.rawValue)
             lines.append(contentsOf: ofKind.map { "  " + line($0) })
@@ -273,6 +273,25 @@ public enum Scoreboard {
             offers: offers, installed: Set(offers.map(\.cli)), lineup: lineup, now: now
         ) else { return nil }
         return "  vitra picks next: \(choice.offer.name) — \(choice.reason)"
+    }
+
+    /// Rated audits of a focus needed before its best auditor is named.
+    static let ratedAuditsPerFocus = 2
+
+    /// One line per audit focus with two rated audits or more: the auditor
+    /// rated best on it, so the record says who audits security well.
+    static func focusLines(_ history: [Run]) -> [String] {
+        let rated = history.filter { $0.spec.isAudit && $0.rating != nil && $0.providerFailure == nil }
+        return AuditFocus.allCases.compactMap { focus in
+            let audits = rated.filter { $0.spec.auditFocus?.contains(focus) == true }
+            guard audits.count >= ratedAuditsPerFocus else { return nil }
+            let byWorker = Dictionary(grouping: audits) { $0.spec.worker }.map { worker, runs in
+                (worker, Double(runs.compactMap { $0.rating?.score }.reduce(0, +)) / Double(runs.count), runs.count)
+            }
+            guard let best = byWorker.max(by: { ($0.1, $0.2, $1.0) < ($1.1, $1.2, $0.0) }) else { return nil }
+            return "  audits of \(focus.rawValue): best rated \(best.0) — "
+                + String(format: "%.1f/5 over %d of %d rated", best.1, best.2, audits.count)
+        }
     }
 
     /// How many untried workers are named before the rest are counted.
