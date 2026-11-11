@@ -233,6 +233,9 @@ final class WorkerRowView: NSView {
         title.textColor = row.kind == .stopped ? CockpitStyle.muted : CockpitStyle.text
         state.stringValue = row.stateText
         meta.stringValue = row.meta
+        // Two lines closed, all of it open: the model, the times, the cost and
+        // why this worker do not fit one line of the narrow panel.
+        meta.maximumNumberOfLines = isOpen ? 0 : 2
 
         let (dotColor, stateColor): (NSColor, NSColor) = switch row.kind {
         case .running: (CockpitStyle.accent, CockpitStyle.accent)
@@ -343,6 +346,10 @@ final class WorkerRowView: NSView {
         answerBox.addSubview(answer)
         answerBox.isHidden = true
 
+        meta.lineBreakMode = .byWordWrapping
+        meta.cell?.wraps = true
+        meta.cell?.truncatesLastVisibleLine = true
+        meta.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let column = NSStackView(views: [top, meta, answerBox, actions])
         column.orientation = .vertical
         column.alignment = .leading
@@ -362,7 +369,7 @@ final class WorkerRowView: NSView {
             top.widthAnchor.constraint(equalTo: column.widthAnchor),
             // Under the title, not under the dot.
             meta.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            meta.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor),
+            meta.trailingAnchor.constraint(equalTo: column.trailingAnchor),
             answerBox.leadingAnchor.constraint(equalTo: title.leadingAnchor),
             answerBox.trailingAnchor.constraint(equalTo: column.trailingAnchor),
             actions.leadingAnchor.constraint(equalTo: title.leadingAnchor),

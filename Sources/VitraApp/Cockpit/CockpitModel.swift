@@ -232,7 +232,7 @@ enum WorkerBoard {
             kind: kind,
             stateText: (delivered(run) && run.rating?.isSatisfactory == false ? "insatisfatório" : stateText(run.state, kind))
                 + (run.rating.map { " · \($0.score)/5" } ?? ""),
-            meta: ([model, chooser(run), started, elapsed, tail].compactMap { $0 }).joined(separator: " · "),
+            meta: ([model, started, elapsed, tail, chooser(run)].compactMap { $0 }).joined(separator: " · "),
             detail: run.output?.text
         )
     }

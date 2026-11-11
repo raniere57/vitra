@@ -106,16 +106,16 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
         return WorkerBoard.row(worker, now: now, timeZone: zone).meta
     }
     #expect(meta(PickReason(code: .lineup, text: "1st in your lineup for hard pieces", position: 1))
-        == "deepseek-v4.1-flash-free · Vitra · 1º da sua escalação · 10:46 · 38s · só leitura")
-    #expect(meta(PickReason(code: .lineup, text: "3rd", position: 3)).contains(" · Vitra · 3º da sua escalação · "))
-    #expect(meta(PickReason(code: .learning, text: "learning turn")).contains(" · Vitra · vez de teste · "))
+        == "deepseek-v4.1-flash-free · 10:46 · 38s · só leitura · Vitra · 1º da sua escalação")
+    #expect(meta(PickReason(code: .lineup, text: "3rd", position: 3)).hasSuffix(" · Vitra · 3º da sua escalação"))
+    #expect(meta(PickReason(code: .learning, text: "learning turn")).hasSuffix(" · Vitra · vez de teste"))
     #expect(meta(PickReason(code: .lineup, text: "2nd", position: 2, passed: "opus", cause: .quota))
-        .contains(" · Vitra · opus sem cota · "))
-    #expect(meta(PickReason(code: .lineup, text: "2nd", position: 2, passed: "opus", cause: .slow)).contains(" · Vitra · opus lento · "))
-    #expect(meta(PickReason(code: .record, text: "x")).contains(" · Vitra · fora da escalação, pelo histórico · "))
-    #expect(meta(PickReason(code: .learning, text: "x"), retryOf: "aaaaaaaa").contains(" · Vitra, após falha · vez de teste · "))
+        .hasSuffix(" · Vitra · opus sem cota"))
+    #expect(meta(PickReason(code: .lineup, text: "2nd", position: 2, passed: "opus", cause: .slow)).hasSuffix(" · Vitra · opus lento"))
+    #expect(meta(PickReason(code: .record, text: "x")).hasSuffix(" · Vitra · fora da escalação, pelo histórico"))
+    #expect(meta(PickReason(code: .learning, text: "x"), retryOf: "aaaaaaaa").hasSuffix(" · Vitra, após falha · vez de teste"))
     // Picked before reasons were kept, and named by hand.
-    #expect(meta(nil) == "deepseek-v4.1-flash-free · Vitra · 10:46 · 38s · só leitura")
+    #expect(meta(nil) == "deepseek-v4.1-flash-free · 10:46 · 38s · só leitura · Vitra")
     #expect(meta(nil, picked: false) == "deepseek-v4.1-flash-free · 10:46 · 38s · só leitura")
 }
 
