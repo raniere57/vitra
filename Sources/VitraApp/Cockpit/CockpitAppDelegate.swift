@@ -124,6 +124,7 @@ final class CockpitAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let edit = NSMenu(title: "Editar")
+        edit.addItem(withTitle: "Recortar", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         edit.addItem(withTitle: "Copiar", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         edit.addItem(withTitle: "Colar", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         edit.addItem(withTitle: "Selecionar tudo", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a")

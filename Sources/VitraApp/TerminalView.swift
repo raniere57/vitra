@@ -1131,6 +1131,46 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         pasteboard.setString(text, forType: .string)
     }
 
+    /// Copies the selection and takes it out of the line being typed. A
+    /// terminal cannot delete what a program has already printed, so only
+    /// typed text goes: one stretch on the cursor's row, or the whole of an
+    /// input that runs over several rows. Anything else is just copied.
+    @objc func cut(_ sender: Any?) {
+        guard let text = session.selectedText(), !text.isEmpty else { return }
+        copy(sender)
+        defer { session.clearSelection() }
+        guard snapshot.scroll.isAtBottom, let cursor = snapshot.cursor else { return }
+
+        if let span = selectedSpan(), span.row == Int(cursor.row),
+           let edit = SelectionEdit.replacing(
+               selectionRow: span.row,
+               start: span.start,
+               end: span.end,
+               cursorRow: Int(cursor.row),
+               cursorColumn: Int(cursor.column)
+           ) {
+            apply(edit)
+            return
+        }
+
+        guard session.isRunningProgram, let input = inputSpan() else { return }
+        let rows = Int(input.firstRow) ... Int(input.lastRow)
+        let typed = rows.map { rowCells($0).joined() }.joined()
+        let squeezed = { (string: String) in string.filter { !$0.isWhitespace } }
+        // The marker is not typed text; with it gone, what was selected has to
+        // be the whole input for "cut" to mean "clear it".
+        guard squeezed(typed).hasSuffix(squeezed(text)), squeezed(text).count * 10 >= squeezed(typed).count * 9 else { return }
+        // To the end of the input, then back over all of it. A backspace too
+        // many does nothing at the start of an empty input.
+        for _ in Int(cursor.row) ..< Int(input.lastRow) {
+            session.send(KeyEvent(keyCode: Self.downArrowKeyCode))
+        }
+        session.send(text: "\u{05}")
+        for _ in 0 ..< typed.count {
+            session.send(KeyEvent(keyCode: Self.backspaceKeyCode))
+        }
+    }
+
     @objc func paste(_ sender: Any?) {
         // Files and images on the clipboard become paths, never bytes on the pty.
         let found = PasteboardAttachments.read(from: .general, store: attachments)
@@ -1155,30 +1195,57 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         // Inside a program — Claude Code, above all — "all" is the line being
         // typed, not the transcript around it: that is what you select to
         // replace or clear it. In a plain shell the whole screen still wins.
-        if session.isRunningProgram, let line = inputLineSpan() {
-            session.beginSelection(column: line.start, row: line.row, clickCount: 1)
-            session.extendSelection(column: line.end, row: line.row)
+        if session.isRunningProgram, let input = inputSpan() {
+            session.beginSelection(column: input.start, row: input.firstRow, clickCount: 1)
+            session.extendSelection(column: input.end, row: input.lastRow)
             return
         }
         session.selectAll()
     }
 
-    /// The typed text on the cursor's row: first to last non-blank cell, less
-    /// a prompt marker in front (`❯`, `>`, `$` — one glyph and a space).
-    private func inputLineSpan() -> (row: UInt16, start: UInt16, end: UInt16)? {
+    /// The text being typed, every row of it: from just after the prompt
+    /// marker (`❯`, `>`, `$` — one glyph and a space) to the last non-blank
+    /// cell of the last row. A long prompt wraps, and "all" is all of it, not
+    /// the row the cursor happens to be on.
+    private func inputSpan() -> (firstRow: UInt16, start: UInt16, lastRow: UInt16, end: UInt16)? {
         guard snapshot.scroll.isAtBottom, let cursor = snapshot.cursor else { return nil }
         let row = Int(cursor.row)
-        let columns = Int(snapshot.columns)
-        guard row < Int(snapshot.rows), columns > 0 else { return nil }
-        let text = rowCells(row)
-        guard var start = text.firstIndex(where: { $0 != " " }),
-              let end = text.lastIndex(where: { $0 != " " })
+        let rows = Int(snapshot.rows)
+        guard row < rows, Int(snapshot.columns) > 0 else { return nil }
+
+        // A program draws its input between rules, or under what came before:
+        // a rule or an empty row ends it on either side.
+        func ends(_ candidate: Int) -> Bool {
+            let cells = rowCells(candidate)
+            guard cells.contains(where: { $0 != " " }) else { return true }
+            return cells.filter { $0 == "─" || $0 == "━" || $0 == "═" }.count >= 8
+        }
+
+        // Up to the row that carries the marker; the cursor's own row when no
+        // row above it does.
+        var first = row
+        var candidate = row
+        while candidate >= max(0, row - Self.longestInput), !ends(candidate) {
+            if markerColumn(of: candidate) != nil {
+                first = candidate
+                break
+            }
+            candidate -= 1
+        }
+        var last = row
+        while last + 1 < min(rows, row + Self.longestInput), !ends(last + 1) { last += 1 }
+
+        guard var start = rowCells(first).firstIndex(where: { $0 != " " }),
+              let end = rowCells(last).lastIndex(where: { $0 != " " })
         else { return nil }
-        if let marker = markerColumn(of: row) { start = marker + 2 }
-        // The marker was the whole line: nothing typed yet.
-        guard start <= end else { return nil }
-        return (UInt16(row), UInt16(start), UInt16(end))
+        if let marker = markerColumn(of: first) { start = marker + 2 }
+        // The marker was the whole input: nothing typed yet.
+        guard first < last || start <= end else { return nil }
+        return (UInt16(first), UInt16(start), UInt16(last), UInt16(end))
     }
+
+    /// How many rows away from the cursor an input is looked for.
+    private static let longestInput = 40
 
     /// Clears the screen and the scrollback, the way Cmd-K does everywhere else
     /// on macOS.
@@ -1189,7 +1256,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// Greys out Copy when there is nothing selected.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
-        case #selector(copy(_:)):
+        case #selector(copy(_:)), #selector(cut(_:)):
             return session.selectedText()?.isEmpty == false
         case #selector(paste(_:)):
             // Not only text: a screenshot is an image with no text beside it,
@@ -1419,6 +1486,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// The backspace key, by keycode.
     private static let backspaceKeyCode: UInt16 = 0x33
     private static let leftArrowKeyCode: UInt16 = 0x7B
+    private static let downArrowKeyCode: UInt16 = 0x7D
     private static let rightArrowKeyCode: UInt16 = 0x7C
 
     /// The keystrokes that would delete the selection out of the program's own
