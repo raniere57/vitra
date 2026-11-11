@@ -173,7 +173,9 @@ enum AttentionPolicy {
 
     static func elapsed(_ seconds: TimeInterval) -> String {
         let seconds = max(0, Int(seconds))
-        if seconds < 60 { return "\(seconds) s" }
+        // The pill is redrawn every half minute: a count of seconds would
+        // sit frozen on screen, so under a minute it says only that.
+        if seconds < 60 { return "agora" }
         if seconds < 3600 { return "\(seconds / 60) min" }
         return "\(seconds / 3600) h"
     }

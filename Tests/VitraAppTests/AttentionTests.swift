@@ -143,7 +143,7 @@ private func update(_ event: String, type: String? = nil, message: String? = nil
     let waiting = AttentionRecord(state: .waiting, message: nil, since: t0, path: project)
     let permission = AttentionRecord(state: .needsPermission, message: nil, since: t0, path: project)
     #expect(AttentionPolicy.label(waiting, now: t0.addingTimeInterval(2)) == nil)
-    #expect(AttentionPolicy.label(waiting, now: t0.addingTimeInterval(40)) == "aguardando você · 40 s")
+    #expect(AttentionPolicy.label(waiting, now: t0.addingTimeInterval(40)) == "aguardando você · agora")
     #expect(AttentionPolicy.label(permission, now: t0.addingTimeInterval(190)) == "pede permissão · 3 min")
     #expect(AttentionPolicy.elapsed(7_300) == "2 h")
     #expect(AttentionPolicy.body(waiting) == "O maestro terminou e aguarda você")

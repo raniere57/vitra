@@ -12,8 +12,6 @@ final class AttentionAlerts: NSObject, UNUserNotificationCenterDelegate {
     /// Called with a project's path when its notification is clicked.
     var onOpen: ((String) -> Void)?
 
-    private var isAuthorizationAsked = false
-
     /// Notifications need an app bundle: from a bare `swift run` binary the
     /// system has no identity to post them under, and asking for the center
     /// raises.
@@ -24,17 +22,19 @@ final class AttentionAlerts: NSObject, UNUserNotificationCenterDelegate {
         guard isAvailable else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        // Asked the first time there is something to say, not at launch.
-        if !isAuthorizationAsked {
-            isAuthorizationAsked = true
-            center.requestAuthorization(options: [.alert]) { _, _ in }
-        }
         let content = UNMutableNotificationContent()
         content.title = name
         content.body = body
         content.userInfo = [Self.projectKey: project]
         // One per project: a newer one replaces the older instead of stacking.
-        center.add(UNNotificationRequest(identifier: "attention-" + project, content: content, trigger: nil)) { _ in }
+        let request = UNNotificationRequest(identifier: "attention-" + project, content: content, trigger: nil)
+        // Asked the first time there is something to say, not at launch — and
+        // the notification waits for the answer: posted before it, the system
+        // drops it and the first wait goes by with a sound and no banner.
+        center.requestAuthorization(options: [.alert]) { granted, _ in
+            guard granted else { return }
+            center.add(request) { _ in }
+        }
     }
 
     nonisolated func userNotificationCenter(
