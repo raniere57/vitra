@@ -13,7 +13,8 @@ import Foundation
 struct RunSummary: Codable, Equatable, Sendable {
     /// 2: an empty answer and a timeout are failures, so a summary written
     /// before that says "finished" for runs that are no longer.
-    static let version = 2
+    /// 3: a run that did not run because of its provider says so.
+    static let version = 3
     static let textLimit = 4000
 
     var version = RunSummary.version
@@ -32,6 +33,7 @@ struct RunSummary: Codable, Equatable, Sendable {
     let inputTokens: Int
     let outputTokens: Int
     let sessionID: String?
+    let providerFailure: ProviderFailure?
 
     init(
         exitCode: Int32,
@@ -54,6 +56,11 @@ struct RunSummary: Codable, Equatable, Sendable {
         inputTokens = output.inputTokens
         outputTokens = output.outputTokens
         sessionID = output.sessionID
+        // A timeout is the run's own doing, and a delivery is no failure.
+        let didNotDeliver = output.isError || exitCode != 0
+        providerFailure = didNotDeliver && exitCode != Orchestrator.timeoutExitCode
+            ? ProviderFailure.detect(text: output.text, errorTail: errorTail)
+            : nil
     }
 
     var output: WorkerOutput {

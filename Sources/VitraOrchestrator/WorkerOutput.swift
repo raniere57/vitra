@@ -194,3 +194,71 @@ public struct WorkerOutput: Equatable, Sendable {
     private static func int(_ value: Any?) -> Int { (value as? NSNumber)?.intValue ?? 0 }
     private static func double(_ value: Any?) -> Double { (value as? NSNumber)?.doubleValue ?? 0 }
 }
+
+/// A run that did not run because of its provider, not because of its work:
+/// out of quota, signed out, or the API down. Nothing was delivered and
+/// nothing is learned about the worker, so such a run counts for nobody.
+public enum ProviderFailure: Codable, Equatable, Sendable {
+    case quota(String)
+    case signedOut(String)
+    case unavailable(String)
+
+    /// What kind it is, as it is said in reports.
+    public var name: String {
+        switch self {
+        case .quota: return "quota"
+        case .signedOut: return "signed out"
+        case .unavailable: return "unavailable"
+        }
+    }
+
+    /// The words that matched, as the provider wrote them.
+    public var reason: String {
+        switch self {
+        case let .quota(reason), let .signedOut(reason), let .unavailable(reason): return reason
+        }
+    }
+
+    /// How long the CLI stays out of the picker after this: nil until a later
+    /// run of it succeeds, which is for a sign-in the user has to redo.
+    public var stall: TimeInterval? {
+        switch self {
+        case .quota: return 60 * 60
+        case .signedOut: return nil
+        case .unavailable: return 10 * 60
+        }
+    }
+
+    /// A provider's message is short; a worker's report of a failed task is
+    /// not, and may mention a login or a quota for reasons of its own.
+    static let longestMessage = 800
+
+    private static let patterns: [(regex: String, make: @Sendable (String) -> ProviderFailure)] = [
+        (#"free usage limit|usage limit|rate[ _-]?limit|quota|\b429\b|too many requests|\bcredit"#, { .quota($0) }),
+        (#"authentication required|not logged in|not signed in|\blog ?in\b|\bsign ?in\b|unauthori[sz]ed"#, { .signedOut($0) }),
+        (
+            #"overloaded|service unavailable|bad gateway|gateway time-?out|"#
+                + #"(?:http|status|error|code)[^0-9\n]{0,12}5\d\d\b|\b5\d\d (?:internal|server|service|bad|gateway)"#,
+            { .unavailable($0) }
+        ),
+    ]
+
+    /// Reads a failed run's answer and stderr for the provider's own words.
+    /// Nil when neither is short enough to be the provider's.
+    static func detect(text: String, errorTail: String?) -> ProviderFailure? {
+        for source in [text, errorTail ?? ""] where source.count <= longestMessage {
+            for (regex, make) in patterns {
+                if let range = source.range(of: regex, options: [.regularExpression, .caseInsensitive]) {
+                    return make(reason(of: source, around: range))
+                }
+            }
+        }
+        return nil
+    }
+
+    /// The line the match is in, trimmed and cut: what the provider said.
+    private static func reason(of source: String, around range: Range<String.Index>) -> String {
+        let text = source[source.lineRange(for: range)].trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.count > 160 ? String(text.prefix(159)) + "…" : text
+    }
+}
