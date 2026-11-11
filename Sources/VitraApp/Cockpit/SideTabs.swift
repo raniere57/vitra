@@ -104,7 +104,7 @@ private final class TabButton: NSButton {
 final class RankingView: NSView {
     /// Fixed widths of the figure columns, so that they line up from row to row
     /// and from section to section. What is left goes to the name.
-    private enum Column {
+    enum Column {
         static let rank: CGFloat = 16
         static let score: CGFloat = 32
         static let time: CGFloat = 50
@@ -114,9 +114,12 @@ final class RankingView: NSView {
     }
 
     private let column = NSStackView()
+    /// The user's lineup, above the record; it loads and saves itself.
+    private let lineup: LineupSectionView
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
+    init(lineup: LineupSectionView = LineupSectionView()) {
+        self.lineup = lineup
+        super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = CockpitStyle.panel.cgColor
         column.orientation = .vertical
@@ -150,13 +153,17 @@ final class RankingView: NSView {
 
     func show(_ rows: [RankingRow]) {
         column.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        add(lineup)
+        column.setCustomSpacing(CockpitStyle.Space.xxl, after: lineup)
+        lineup.reload()
         if rows.isEmpty {
-            column.addArrangedSubview(NSTextField.label("Ainda não há entregas para comparar", font: CockpitStyle.title, color: CockpitStyle.text))
-            let body = NSTextField(wrappingLabelWithString: "O maestro dá uma nota de 1 a 5 a cada entrega que revisa. Com as notas e os tempos, o ranking aparece aqui e ele passa a escolher o operário por ele.")
+            let title = NSTextField.label("Ainda não há entregas para comparar", font: CockpitStyle.title, color: CockpitStyle.text)
+            column.addArrangedSubview(title)
+            let body = NSTextField(wrappingLabelWithString: "O maestro dá uma nota de 1 a 5 a cada entrega que revisa. Com as notas e os tempos, o ranking aparece aqui, e quem fica para trás desce na sua escalação.")
             body.font = CockpitStyle.body
             body.textColor = CockpitStyle.muted
             column.addArrangedSubview(body)
-            column.setCustomSpacing(CockpitStyle.Space.md, after: column.arrangedSubviews[0])
+            column.setCustomSpacing(CockpitStyle.Space.md, after: title)
             body.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -2 * CockpitStyle.inset).isActive = true
             return
         }
@@ -174,7 +181,7 @@ final class RankingView: NSView {
                 let heading = NSTextField.label(section.uppercased(), font: CockpitStyle.micro, color: CockpitStyle.text)
                 column.addArrangedSubview(heading)
                 column.setCustomSpacing(CockpitStyle.Space.md, after: heading)
-                add(headerRow())
+                add(Self.headerRow())
             }
             if !isFirstOfSection {
                 // The hairline between two rows of one section.
@@ -183,7 +190,7 @@ final class RankingView: NSView {
             }
             isFirstOfSection = false
             place += 1
-            let view = tableRow(row, place: place)
+            let view = Self.tableRow(row, place: place)
             add(view)
             previous = view
         }
@@ -196,7 +203,7 @@ final class RankingView: NSView {
 
     /// The small row of captions over one section's figures, with a hairline
     /// under it.
-    private func headerRow() -> NSView {
+    private static func headerRow() -> NSView {
         let heads = line([
             cell("#", Column.rank, .left, font: CockpitStyle.micro, color: CockpitStyle.muted),
             flexible("MODELO", font: CockpitStyle.micro, color: CockpitStyle.muted),
@@ -215,7 +222,7 @@ final class RankingView: NSView {
     }
 
     /// One worker: place, name, and the four figures in their columns.
-    private func tableRow(_ row: RankingRow, place: Int) -> NSView {
+    private static func tableRow(_ row: RankingRow, place: Int) -> NSView {
         let name = flexible(row.model, font: CockpitStyle.label, color: CockpitStyle.text)
         name.lineBreakMode = .byTruncatingMiddle
         let view = line([
@@ -232,7 +239,7 @@ final class RankingView: NSView {
         return view
     }
 
-    private func line(_ views: [NSView], height: CGFloat) -> NSStackView {
+    static func line(_ views: [NSView], height: CGFloat) -> NSStackView {
         let stack = NSStackView(views: views)
         stack.spacing = Column.gap
         stack.alignment = .centerY
@@ -243,7 +250,7 @@ final class RankingView: NSView {
     }
 
     /// A label of fixed width: a column.
-    private func cell(_ text: String, _ width: CGFloat, _ alignment: NSTextAlignment, font: NSFont, color: NSColor) -> NSTextField {
+    static func cell(_ text: String, _ width: CGFloat, _ alignment: NSTextAlignment, font: NSFont, color: NSColor) -> NSTextField {
         let label = NSTextField.label(text, font: font, color: color)
         label.alignment = alignment
         label.lineBreakMode = .byClipping
@@ -254,7 +261,7 @@ final class RankingView: NSView {
     }
 
     /// The column that takes what the fixed ones leave, and gives way first.
-    private func flexible(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
+    static func flexible(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
         let label = NSTextField.label(text, font: font, color: color)
         label.setContentHuggingPriority(.defaultLow, for: .horizontal)
         return label

@@ -88,7 +88,7 @@ public enum ModelCatalog {
 
 
     /// One worker the catalogue offers: a CLI, a model, and the effort it runs at.
-    public struct Offer: Hashable, Sendable {
+    public struct Offer: Hashable, Sendable, Codable {
         public let cli: WorkerCLI
         public let model: String
         public let effort: String?

@@ -13,10 +13,19 @@ private let haikuLow = offer(.claude, "haiku", "low")
 private let haikuMedium = offer(.claude, "haiku", "medium")
 private let haikuHigh = offer(.claude, "haiku", "high")
 private let sonnet = offer(.claude, "sonnet", "high")
+private let opus = offer(.claude, "opus", "low")
 private let glm = offer(.opencode, "opencode/glm-5.3-flash-free")
+private let deepseek = offer(.opencode, "opencode/deepseek-v4.1-flash-free")
 private let grokLow = offer(.cursor, "grok-4.7-low-fast")
 private let grokHigh = offer(.cursor, "grok-4.7-high-fast")
+private let grok46 = offer(.cursor, "cursor-grok-4.6-low-fast")
 private let geminiLow = offer(.gemini, "gemini-3.8-flash-low")
+
+/// Everything the default lineup names, and a little more.
+private let catalogue = [haikuLow, haikuMedium, haikuHigh, sonnet, opus, glm, deepseek, grok46, grokLow, grokHigh, geminiLow]
+
+/// No preference: the record alone decides.
+private let noLineup = Lineup(hard: [], normal: [], easy: [])
 
 /// `count` runs of `worker` on `kind`, a second apart from `at`.
 private func runs(
@@ -29,6 +38,7 @@ private func runs(
     failed: Bool = false,
     providerFailure: ProviderFailure? = nil,
     difficulty: Difficulty? = nil,
+    pick: PickReason? = nil,
     at began: Date = start
 ) -> [Run] {
     (0..<count).map { index in
@@ -46,7 +56,8 @@ private func runs(
             output: WorkerOutput(text: failed ? "no" : "ok", isError: failed, costUSD: cost),
             errorTail: nil,
             rating: score.map { Rating(score: $0, note: nil, rated: started) },
-            providerFailure: providerFailure
+            providerFailure: providerFailure,
+            pick: pick
         )
     }
 }
@@ -62,134 +73,212 @@ private func pick(
     installed: Set<WorkerCLI> = installed,
     excluded: Set<WorkerCLI> = [],
     difficulty: Difficulty = .normal,
+    lineup: Lineup = noLineup,
     now at: Date = now
 ) -> WorkerPicker.Choice? {
     WorkerPicker.pick(
         kind: kind, access: access, needsCommands: needsCommands, history: history,
-        offers: offers, installed: installed, excluded: excluded, difficulty: difficulty, now: at
+        offers: offers, installed: installed, excluded: excluded, difficulty: difficulty, lineup: lineup, now: at
     )
 }
 
-// MARK: Learning
+// MARK: The lineup file
 
-@Test func learningTriesTheCheapestWorkerFirstAndFreeOnesCostNothing() {
-    // Catalogue order lists the dear ones first; cost decides.
-    let choice = pick([sonnet, haikuLow, glm])
-    #expect(choice?.offer == glm)
-    #expect(choice?.reason == "learning, 0 of 2 runs on review")
-    // Among claude, by tier: haiku low < medium < high < sonnet high.
-    #expect(pick([sonnet, haikuHigh, haikuMedium, haikuLow], installed: [.claude])?.offer == haikuLow)
+@Test func theLineupFileRoundTripsAndAMissingOrBrokenOneIsTheDefault() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-lineup-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("lineup.json")
+
+    #expect(Lineup.load(from: file) == .standard)
+    #expect(Lineup.standard.hard == [opus, sonnet, haikuHigh, grokHigh])
+    #expect(Lineup.standard.normal == [grok46, haikuLow, glm, deepseek, grokLow])
+    #expect(Lineup.standard.easy == [grok46, glm, haikuLow])
+
+    let mine = Lineup.standard.with(.hard, [sonnet, opus])
+    try mine.save(to: file)
+    #expect(Lineup.load(from: file) == mine)
+    #expect(Lineup.load(from: file).version == Lineup.currentVersion)
+
+    // A rewrite is seen at once, though the last read is cached.
+    let later = mine.with(.easy, [glm])
+    try later.save(to: file)
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(5)], ofItemAtPath: file.path)
+    #expect(Lineup.load(from: file) == later)
+
+    try Data("{ not json".utf8).write(to: file)
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(10)], ofItemAtPath: file.path)
+    #expect(Lineup.load(from: file) == .standard)
+
+    try Data(#"{"version": 99, "hard": [], "normal": [], "easy": []}"#.utf8).write(to: file)
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(15)], ofItemAtPath: file.path)
+    #expect(Lineup.load(from: file) == .standard)
 }
 
-@Test func theCLIWithTheFewestRunsOnTheKindBreaksACostTie() {
-    // Both free; opencode already has a run on review, cursor none.
-    let history = runs(glm, 1)
-    #expect(pick([glm, grokLow], history)?.offer == grokLow)
-    // A run on another kind is not a run on this one.
-    #expect(pick([glm, grokLow], runs(glm, 1, kind: .explore))?.offer == glm)
+// MARK: The lineup decides
+
+@Test func thePickerFollowsTheLineupAndSaysWhichPlace() {
+    let hard = pick(catalogue, difficulty: .hard, lineup: .standard)
+    #expect(hard?.offer == opus)
+    #expect(hard?.reason == "1st in your lineup for hard pieces")
+    #expect(hard?.pick == PickReason(code: .lineup, text: "1st in your lineup for hard pieces", position: 1))
+
+    #expect(pick(catalogue, lineup: .standard)?.offer == grok46)
+    #expect(pick(catalogue, difficulty: .easy, lineup: .standard)?.offer == grok46)
+    // Cursor cannot be given commands: the next, and that is not news.
+    let commands = pick(catalogue, needsCommands: true, lineup: .standard)
+    #expect(commands?.offer == haikuLow)
+    #expect(commands?.reason == "2nd in your lineup for normal pieces")
+    // Not installed or not offered is the same.
+    #expect(pick(catalogue, installed: [.opencode], difficulty: .easy, lineup: .standard)?.offer == glm)
+    #expect(pick([sonnet, haikuHigh], difficulty: .hard, lineup: .standard)?.offer == sonnet)
 }
 
-@Test func aHigherEffortIsTriedOnlyAfterALowerOneHasRun() {
-    // The high one is listed first and costs the same, yet low goes first.
-    #expect(pick([grokHigh, grokLow])?.offer == grokLow)
-    // One run of low is enough to open high, once low has had its deliveries.
-    #expect(pick([grokHigh, grokLow], runs(grokLow, 2))?.offer == grokHigh)
-    // For claude: medium waits for low, and high for low or medium.
-    #expect(pick([haikuMedium, haikuHigh, haikuLow], runs(haikuLow, 2), installed: [.claude])?.offer == haikuMedium)
-    // A model with no lower effort on offer is not held back.
-    #expect(pick([sonnet], installed: [.claude])?.offer == sonnet)
+@Test func aRecordDoesNotOverruleTheLineup() {
+    // glm is proven and fast on review; the user still wants opus first on hard pieces.
+    let history = runs(glm, 3, seconds: 5, score: 5, difficulty: .hard)
+    #expect(pick(catalogue, history, difficulty: .hard, lineup: .standard)?.offer == opus)
 }
 
-@Test func theEffortBelongsToTheWorkerSoOneEffortsRunsDoNotCloseAnother() {
-    // haiku at low has its two deliveries; haiku at medium has none.
-    let choice = pick([haikuLow, haikuMedium], runs(haikuLow, 2), installed: [.claude])
-    #expect(choice?.offer == haikuMedium)
-    #expect(choice?.reason == "learning, 0 of 2 runs on review")
+@Test func aStalledOrRestingLineupWorkerIsPassedOverAndTheReasonSaysWhy() throws {
+    // claude is out of quota: every claude worker on the hard tier is passed.
+    let quota = runs(haikuLow, 1, kind: .explore, seconds: 300, failed: true,
+                     providerFailure: .quota("usage limit"), at: now.addingTimeInterval(-10 * 60))
+    let choice = pick(catalogue, quota, difficulty: .hard, lineup: .standard)
+    #expect(choice?.offer == grokHigh)
+    #expect(choice?.reason == "4th in your lineup: opus (low) is out of quota")
+    #expect(choice?.pick.passed == "opus")
+    #expect(choice?.pick.cause == .quota)
+    #expect(choice?.pick.position == 4)
+
+    // opus failed three times in a row: it rests, sonnet goes.
+    let three = runs(opus, 3, kind: .explore, seconds: 100, failed: true, at: now.addingTimeInterval(-20 * 60))
+    let until = try #require(three.last?.ended).addingTimeInterval(30 * 60)
+    let resting = pick(catalogue, three, difficulty: .hard, lineup: .standard)
+    #expect(resting?.offer == sonnet)
+    #expect(resting?.reason == "2nd in your lineup: opus (low) is resting until \(WorkerPicker.clock(until)) after 3 failures in a row")
+    #expect(resting?.pick.cause == .resting)
 }
 
-@Test func twoDeliveriesEndLearning() {
-    #expect(pick([glm], runs(glm, 1))?.reason == "learning, 1 of 2 runs on review")
-    // A failed run is not a delivery.
-    #expect(pick([glm], runs(glm, 1) + runs(glm, 1, failed: true, at: start.addingTimeInterval(5)))?.reason
-        == "learning, 1 of 2 runs on review")
-    let done = pick([glm], runs(glm, 2, score: 5))
-    #expect(done?.offer == glm)
-    #expect(done?.reason.hasPrefix("fastest rated 4 or more on review") == true)
-}
-
-// MARK: Exploitation
-
-@Test func exploitationTakesTheFastestWorkerRatedFourOrMore() {
-    // Five runs of the kind, so the turn is not an exploration one.
-    let history = runs(glm, 2, seconds: 30, score: 5) + runs(grokLow, 3, seconds: 12, score: 4)
-    #expect(pick([glm, grokLow], history)?.offer == grokLow)
-    // Rated below four, a worker is not exploited however fast it is.
-    let fastButPoor = runs(glm, 2, seconds: 1, score: 3) + runs(grokLow, 3, seconds: 12, score: 4)
-    #expect(pick([glm, grokLow], fastButPoor)?.offer == grokLow)
-}
-
-@Test func equalTimesAreSeparatedByTheMedianCost() {
-    let history = runs(sonnet, 2, seconds: 10, cost: 0.30, score: 5) + runs(haikuLow, 3, seconds: 10, cost: 0.02, score: 5)
-    #expect(pick([sonnet, haikuLow], history, installed: [.claude])?.offer == haikuLow)
-}
-
-@Test func everyFifthPieceOfAKindGoesToTheLeastUsedWorker() {
-    // The fast worker is the free one; the slow one the dear one. Four runs
-    // of the kind so far: the fifth is an exploration turn, tied on runs and
-    // broken by cost.
-    let fast = runs(sonnet, 2, seconds: 10, score: 5)
-    let slow = runs(glm, 2, seconds: 40, score: 5, at: start.addingTimeInterval(10))
-    let turn = pick([sonnet, glm], fast + slow)
-    #expect(turn?.offer == glm)
-    #expect(turn?.reason == "every fifth piece goes to the least used worker: 2 runs on review")
-    // A fifth run of the kind and the next one is exploitation again.
-    let more = runs(sonnet, 1, seconds: 10, score: 5, at: start.addingTimeInterval(20))
-    #expect(pick([sonnet, glm], fast + slow + more)?.offer == sonnet)
-    // Nine runs: sonnet 5, glm 4 — the fewest runs is the one that goes.
-    let nine = runs(sonnet, 5, seconds: 10, score: 5) + runs(glm, 4, seconds: 40, score: 5, at: start.addingTimeInterval(10))
-    #expect(pick([sonnet, glm], nine)?.offer == glm)
-}
-
-@Test func theExplorationTurnPassesOverAWorkerKnownBad() {
-    let rated = runs(glm, 2, score: 5) + runs(grokLow, 2, score: 5, at: start.addingTimeInterval(10))
-    let bad = runs(haikuLow, 3, score: 2, at: start.addingTimeInterval(20))
-    // Nine runs of the kind, so it is a turn; glm has four, grok two, and
-    // haiku three but is known bad, so grok goes.
-    let nine = rated + bad + runs(glm, 2, score: 5, at: start.addingTimeInterval(30))
-    #expect(nine.count == 9)
-    let choice = pick([haikuLow, glm, grokLow], nine, installed: [.claude, .opencode, .cursor])
+@Test func outsideTheLineupTheRecordDecides() {
+    let lineup = Lineup(hard: [], normal: [glm], easy: [])
+    // glm is excluded: the others, fastest rated 4 or more first.
+    let history = runs(grokLow, 3, seconds: 12, score: 4) + runs(haikuLow, 2, seconds: 30, score: 5)
+    let choice = pick([glm, grokLow, haikuLow], history, excluded: [.opencode], lineup: lineup)
     #expect(choice?.offer == grokLow)
-    #expect(choice?.reason == "every fifth piece goes to the least used worker: 2 runs on review")
+    #expect(choice?.reason == "not in the lineup: fastest rated 4+ on review")
+    #expect(choice?.pick.code == .record)
+    // Nobody rated: the cheapest.
+    let cheapest = pick([sonnet, haikuLow], installed: [.claude], lineup: lineup)
+    #expect(cheapest?.offer == haikuLow)
+    #expect(cheapest?.reason == "not in the lineup: cheapest that may run")
 }
 
-@Test func withNoWorkerRatedFourTheCheapestEligibleGoes() {
-    // Two deliveries each and no rating: not learning, not exploited.
-    let history = runs(sonnet, 2) + runs(haikuLow, 2, at: start.addingTimeInterval(5))
-    let choice = pick([sonnet, haikuLow], history, installed: [.claude])
-    #expect(choice?.offer == haikuLow)
-    #expect(choice?.reason == "cheapest that may run; none is rated 4 or more on review")
+// MARK: Demotion
+
+@Test func aLineupWorkerRatedBelowFourTwiceIsDemoted() {
+    let poor = runs(opus, 2, score: 3, difficulty: .hard)
+    let choice = pick(catalogue, poor, difficulty: .hard, lineup: .standard)
+    #expect(choice?.offer == sonnet)
+    #expect(choice?.reason == "2nd in your lineup: opus (low) is demoted, rated 3.0 on review")
+    #expect(choice?.pick.cause == .demoted)
+    // One rating is not a record yet.
+    #expect(pick(catalogue, runs(opus, 1, score: 2, difficulty: .hard), difficulty: .hard, lineup: .standard)?.offer == opus)
+    // On another kind it is not demoted.
+    #expect(pick(catalogue, poor, kind: .implement, difficulty: .hard, lineup: .standard)?.offer == opus)
+    #expect(WorkerPicker.demotion(of: opus, kind: .review, difficulty: .hard, history: poor, next: sonnet) == .rating(3))
+}
+
+@Test func aLineupWorkerTwiceAsSlowAsTheNextIsDemoted() {
+    let slow = runs(opus, 3, seconds: 300, score: 5, difficulty: .hard)
+    let fast = runs(sonnet, 3, seconds: 100, score: 5, difficulty: .hard, at: start.addingTimeInterval(10))
+    let choice = pick(catalogue, slow + fast, difficulty: .hard, lineup: .standard)
+    #expect(choice?.offer == sonnet)
+    #expect(choice?.reason == "2nd in your lineup: opus (low) is demoted, over twice as slow as sonnet (high) on review")
+    #expect(choice?.pick.cause == .slow)
+    // Exactly twice as slow is not more than twice.
+    let twice = runs(opus, 3, seconds: 200, score: 5, difficulty: .hard)
+    #expect(pick(catalogue, twice + fast, difficulty: .hard, lineup: .standard)?.offer == opus)
+    // Two deliveries each are too few to compare.
+    let few = Array(slow.prefix(2)) + Array(fast.prefix(2))
+    #expect(pick(catalogue, few, difficulty: .hard, lineup: .standard)?.offer == opus)
+}
+
+@Test func aDemotedWorkerGetsItsChanceBackOnALearningTurn() {
+    // Four hard reviews: the fifth is a learning turn, and demoted opus takes it.
+    let history = runs(opus, 2, score: 3, difficulty: .hard) + runs(sonnet, 2, score: 5, difficulty: .hard, at: start.addingTimeInterval(10))
+    let turn = pick(catalogue, history, difficulty: .hard, lineup: .standard)
+    #expect(turn?.offer == opus)
+    #expect(turn?.reason == "learning turn")
+    #expect(turn?.pick.code == .learning)
+    // Rated well this time, its average is back to 4: first again.
+    let redeemed = history + runs(opus, 2, score: 5, difficulty: .hard, at: start.addingTimeInterval(20))
+    #expect(pick(catalogue, redeemed, difficulty: .hard, lineup: .standard)?.offer == opus)
+}
+
+// MARK: Learning turns
+
+@Test func everyFifthPieceOfAKindAndDifficultyIsALearningTurn() {
+    let proven = runs(grok46, 4, score: 5)
+    let turn = pick(catalogue, proven, lineup: .standard)
+    // The cheapest untried: free ones cost nothing, and a lower effort goes first.
+    #expect(turn?.offer == glm)
+    #expect(turn?.reason == "learning turn")
+    // Three, or four of another difficulty, are not a turn.
+    #expect(pick(catalogue, runs(grok46, 3, score: 5), lineup: .standard)?.offer == grok46)
+    #expect(pick(catalogue, runs(grok46, 4, score: 5, difficulty: .easy), lineup: .standard)?.offer == grok46)
+    // Never two in a row: the 1st of the lineup keeps the next piece.
+    var after = proven
+    after[3].pick = PickReason(code: .learning, text: "learning turn")
+    #expect(pick(catalogue, after, lineup: .standard)?.offer == grok46)
+}
+
+@Test func aHardPieceLearnsAmongStrongWorkersOnly() {
+    let proven = runs(opus, 4, score: 5, difficulty: .hard)
+    let turn = pick(catalogue, proven, difficulty: .hard, lineup: .standard)
+    // The cheapest untried strong worker: the free Grok at high, once its low has run...
+    #expect(turn?.offer != glm)
+    #expect(turn.map { WorkerPicker.isStrong($0.offer) } == true)
+    #expect(turn?.reason == "learning turn")
+    // ... and with no Grok offered, never the light haiku low or glm: haiku at
+    // high waits for its low to have run, so sonnet.
+    let claude = pick([opus, sonnet, haikuHigh, haikuLow, glm], proven, difficulty: .hard, lineup: .standard)
+    #expect(claude?.offer == sonnet)
+    #expect(pick([opus, sonnet, haikuHigh], proven, difficulty: .hard, lineup: .standard)?.offer == haikuHigh)
+}
+
+@Test func runsThatNeverRanBecauseOfTheirProviderDoNotCountTowardsTheTurn() {
+    let long = now.addingTimeInterval(-2 * 3600)
+    let quota = runs(glm, 2, failed: true, providerFailure: .quota("limit"), at: long)
+    #expect(pick(catalogue, runs(grok46, 2, score: 5) + quota, lineup: .standard)?.offer == grok46)
+    #expect(pick(catalogue, runs(grok46, 4, score: 5), lineup: .standard)?.reason == "learning turn")
+}
+
+@Test func aHigherEffortIsLearnedOnlyAfterALowerOneHasRun() {
+    // Four normal reviews by sonnet: a turn; haiku medium waits for haiku low.
+    let proven = runs(sonnet, 4, score: 5)
+    let lineup = Lineup(hard: [], normal: [sonnet], easy: [])
+    #expect(pick([sonnet, haikuMedium, haikuLow], proven, installed: [.claude], lineup: lineup)?.offer == haikuLow)
+    let lowRan = proven + runs(haikuLow, 2, score: 5, at: start.addingTimeInterval(10)) + runs(sonnet, 3, score: 5, at: start.addingTimeInterval(20))
+    #expect(lowRan.count == 9)
+    #expect(pick([sonnet, haikuMedium, haikuLow], lowRan, installed: [.claude], lineup: lineup)?.offer == haikuMedium)
 }
 
 // MARK: Known bad
 
-@Test func knownBadIsPerWorkerAndNeverPerProviderOrPerEffort() {
-    // haiku at low is rated 2: never picked on its own again ...
+@Test func knownBadOutsideTheLineupIsNeverPickedOnItsOwn() {
     let history = runs(haikuLow, 2, score: 2)
     #expect(pick([haikuLow], history, installed: [.claude]) == nil)
-    // ... but haiku at medium, the same model, is its own worker and is next ...
     #expect(pick([haikuLow, haikuMedium], history, installed: [.claude])?.offer == haikuMedium)
-    // ... and so is another model of the same provider.
-    #expect(pick([haikuLow, sonnet], history, installed: [.claude])?.offer == sonnet)
-    // A single rating below four is enough; an average of four is not bad.
-    #expect(pick([glm], runs(glm, 1, score: 3) + runs(glm, 1, score: 5, at: start.addingTimeInterval(1)))?.offer == glm)
     #expect(pick([glm], runs(glm, 1, score: 3)) == nil)
+    #expect(pick([glm], runs(glm, 1, score: 3) + runs(glm, 1, score: 5, at: start.addingTimeInterval(1)))?.offer == glm)
+    // Two runs that delivered nothing rule a worker out too.
+    #expect(pick([geminiLow, glm], runs(geminiLow, 2, failed: true))?.offer == glm)
 }
 
 // MARK: Eligibility
 
 @Test func commandsKeepCursorAndGeminiOutOfTheChoice() {
     let all = [grokLow, geminiLow, haikuLow]
-    // Without commands the free ones come first.
     #expect(pick(all, kind: .explore)?.offer == grokLow)
     #expect(pick(all, kind: .explore, needsCommands: true)?.offer == haikuLow)
     #expect(pick([grokLow, geminiLow], needsCommands: true) == nil)
@@ -204,22 +293,17 @@ private func pick(
 }
 
 @Test func aCLIThatFailedWithoutRunningRecentlyIsSkipped() {
-    // "Free usage limit reached", out in 5 seconds, ten minutes ago.
+    let lineup = Lineup(hard: [], normal: [glm, grokLow], easy: [])
     let limit = runs(glm, 1, seconds: 5, failed: true, at: now.addingTimeInterval(-600))
-    #expect(pick([glm, grokLow], limit)?.offer == grokLow)
-    // Any kind of run counts: it is the CLI that is out, not the kind.
+    #expect(pick([glm, grokLow], limit, lineup: lineup)?.offer == grokLow)
     let other = runs(glm, 1, kind: .explore, seconds: 5, failed: true, at: now.addingTimeInterval(-600))
-    #expect(pick([glm, grokLow], other)?.offer == grokLow)
-    // Half an hour on, it is tried again. (These are runs of another kind, so
-    // they do not tip the CLI-with-fewest-runs tie-break on review.)
+    #expect(pick([glm, grokLow], other, lineup: lineup)?.offer == grokLow)
     let old = runs(glm, 1, kind: .explore, seconds: 5, failed: true, at: now.addingTimeInterval(-31 * 60))
-    #expect(pick([glm, grokLow], old)?.offer == glm)
-    // A failure that ran for a while was a real attempt, not a quota.
+    #expect(pick([glm, grokLow], old, lineup: lineup)?.offer == glm)
     let slow = runs(glm, 1, kind: .explore, seconds: 90, failed: true, at: now.addingTimeInterval(-600))
-    #expect(pick([glm, grokLow], slow)?.offer == glm)
-    // A later run that worked lifts it: the latest run decides.
+    #expect(pick([glm, grokLow], slow, lineup: lineup)?.offer == glm)
     let recovered = other + runs(glm, 1, kind: .explore, seconds: 8, at: now.addingTimeInterval(-300))
-    #expect(pick([glm, grokLow], recovered)?.offer == glm)
+    #expect(pick([glm, grokLow], recovered, lineup: lineup)?.offer == glm)
 }
 
 @Test func excludedAndUninstalledCLIsAreNotPicked() {
@@ -229,80 +313,38 @@ private func pick(
     #expect(pick([], installed: installed) == nil)
 }
 
-@Test func aProvenWorkerDoesTheWorkAndLearningIsOnlyEveryFifthPiece() {
-    // glm is rated on review; the Groks are untried. Learning them is a turn.
-    let offers = [glm, grokLow, grokHigh]
-    #expect(pick(offers, runs(glm, 2, score: 5))?.offer == glm)
-    #expect(pick(offers, runs(glm, 3, score: 5))?.offer == glm)
-    let fifth = pick(offers, runs(glm, 4, score: 5))
-    #expect(fifth?.offer == grokLow)
-    #expect(fifth?.reason == "learning, 0 of 2 runs on review")
-}
-
-@Test func twoRunsWithNothingDeliveredRuleAWorkerOut() {
-    let broken = runs(geminiLow, 2, failed: true)
-    #expect(pick([geminiLow, glm], broken)?.offer == glm)
-    // One failure is not a verdict yet.
-    #expect(pick([geminiLow], runs(geminiLow, 1, failed: true))?.offer == geminiLow)
-    #expect(pick([geminiLow], broken) == nil)
-}
-
-// MARK: Provider failures
-
-private let quota = ProviderFailure.quota("Free usage limit reached")
-
-@Test func runsThatNeverRanBecauseOfTheirProviderAreNotHeldAgainstAWorker() {
-    // Long enough ago that nothing is stalled any more.
-    let long = now.addingTimeInterval(-2 * 3600)
-    // Two failures that delivered nothing would rule a worker out; these are not runs.
-    let history = runs(glm, 2, failed: true, providerFailure: quota, at: long)
-    #expect(pick([glm], history)?.offer == glm)
-    #expect(pick([glm], history)?.reason == "learning, 0 of 2 runs on review")
-
-    // Nor do they move the every-fifth-piece count: four real runs would make
-    // the next one a learning turn, two real runs and two quota failures do not.
-    let offers = [glm, grokLow]
-    #expect(pick(offers, runs(glm, 2, score: 5) + runs(glm, 2, failed: true, providerFailure: quota, at: long))?.offer == glm)
-    #expect(pick(offers, runs(glm, 4, score: 5))?.offer == grokLow)
-}
-
 @Test func aProvidersOwnWordsKeepItsCLIOutForAsLongAsTheKindSays() {
-    // Each ran for five minutes, so no guess from speed could explain it.
+    let lineup = Lineup(hard: [], normal: [glm, grokLow], easy: [])
     func isOut(_ failure: ProviderFailure, endedMinutesAgo minutes: Double, kind: TaskKind = .explore) -> Bool {
         let started = now.addingTimeInterval(-minutes * 60 - 300)
         let history = runs(glm, 1, kind: kind, seconds: 300, failed: true, providerFailure: failure, at: started)
-        return pick([glm, grokLow], history)?.offer == grokLow
+        return pick([glm, grokLow], history, lineup: lineup)?.offer == grokLow
     }
-    // Quota: an hour, from any kind of run.
+    let quota = ProviderFailure.quota("Free usage limit reached")
     #expect(isOut(quota, endedMinutesAgo: 59))
     #expect(isOut(quota, endedMinutesAgo: 59, kind: .review))
     #expect(!isOut(quota, endedMinutesAgo: 61))
-    // Down: ten minutes.
     #expect(isOut(.unavailable("503 Service Unavailable"), endedMinutesAgo: 9))
     #expect(!isOut(.unavailable("503 Service Unavailable"), endedMinutesAgo: 11))
-    // Signed out: until the user signs in again, however long that takes.
     let signedOut = ProviderFailure.signedOut("Authentication required")
     #expect(isOut(signedOut, endedMinutesAgo: 600))
     #expect(isOut(signedOut, endedMinutesAgo: 60 * 24 * 3))
 }
 
 @Test func aLaterRunThatWorkedLiftsAStallAndAQuickFailureWithWordsIsNotGuessedAt() {
+    let lineup = Lineup(hard: [], normal: [glm, grokLow], easy: [])
     let failedLong = now.addingTimeInterval(-3 * 3600)
     let signedOut = runs(glm, 1, kind: .explore, seconds: 300, failed: true, providerFailure: .signedOut("Not logged in"), at: failedLong)
-    #expect(pick([glm, grokLow], signedOut)?.offer == grokLow)
-    // The user signed in and a run delivered: the CLI is back.
+    #expect(pick([glm, grokLow], signedOut, lineup: lineup)?.offer == grokLow)
+    #expect(pick([glm, grokLow], signedOut, lineup: lineup)?.pick.cause == .signedOut)
     let back = signedOut + runs(glm, 1, kind: .explore, seconds: 8, at: failedLong.addingTimeInterval(3600))
-    #expect(pick([glm, grokLow], back)?.offer == glm)
-    // A later failure that is not the provider's does not lift it.
+    #expect(pick([glm, grokLow], back, lineup: lineup)?.offer == glm)
     let stillOut = signedOut + runs(glm, 1, kind: .explore, seconds: 300, failed: true, at: failedLong.addingTimeInterval(3600))
-    #expect(pick([glm, grokLow], stillOut)?.offer == grokLow)
-
-    // A provider that was down for 5 seconds eleven minutes ago is back: the
-    // 60-second heuristic is only for failures nobody put words to.
+    #expect(pick([glm, grokLow], stillOut, lineup: lineup)?.offer == grokLow)
     let blip = runs(glm, 1, kind: .explore, seconds: 5, failed: true, providerFailure: .unavailable("overloaded"), at: now.addingTimeInterval(-11 * 60))
-    #expect(pick([glm, grokLow], blip)?.offer == glm)
+    #expect(pick([glm, grokLow], blip, lineup: lineup)?.offer == glm)
     let unexplained = runs(glm, 1, kind: .explore, seconds: 5, failed: true, at: now.addingTimeInterval(-11 * 60))
-    #expect(pick([glm, grokLow], unexplained)?.offer == grokLow)
+    #expect(pick([glm, grokLow], unexplained, lineup: lineup)?.offer == grokLow)
 }
 
 // MARK: Circuit breaker
@@ -311,49 +353,32 @@ private func failures(_ worker: ModelCatalog.Offer, _ count: Int, kind: TaskKind
     runs(worker, count, kind: kind, seconds: 100, failed: true, at: now.addingTimeInterval(-minutesAgo * 60))
 }
 
-@Test func aWorkerThatFailedThreeTimesInARowRestsAndTheReasonSaysSo() throws {
-    let three = failures(glm, 3, minutesAgo: 20)
-    let until = try #require(three.last?.ended).addingTimeInterval(30 * 60)
-
-    let choice = pick([glm, grokLow], three)
-    #expect(choice?.offer == grokLow)
-    #expect(choice?.reason == "learning, 0 of 2 runs on review; "
-        + "opencode opencode/glm-5.3-flash-free is resting until \(WorkerPicker.clock(until)) after 3 failures in a row")
-    // Nobody else to take it: nothing may run.
-    #expect(pick([glm], three) == nil)
-    // Two are not enough, and the reason says nothing when the choice is the same.
-    #expect(pick([glm, grokLow], failures(glm, 2, minutesAgo: 20))?.offer == glm)
-    #expect(pick([grokLow, glm], three)?.reason == "learning, 0 of 2 runs on review")
-}
-
 @Test func theBreakerCountsRunsOfAnyKindAndOnlyTheWorkerThatFailed() {
+    let lineup = Lineup(hard: [], normal: [glm, grokLow], easy: [])
     let mixed = failures(glm, 1, kind: .explore, minutesAgo: 20)
         + failures(glm, 1, kind: .test, minutesAgo: 18)
         + failures(glm, 1, kind: .docs, minutesAgo: 16)
-    #expect(pick([glm, grokLow], mixed)?.offer == grokLow)
-    // A worker is a cli, a model and an effort: haiku at low resting leaves haiku at high alone.
+    #expect(pick([glm, grokLow], mixed, lineup: lineup)?.offer == grokLow)
+    #expect(pick([glm], failures(glm, 3, minutesAgo: 20)) == nil)
+    #expect(pick([glm, grokLow], failures(glm, 2, minutesAgo: 20), lineup: lineup)?.offer == glm)
     let low = failures(haikuLow, 3, minutesAgo: 20)
     #expect(pick([haikuLow, haikuHigh], low, installed: [.claude])?.offer == haikuHigh)
-    #expect(pick([haikuLow, haikuHigh], failures(grokLow, 3, minutesAgo: 20), installed: [.claude, .cursor])?.offer == haikuLow)
 }
 
 @Test func aSuccessClosesTheBreakerAndTimeExpiresIt() {
+    let lineup = Lineup(hard: [], normal: [glm, grokLow], easy: [])
     let three = failures(glm, 3, minutesAgo: 20)
-    // A delivery since, rated poorly or not, is a worker that works.
-    #expect(pick([glm, grokLow], three + runs(glm, 1, kind: .explore, seconds: 8, at: now.addingTimeInterval(-5 * 60)))?.offer == glm)
-    // The rest lasts half an hour from the last failure.
-    #expect(pick([glm, grokLow], failures(glm, 3, minutesAgo: 31 + 2))?.offer == glm)
-    #expect(pick([glm, grokLow], failures(glm, 3, minutesAgo: 28 + 2))?.offer == grokLow)
-    // Failures spread over more than half an hour are not "in a row" in time.
+    #expect(pick([glm, grokLow], three + runs(glm, 1, kind: .explore, seconds: 8, at: now.addingTimeInterval(-5 * 60)), lineup: lineup)?.offer == glm)
+    #expect(pick([glm, grokLow], failures(glm, 3, minutesAgo: 31 + 2), lineup: lineup)?.offer == glm)
+    #expect(pick([glm, grokLow], failures(glm, 3, minutesAgo: 28 + 2), lineup: lineup)?.offer == grokLow)
     let spread = failures(glm, 1, minutesAgo: 50) + failures(glm, 1, minutesAgo: 30) + failures(glm, 1, minutesAgo: 10)
-    #expect(pick([glm, grokLow], spread)?.offer == glm)
+    #expect(pick([glm, grokLow], spread, lineup: lineup)?.offer == glm)
 }
 
 @Test func aProviderFailureOrAStoppedRunIsNeitherAFailureNorABreakInTheRow() {
-    // Two failures of its own and one of its provider's: two failures.
+    let quota = ProviderFailure.quota("Free usage limit reached")
     let provider = runs(glm, 1, kind: .explore, seconds: 100, failed: true, providerFailure: quota, at: now.addingTimeInterval(-9 * 60))
     #expect(WorkerPicker.resting(failures(glm, 2, minutesAgo: 20) + provider, now: now).isEmpty)
-    // ... and between the third failure and the other two it breaks nothing.
     #expect(WorkerPicker.resting(failures(glm, 3, minutesAgo: 20) + provider, now: now).count == 1)
     let stopped = Run(
         id: "0123abcd", spec: WorkerSpec(cli: .opencode, model: glm.model, prompt: "go", directory: "/tmp"),
@@ -363,25 +388,29 @@ private func failures(_ worker: ModelCatalog.Offer, _ count: Int, kind: TaskKind
     #expect(WorkerPicker.resting(failures(glm, 3, minutesAgo: 20) + [stopped], now: now).count == 1)
 }
 
-@Test func agentScoresSaysWhoIsResting() throws {
+// MARK: agent_scores
+
+@Test func agentScoresSaysWhoIsRestingAndPrintsTheLineupsWithDemotions() throws {
     let three = failures(glm, 3, minutesAgo: 20)
     let until = try #require(three.last?.ended).addingTimeInterval(30 * 60)
-    let text = Scoreboard.summary(
-        Scoreboard.scores(three), offers: [glm, grokLow], history: three, now: now
-    )
+    let text = Scoreboard.summary(Scoreboard.scores(three), offers: [glm, grokLow], history: three, now: now)
     #expect(text.contains(
         "resting\n  opencode opencode/glm-5.3-flash-free — resting until \(WorkerPicker.clock(until)) after 3 failures in a row"
     ))
     #expect(!Scoreboard.summary(Scoreboard.scores(three), offers: [glm], history: three, now: now.addingTimeInterval(3600)).contains("resting"))
+
+    let poor = runs(opus, 2, score: 3, difficulty: .hard)
+    let lineups = Scoreboard.summary(Scoreboard.scores(poor), offers: catalogue, history: poor, now: now)
+    #expect(lineups.contains(
+        "  hard: 1. claude opus (low) [demoted: rated 3.0 on review], 2. claude sonnet (high), 3. claude haiku (high), 4. cursor grok-4.7-high-fast"
+    ))
+    #expect(lineups.contains("  easy: 1. cursor cursor-grok-4.6-low-fast, 2. opencode opencode/glm-5.3-flash-free, 3. claude haiku (low)"))
 }
 
-// MARK: Difficulty
-
-private let opus = offer(.claude, "opus", "low")
-private let grokXHigh = offer(.cursor, "grok-4.7-xhigh-fast")
+// MARK: Strength
 
 @Test func strongWorkersAreSonnetOpusHaikuAtHighAndTheGroksAtHighOrXHigh() {
-    for strong in [haikuHigh, sonnet, opus, grokHigh, grokXHigh, offer(.claude, "sonnet", "low")] {
+    for strong in [haikuHigh, sonnet, opus, grokHigh, offer(.cursor, "grok-4.7-xhigh-fast"), offer(.claude, "sonnet", "low")] {
         #expect(WorkerPicker.isStrong(strong), "\(strong.name)")
     }
     for light in [haikuLow, haikuMedium, grokLow, glm, geminiLow, offer(.opencode, "opencode/big-free", "high")] {
@@ -389,54 +418,22 @@ private let grokXHigh = offer(.cursor, "grok-4.7-xhigh-fast")
     }
 }
 
-@Test func aHardPieceGoesOnlyToStrongWorkersWhenAnyMayRunAndHasNoLearningTurns() {
-    let all = [glm, haikuLow, haikuMedium, haikuHigh, sonnet, opus, grokLow, grokHigh]
-    // The cheapest strong one: the Grok is free.
-    let choice = pick(all, difficulty: .hard)
-    #expect(choice?.offer == grokHigh)
-    #expect(choice?.reason == "cheapest that may run; none is rated 4 or more on review, hard piece")
+@Test func outsideTheLineupAHardPieceGoesToStrongWorkersAndAnEasyOneStaysOffThem() {
+    let all = [glm, haikuLow, haikuHigh, sonnet, opus, grokLow, grokHigh]
+    #expect(pick(all, difficulty: .hard)?.offer == grokHigh)
     #expect(pick(all, installed: [.claude], difficulty: .hard)?.offer == haikuHigh)
-    #expect(pick(all, installed: [.opencode], difficulty: .hard)?.offer == glm, "with no strong one installed it goes on as normal")
-    #expect(pick(all, installed: [.claude, .opencode], excluded: [.claude], difficulty: .hard)?.offer == glm)
-
-    // The every-fifth learning turn is skipped for a hard piece.
-    let proven = runs(sonnet, 4, score: 5)
-    #expect(pick([sonnet, haikuHigh], proven)?.offer == haikuHigh)
-    let hard = pick([sonnet, haikuHigh], proven, difficulty: .hard)
-    #expect(hard?.offer == sonnet)
-    #expect(hard?.reason.hasSuffix(", hard piece") == true)
-    // ... and so is learning an untried worker while nobody is rated: the cheapest goes.
-    #expect(pick([sonnet, haikuHigh], difficulty: .hard)?.offer == haikuHigh)
-    #expect(pick([sonnet, haikuHigh])?.reason == "learning, 0 of 2 runs on review")
-}
-
-@Test func anEasyPieceStaysOffStrongWorkersWhenALighterOneMayRun() {
+    #expect(pick(all, installed: [.opencode], difficulty: .hard)?.offer == glm)
     #expect(pick([sonnet, haikuLow], difficulty: .easy)?.offer == haikuLow)
-    #expect(pick([opus, grokHigh, glm], difficulty: .easy)?.offer == glm)
-    // Nobody lighter: the strong one takes it.
     #expect(pick([sonnet, grokHigh], difficulty: .easy)?.offer == grokHigh)
-    // A proven strong worker does not take it when a lighter one can learn.
-    let choice = pick([sonnet, haikuLow], runs(sonnet, 2, score: 5), difficulty: .easy)
-    #expect(choice?.offer == haikuLow)
-    #expect(choice?.reason == "learning, 0 of 2 runs on review, easy piece")
-    // Normal is as it was: the proven worker.
-    #expect(pick([sonnet, haikuLow], runs(sonnet, 2, score: 5))?.offer == sonnet)
 }
 
 @Test func rankingUsesTheRunsOfTheSameDifficultyWhenAWorkerHasTwoOfThem() {
     let slowOnHard = runs(glm, 2, seconds: 5, score: 5, difficulty: .easy)
         + runs(glm, 2, seconds: 100, score: 5, difficulty: .hard, at: start.addingTimeInterval(10))
-    // (Three, so that no total of runs lands on an every-fifth learning turn.)
     let steady = runs(grokLow, 3, seconds: 20, score: 5, at: start.addingTimeInterval(20))
     let history = slowOnHard + steady
-    // Easy: glm's two easy runs, 5 s. Hard: its two hard runs, 100 s, so the
-    // other is faster. Normal: glm has none, so all four count (52.5 s).
     #expect(pick([glm, grokLow], history, difficulty: .easy)?.offer == glm)
-    #expect(pick([glm, grokLow], history, difficulty: .hard)?.offer == grokLow)
     #expect(pick([glm, grokLow], history, difficulty: .normal)?.offer == grokLow)
-    // With one run of a difficulty a worker is judged on everything it did.
-    let one = runs(glm, 1, seconds: 5, score: 5, difficulty: .easy) + runs(glm, 1, seconds: 100, score: 5, difficulty: .hard, at: start.addingTimeInterval(10))
-    #expect(pick([glm, grokLow], one + steady, difficulty: .easy)?.offer == grokLow)
 }
 
 @Test func aSingleWorkerCanBeLeftOutOfThePick() {

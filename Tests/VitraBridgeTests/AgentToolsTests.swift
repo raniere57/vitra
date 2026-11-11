@@ -25,7 +25,10 @@ private struct Fixture {
         }
         let executables = Executables(paths: paths)
         orchestrator = Orchestrator(root: scratch.appendingPathComponent("runs"), executables: executables)
-        executor = AgentToolExecutor(orchestrator: orchestrator, executables: executables, lockTimeout: lockTimeout)
+        executor = AgentToolExecutor(
+            orchestrator: orchestrator, executables: executables, lockTimeout: lockTimeout,
+            lineupFile: scratch.appendingPathComponent("lineup.json"), honoursNamedWorkers: true
+        )
     }
 
     /// Moves a run's deadline to the past, as if its time had run out.
@@ -50,6 +53,14 @@ private struct Fixture {
     }
 
     func cleanUp() { try? FileManager.default.removeItem(at: root) }
+
+    /// Puts the free opencode first in the user's lineup, for every difficulty.
+    func preferOpenCode() throws {
+        let free = ModelCatalog.Offer(cli: .opencode, model: "opencode/glm-5.3-flash-free", effort: nil)
+        let standard = Lineup.standard
+        try Lineup(hard: [free] + standard.hard, normal: [free] + standard.normal, easy: [free] + standard.easy)
+            .save(to: root.appendingPathComponent("lineup.json"))
+    }
 
     func call(_ tool: String, _ arguments: JSONValue = [:]) async throws -> String {
         try await executor.run(tool: tool, arguments: arguments, pane: nil)
@@ -87,7 +98,9 @@ private let answers = #"cat >/dev/null; echo '{"result":"the answer","is_error":
     // With no history there are no scores, but the picker's next choice and
     // the untried workers are still said, for a kind with no runs at all.
     let empty = try await fixture.call("agent_scores", ["kind": "review"])
-    #expect(empty.contains("review\n  vitra picks next: claude haiku (low) — learning, 0 of 2 runs on review\n"))
+    // Only claude is installed: the normal lineup's first claude worker.
+    #expect(empty.contains("review\n  vitra picks next: claude haiku (low) — 2nd in your lineup for normal pieces\n"))
+    #expect(empty.contains("the user's lineup (Vitra picks the first that may run and is not demoted)\n  hard: 1. claude opus (low), 2. claude sonnet (high)"))
     #expect(empty.contains("  not tried yet: claude haiku (low), claude haiku (medium), claude haiku (high), claude sonnet (high), claude opus (low)"))
 
     let id = try await fixture.spawn()
@@ -125,7 +138,7 @@ private let answers = #"cat >/dev/null; echo '{"result":"the answer","is_error":
     let text = try await fixture.call("agent_spawn", ["prompt": "go", "directory": .string(fixture.root.path), "kind": "review"])
     #expect(text.contains("claude haiku (low), read access"))
     // A short read of nothing in particular is an easy piece, and the pick says so.
-    #expect(text.contains("picked claude haiku (low): learning, 0 of 2 runs on review, easy piece."))
+    #expect(text.contains("picked claude haiku (low): 3rd in your lineup for easy pieces."))
     let id = String(text.dropFirst("Started agent ".count).prefix(8))
     #expect(try fixture.orchestrator.status(id).spec.effort == "low")
     #expect(try fixture.orchestrator.status(id).spec.difficulty == .easy)
@@ -136,7 +149,11 @@ private let answers = #"cat >/dev/null; echo '{"result":"the answer","is_error":
         "prompt": "go", "directory": .string(fixture.root.path), "kind": "review", "commands": ["bun test"],
         "difficulty": "normal",
     ])
-    #expect(withCommands.contains("picked claude haiku (low): learning, 1 of 2 runs on review."))
+    #expect(withCommands.contains("picked claude haiku (low): 2nd in your lineup for normal pieces."))
+    // The reason is kept in the run's record.
+    #expect(try fixture.orchestrator.status(id).pick == PickReason(
+        code: .lineup, text: "3rd in your lineup for easy pieces", position: 3
+    ))
 
     // A model without a cli is a half-named worker: refused rather than guessed.
     await #expect(throws: ToolError("model and effort go with a cli: name the worker with all three, or leave all three out and Vitra picks")) {
@@ -1216,7 +1233,8 @@ private func successorID(in line: String) -> String {
     let fixture = try Fixture(claude: answers, opencode: outOfQuota)
     defer { fixture.cleanUp() }
 
-    // The free opencode is the cheapest, so Vitra picks it, and it is out.
+    // The free opencode is first in the user's lineup, so Vitra picks it, and it is out.
+    try fixture.preferOpenCode()
     let text = try await fixture.call("agent_spawn", [
         "prompt": "map the code", "directory": .string(fixture.root.path), "kind": "explore",
         "label": "probe", "difficulty": "normal", "commands": [], "minutes": 7,
@@ -1256,6 +1274,7 @@ private func successorID(in line: String) -> String {
     let both = #"cat >/dev/null; echo 'Claude AI usage limit reached|1731' >&2; exit 1"#
     let fixture = try Fixture(claude: both, opencode: outOfQuota)
     defer { fixture.cleanUp() }
+    try fixture.preferOpenCode()
 
     let started = try await fixture.call("agent_spawn", ["prompt": "go", "directory": .string(fixture.root.path), "kind": "explore"])
     let id = startedID(started)
@@ -1280,6 +1299,7 @@ private func successorID(in line: String) -> String {
     defer { fixture.cleanUp() }
     let repository = fixture.root.appendingPathComponent("repo")
     try makeRepository(at: repository)
+    try fixture.preferOpenCode()
 
     let text = try await fixture.call("agent_spawn", [
         "prompt": "change it", "directory": .string(repository.path), "access": "edit", "kind": "implement",
@@ -1309,7 +1329,7 @@ private func successorID(in line: String) -> String {
     let text = try await fixture.call("agent_spawn", [
         "prompt": "go", "directory": .string(fixture.root.path), "kind": "review", "difficulty": "hard",
     ])
-    #expect(text.contains("picked claude haiku (high): cheapest that may run; none is rated 4 or more on review, hard piece."))
+    #expect(text.contains("picked claude opus (low): 1st in your lineup for hard pieces."))
     #expect(try fixture.orchestrator.status(startedID(text)).spec.difficulty == .hard)
 
     // Left out, it is judged from the prompt and stored all the same.
@@ -1412,7 +1432,8 @@ echo '{"type":"text","part":{"text":"redone"}}'
     let redo = try fixture.orchestrator.status(startedID(other))
     #expect(redo.spec.cli == .opencode)
     #expect(redo.spec.model == "opencode/glm-5.3-flash-free")
-    #expect(other.contains("picked: learning"))
+    #expect(other.contains("picked: 3rd in your lineup for normal pieces"))
+    #expect(try fixture.orchestrator.status(startedID(other)).wasPicked)
     #expect(other.contains("claude haiku (low) delivered a 2/5"))
     // Still on the same branch: it builds on the delivery whoever does it.
     #expect(redo.branch == "vitra/\(id)")
@@ -1529,4 +1550,64 @@ echo '{"type":"text","part":{"text":"redone"}}'
     #expect(merged.contains("Merged vitra/\(id)"))
     #expect(merged.contains("Removed worktree \(fixture.root.appendingPathComponent("runs/\(redoID)/tree").path)."))
     #expect(try String(contentsOf: repository.appendingPathComponent("from-worker.txt"), encoding: .utf8) == "run\nrun\n")
+}
+
+// MARK: - The maestro does not name the worker
+
+@Test func spawnAndRedoNoLongerOfferCLIModelOrEffort() throws {
+    for name in ["agent_spawn", "agent_redo"] {
+        let tool = try #require(AgentTools.all.first { $0["name"]?.stringValue == name })
+        let properties = try #require(tool["inputSchema"]?["properties"])
+        #expect(properties["cli"] == nil)
+        #expect(properties["model"] == nil)
+        #expect(properties["effort"] == nil)
+        #expect(tool["description"]?.stringValue?.contains("name cli") == false)
+    }
+    let spawn = try #require(AgentTools.all.first { $0["name"]?.stringValue == "agent_spawn" })
+    let properties = try #require(spawn["inputSchema"]?["properties"])
+    for field in ["kind", "access", "difficulty", "commands", "label", "prompt", "directory", "minutes", "audit"] {
+        #expect(properties[field] != nil)
+    }
+}
+
+@Test func aWorkerTheMaestroNamesIsIgnoredAndTheResultSaysSo() async throws {
+    let fixture = try Fixture(claude: answers)
+    defer { fixture.cleanUp() }
+    let executables = Executables(paths: [.claude: fixture.root.appendingPathComponent("fake-claude").path])
+    let executor = AgentToolExecutor(
+        orchestrator: fixture.orchestrator, executables: executables,
+        lineupFile: fixture.root.appendingPathComponent("lineup.json")
+    )
+    let text = try await executor.run(tool: "agent_spawn", arguments: [
+        "cli": "claude", "model": "opus", "effort": "low", "prompt": "go", "directory": .string(fixture.root.path),
+    ], pane: nil)
+    // An easy piece: the easy lineup's first claude worker, not the opus asked for.
+    #expect(text.contains("claude haiku (low), read access"))
+    #expect(text.contains("cli/model ignored: Vitra picks the worker. "))
+    #expect(try fixture.orchestrator.status(startedID(text)).wasPicked)
+}
+
+@Test func aRedoVitraPicksFailsOverAndTheSuccessorSaysWhomItReplaced() async throws {
+    let fixture = try Fixture(claude: answers, opencode: outOfQuota)
+    defer { fixture.cleanUp() }
+
+    let id = try await fixture.spawn()
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    _ = try await fixture.call("agent_rate", ["id": .string(id), "score": 2])
+
+    // Rated below 3: Vitra picks another, the easy lineup's free opencode, which is out.
+    let redo = startedID(try await fixture.call("agent_redo", ["id": .string(id), "notes": "wrong"]))
+    let redone = try fixture.orchestrator.status(redo)
+    #expect(redone.spec.cli == .opencode)
+    #expect(redone.wasPicked)
+    #expect(redone.pick?.code == .lineup)
+
+    let report = try await fixture.call("agent_wait", ["ids": [.string(redo)], "timeout_seconds": 20])
+    let first = try #require(report.split(separator: "\n").first.map(String.init))
+    #expect(first.hasPrefix("[\(redo)] did not run (quota) — retried as ["))
+    let successor = successorID(in: first)
+
+    // Waited on by its own id, the successor still says whom it replaced.
+    let again = try await fixture.call("agent_wait", ["ids": [.string(successor)], "timeout_seconds": 10])
+    #expect(again.hasPrefix("[\(redo)] did not run (quota) — retried as [\(successor)] on claude "))
 }

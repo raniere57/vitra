@@ -14,7 +14,7 @@ public enum AgentTools {
             """
             Delegate a self-contained piece of work to a worker agent on another model, and return its id at once without waiting. \
             You are the orchestrator: plan, split the work, and review what comes back; let workers do the reading and the typing. \
-            Leave cli, model and effort out and Vitra picks the worker from the record of this kind of task (agent_scores shows it, agent_models lists what exists); name them only when the piece truly needs that model. \
+            Vitra picks the worker from the user's lineup for the piece's difficulty and the record of its kind (agent_scores shows both): say what kind of piece it is and how hard, and the result says who took it and why. \
             The worker sees nothing of this conversation, so the prompt must stand on its own: the goal, the files or area, and what done looks like. \
             Spawn several and then agent_wait on all of them to run work in parallel. \
             In a git repository each editing worker is given a worktree and a branch of its own automatically, so several can edit at once; when its delivery is done and its audit read, agent_merge with its id puts the branch on your checkout and cleans up, and agent_merge with discard drops it instead. \
@@ -22,17 +22,6 @@ public enum AgentTools {
             A finished editing delivery of 40 changed lines or more is audited by a cheap read-only worker from another provider: agent_wait starts it and says its id. Pass audit true to have a smaller change audited too, false to skip the gate.
             """,
             properties: [
-                "cli": [
-                    "type": "string",
-                    "enum": .array(WorkerCLI.allCases.map { .string($0.rawValue) }),
-                    "description": "Which agent CLI runs the worker. Leave out, with model and effort, and Vitra picks the worker and says which in the result.",
-                ],
-                "model": MCPTools.string("Model name as that CLI takes it, from agent_models: haiku, sonnet or opus for claude, opencode/…-free for opencode, a Gemini model id for gemini, a Grok id for cursor."),
-                "effort": [
-                    "type": "string",
-                    "enum": .array(ModelCatalog.efforts.map { .string($0) }),
-                    "description": "How hard the model thinks. Required for claude when you name the worker, from the pairs agent_models lists; optional for opencode; never for gemini, which has none, or cursor, where it is part of the model id. The same model at two efforts is two workers with separate records.",
-                ],
                 "prompt": MCPTools.string("The whole task, self-contained."),
                 "directory": MCPTools.string("Absolute path of the directory the worker runs in."),
                 "access": [
@@ -44,7 +33,7 @@ public enum AgentTools {
                 "commands": [
                     "type": "array",
                     "items": ["type": "string"],
-                    "description": "Commands the worker may run by itself, each the start of a command line: \"bun test\" allows \"bun test src/x.test.ts\". Give an editing worker the project's test, build or lint command so it can check its own work instead of handing that back to you. One plain command each — no shell operators — and nothing that reaches another machine, except for a task of kind deploy, which may be given ssh to the one host it deploys to (\"ssh user@host\"). claude and gemini run exactly these; opencode's editing agent runs commands already; cursor cannot be given any. When Vitra picks the worker, giving commands keeps cursor and gemini out of the choice.",
+                    "description": "Commands the worker may run by itself, each the start of a command line: \"bun test\" allows \"bun test src/x.test.ts\". Give an editing worker the project's test, build or lint command so it can check its own work instead of handing that back to you. One plain command each — no shell operators — and nothing that reaches another machine, except for a task of kind deploy, which may be given ssh to the one host it deploys to (\"ssh user@host\"). claude and gemini run exactly these; opencode's editing agent runs commands already; cursor cannot be given any. Giving commands keeps cursor and gemini out of the choice.",
                 ],
                 "kind": [
                     "type": "string",
@@ -62,7 +51,7 @@ public enum AgentTools {
                 "difficulty": [
                     "type": "string",
                     "enum": .array(Difficulty.allCases.map { .string($0.rawValue) }),
-                    "description": "How hard the piece is: easy, normal or hard. Left out, Vitra judges from the prompt (hard when it names six or more files, is very long, or reshapes code across several files; easy for a short read of one file). A hard piece goes only to strong workers (claude sonnet or opus, haiku at high, Grok at high) and has no learning turns; an easy one stays off them. Say it when the default would misjudge the piece.",
+                    "description": "How hard the piece is: easy, normal or hard. Left out, Vitra judges from the prompt (hard when it names six or more files, is very long, or reshapes code across several files; easy for a short read of one file). Each difficulty has its own lineup of workers, chosen by the user. Say it when the default would misjudge the piece.",
                 ],
             ],
             required: ["prompt", "directory"]
@@ -75,22 +64,11 @@ public enum AgentTools {
             worktree and branch, so the new worker builds on it (a paused one gets its worktree back from the branch); the redo is the \
             delivery to audit, and agent_merge of either id merges the branch once. Use it instead of writing a new prompt from scratch. \
             Refuses while the original or its audit is still running. The same worker goes again unless you rated its delivery below 3, \
-            then Vitra picks another; name cli, model and effort to choose one yourself.
+            then Vitra picks another from the lineup.
             """,
             properties: [
                 "id": MCPTools.string("Id of the delivery to redo, from agent_spawn."),
                 "notes": MCPTools.string("What the previous attempt got wrong and must be fixed, specifically."),
-                "cli": [
-                    "type": "string",
-                    "enum": .array(WorkerCLI.allCases.map { .string($0.rawValue) }),
-                    "description": "Name the worker for the redo, with model and effort. Left out, Vitra decides.",
-                ],
-                "model": MCPTools.string("Model name as that CLI takes it, with cli."),
-                "effort": [
-                    "type": "string",
-                    "enum": .array(ModelCatalog.efforts.map { .string($0) }),
-                    "description": "Effort, as for agent_spawn, with cli.",
-                ],
             ],
             required: ["id", "notes"]
         ),
@@ -225,6 +203,12 @@ public struct AgentToolExecutor: ToolExecutor {
     /// How long a merge or an audit start waits for the repository's lock
     /// before it answers that the repository is busy.
     private let lockTimeout: TimeInterval
+    /// Where the user's lineup is kept; read on every pick, so an edit in the
+    /// cockpit holds from the next spawn.
+    private let lineupFile: URL
+    /// Whether a spawn may name its worker with cli, model and effort. Only
+    /// tests turn it on: the maestro says what the piece is, Vitra picks.
+    private let honoursNamedWorkers: Bool
 
     /// The project the cockpit named in the maestro's shell, which this helper
     /// inherits. Absent when the helper was started outside the cockpit.
@@ -240,11 +224,15 @@ public struct AgentToolExecutor: ToolExecutor {
         orchestrator: Orchestrator,
         executables: Executables,
         project: String? = nil,
-        lockTimeout: TimeInterval = RepositoryLock.defaultTimeout
+        lockTimeout: TimeInterval = RepositoryLock.defaultTimeout,
+        lineupFile: URL = Lineup.defaultURL,
+        honoursNamedWorkers: Bool = false
     ) {
         self.orchestrator = orchestrator
         self.executables = executables
         self.lockTimeout = lockTimeout
+        self.lineupFile = lineupFile
+        self.honoursNamedWorkers = honoursNamedWorkers
         // One spelling per directory, as the cockpit keeps it.
         self.project = project.map { $0.count > 1 && $0.hasSuffix("/") ? String($0.dropLast()) : $0 }
     }
@@ -255,9 +243,7 @@ public struct AgentToolExecutor: ToolExecutor {
             case "agent_spawn":
                 // A spawn that gets a worktree checks the whole repository out,
                 // which can take a while: park it off the cooperative pool.
-                return try await Self.offThePool { [orchestrator, executables, project] in
-                    try Self.spawn(arguments, orchestrator: orchestrator, executables: executables, project: project)
-                }
+                return try await Self.offThePool { [self] in try spawn(arguments) }
             case "agent_wait":
                 return try await wait(arguments)
             case "agent_list":
@@ -291,10 +277,11 @@ public struct AgentToolExecutor: ToolExecutor {
                 let runs = orchestrator.recent(limit: Self.scoredRuns)
                 // The listing takes seconds per CLI; it is cached, and it is
                 // dropped from the text when it cannot be had.
-                return try await Self.offThePool { [executables] in
+                return try await Self.offThePool { [executables, lineupFile] in
                     let offers = ModelCatalog.offers(ModelCatalog.cachedListing(executables))
                     return Scoreboard.summary(
-                        Scoreboard.scores(runs, kind: kind), kind: kind, offers: offers, history: runs
+                        Scoreboard.scores(runs, kind: kind), kind: kind, offers: offers, history: runs,
+                        lineup: Lineup.load(from: lineupFile)
                     )
                 }
             case "agent_models":
@@ -309,22 +296,17 @@ public struct AgentToolExecutor: ToolExecutor {
         }
     }
 
-    private static func spawn(
-        _ arguments: JSONValue,
-        orchestrator: Orchestrator,
-        executables: Executables,
-        project: String?
-    ) throws -> String {
+    private func spawn(_ arguments: JSONValue) throws -> String {
         let accessName = arguments["access"]?.stringValue ?? WorkerAccess.read.rawValue
         guard let access = WorkerAccess(rawValue: accessName) else {
             throw ToolError("access must be read or edit, not '\(accessName)'")
         }
-        let kind = try kind(in: arguments)
-        let commands = try commands(in: arguments)
-        let prompt = try string("prompt", in: arguments)
-        let difficulty = try difficulty(in: arguments) ?? Difficulty.estimate(prompt: prompt, kind: kind, access: access)
+        let kind = try Self.kind(in: arguments)
+        let commands = try Self.commands(in: arguments)
+        let prompt = try Self.string("prompt", in: arguments)
+        let difficulty = try Self.difficulty(in: arguments) ?? Difficulty.estimate(prompt: prompt, kind: kind, access: access)
 
-        // Named by the orchestrator: run as asked. Otherwise Vitra picks.
+        // Vitra picks; only a test may name the worker.
         var picked: WorkerPicker.Choice?
         let cli: WorkerCLI
         let model: String
@@ -332,19 +314,12 @@ public struct AgentToolExecutor: ToolExecutor {
         if let named = try namedWorker(in: arguments) {
             (cli, model, effort) = named
         } else {
-            let offers = ModelCatalog.offers(ModelCatalog.cachedListing(executables))
-            guard let choice = WorkerPicker.pick(
-                kind: kind ?? .other,
-                access: access,
-                needsCommands: !commands.isEmpty,
-                history: orchestrator.recent(limit: Self.historyLimit),
-                offers: offers,
-                installed: Set(executables.paths.keys),
-                difficulty: difficulty
+            guard let choice = pick(
+                kind: kind ?? .other, access: access, commands: commands, difficulty: difficulty
             ) else {
                 throw ToolError(
                     "no installed worker can take this piece\(commands.isEmpty ? "" : " with commands"): "
-                        + "name one with cli, model and effort (agent_models lists them)"
+                        + "check agent_models for what is installed and signed in"
                 )
             }
             picked = choice
@@ -357,7 +332,7 @@ public struct AgentToolExecutor: ToolExecutor {
             cli: cli,
             model: model,
             prompt: prompt,
-            directory: try string("directory", in: arguments),
+            directory: try Self.string("directory", in: arguments),
             access: access,
             label: arguments["label"]?.stringValue,
             kind: kind,
@@ -367,32 +342,59 @@ public struct AgentToolExecutor: ToolExecutor {
             // Nil is the default, which is on: only an explicit false turns
             // the gate off, and an explicit true is kept as it was asked.
             audit: arguments["audit"]?.boolValue,
-            minutes: try minutes(in: arguments),
+            minutes: try Self.minutes(in: arguments),
             difficulty: difficulty
         )
         // A worker Vitra picked may be failed over to another if its provider
-        // is out; one the maestro named is only reported.
-        let id = try orchestrator.spawn(spec, link: Orchestrator.SpawnLink(picked: picked != nil))
+        // is out; one a test named is only reported.
+        let id = try orchestrator.spawn(spec, link: Orchestrator.SpawnLink(picked: picked != nil, pick: picked?.pick))
         let why = picked.map { "picked \(spec.worker): \($0.reason). " } ?? ""
-        return "Started agent \(id): \(spec.worker), \(access.rawValue) access, in \(spec.directory). \(why)Call agent_wait with this id for its result."
+        return "Started agent \(id): \(spec.worker), \(access.rawValue) access, in \(spec.directory). \(why)"
+            + Self.ignoredNote(arguments, honoured: honoursNamedWorkers) + "Call agent_wait with this id for its result."
     }
 
-    /// The worker the arguments name, or nil when they leave all of cli, model
-    /// and effort out and Vitra is to pick.
-    private static func namedWorker(in arguments: JSONValue) throws -> (WorkerCLI, String, String?)? {
+    /// Vitra's pick for a piece, from the lineup as the file says it now.
+    private func pick(
+        kind: TaskKind, access: WorkerAccess, commands: [String], difficulty: Difficulty,
+        excluded: Set<WorkerCLI> = [], excludedWorkers: Set<ModelCatalog.Offer> = []
+    ) -> WorkerPicker.Choice? {
+        WorkerPicker.pick(
+            kind: kind,
+            access: access,
+            needsCommands: !commands.isEmpty,
+            history: orchestrator.recent(limit: Self.historyLimit),
+            offers: ModelCatalog.offers(ModelCatalog.cachedListing(executables)),
+            installed: Set(executables.paths.keys),
+            excluded: excluded,
+            excludedWorkers: excludedWorkers,
+            difficulty: difficulty,
+            lineup: Lineup.load(from: lineupFile)
+        )
+    }
+
+    /// What the result says when the maestro named a worker anyway.
+    private static func ignoredNote(_ arguments: JSONValue, honoured: Bool) -> String {
+        guard !honoured, ["cli", "model", "effort"].contains(where: { arguments[$0] != nil }) else { return "" }
+        return "cli/model ignored: Vitra picks the worker. "
+    }
+
+    /// The worker a test names, or nil when Vitra is to pick: always for the
+    /// maestro, whose cli, model and effort are ignored.
+    private func namedWorker(in arguments: JSONValue) throws -> (WorkerCLI, String, String?)? {
+        guard honoursNamedWorkers else { return nil }
         guard arguments["cli"]?.stringValue != nil else {
             guard arguments["model"]?.stringValue == nil, arguments["effort"]?.stringValue == nil else {
                 throw ToolError("model and effort go with a cli: name the worker with all three, or leave all three out and Vitra picks")
             }
             return nil
         }
-        let cliName = try string("cli", in: arguments)
+        let cliName = try Self.string("cli", in: arguments)
         guard let cli = WorkerCLI(rawValue: cliName) else {
             let names = WorkerCLI.allCases.map(\.rawValue)
             let known = names.dropLast().joined(separator: ", ") + " or " + (names.last ?? "")
             throw ToolError("cli must be \(known), not '\(cliName)'")
         }
-        return (cli, try string("model", in: arguments), arguments["effort"]?.stringValue)
+        return (cli, try Self.string("model", in: arguments), arguments["effort"]?.stringValue)
     }
 
     /// The difficulty named in the arguments, or nil when none was.
@@ -812,6 +814,13 @@ public struct AgentToolExecutor: ToolExecutor {
             }
             if !moved { break }
         }
+        // Waited on by its own id, a successor still says whom it took over from.
+        for (index, run) in runs.enumerated() where failovers[index] == nil {
+            guard let old = run.retryOf, let original = try? orchestrator.status(old),
+                  let failure = original.providerFailure
+            else { continue }
+            failovers[index] = "[\(old)] did not run (\(failure.name)) — retried as [\(run.id)] on \(run.spec.worker)"
+        }
         var gates: [String: Gate] = [:]
         for run in runs {
             // Reading the history and starting an auditor both touch the disk
@@ -868,16 +877,9 @@ public struct AgentToolExecutor: ToolExecutor {
             break
         }
 
-        let offers = ModelCatalog.offers(ModelCatalog.cachedListing(executables))
-        guard let choice = WorkerPicker.pick(
-            kind: run.spec.kind ?? .other,
-            access: run.spec.access,
-            needsCommands: !run.spec.commands.isEmpty,
-            history: orchestrator.recent(limit: Self.historyLimit),
-            offers: offers,
-            installed: Set(executables.paths.keys),
-            excluded: [run.spec.cli],
-            difficulty: run.spec.difficulty ?? .normal
+        guard let choice = pick(
+            kind: run.spec.kind ?? .other, access: run.spec.access, commands: run.spec.commands,
+            difficulty: run.spec.difficulty ?? .normal, excluded: [run.spec.cli]
         ) else {
             try? FileManager.default.removeItem(at: record)
             return Failover(id: nil, line: cause + " — no worker from another provider can take it; spawn it again when one is free")
@@ -889,7 +891,7 @@ public struct AgentToolExecutor: ToolExecutor {
             minutes: run.spec.minutes, difficulty: run.spec.difficulty
         )
         do {
-            let successor = try orchestrator.spawn(spec, link: Orchestrator.SpawnLink(picked: true, retryOf: run.id))
+            let successor = try orchestrator.spawn(spec, link: Orchestrator.SpawnLink(picked: true, pick: choice.pick, retryOf: run.id))
             try? Data(successor.utf8).write(to: record, options: .atomic)
             discardEmptyWorktree(of: run)
             return Failover(id: successor, line: cause + " — retried as [\(successor)] on \(spec.worker)")
@@ -937,7 +939,7 @@ public struct AgentToolExecutor: ToolExecutor {
             if let refusal = auditRefusal(member.id) { throw ToolError(refusal) }
         }
 
-        let (cli, model, effort, why) = try redoWorker(for: original, arguments)
+        let (cli, model, effort, why, choice) = try redoWorker(for: original, arguments)
         let spec = original.spec
         let continuing = original.spec.access == .edit ? continuation(of: original, members: members) : nil
         let redone = WorkerSpec(
@@ -948,7 +950,14 @@ public struct AgentToolExecutor: ToolExecutor {
             kind: spec.kind, effort: effort, project: spec.project, commands: spec.commands,
             audit: spec.audit, minutes: spec.minutes, difficulty: spec.difficulty
         )
-        let link = Orchestrator.SpawnLink(redoOf: id, continuing: continuing)
+        // Vitra decides every redo, so it fails over like any other pick; the
+        // same worker going again keeps the reason it was first chosen.
+        let named = honoursNamedWorkers && arguments["cli"]?.stringValue != nil
+        let link = Orchestrator.SpawnLink(
+            picked: !named,
+            pick: choice?.pick ?? (cli == spec.cli ? original.pick : nil),
+            redoOf: id, continuing: continuing
+        )
 
         // Going on in a tree that a merge could remove is held under the lock.
         let started: String
@@ -984,38 +993,32 @@ public struct AgentToolExecutor: ToolExecutor {
         case let continuing?: place = "in a worktree recreated from branch \(continuing.branch)"
         }
         return "Started agent \(started): \(redone.worker), \(spec.access.rawValue) access, redo of \(id), \(place). "
-            + "\(why). Call agent_wait with this id for its result."
+            + "\(why). " + Self.ignoredNote(arguments, honoured: honoursNamedWorkers) + "Call agent_wait with this id for its result."
     }
 
     /// The worker for a redo: the one named; else the same worker, unless its
     /// delivery was rated below 3, when the next pick that is not it.
     private func redoWorker(
         for original: Run, _ arguments: JSONValue
-    ) throws -> (cli: WorkerCLI, model: String, effort: String?, why: String) {
-        if let (cli, model, effort) = try Self.namedWorker(in: arguments) { return (cli, model, effort, "as named") }
+    ) throws -> (cli: WorkerCLI, model: String, effort: String?, why: String, choice: WorkerPicker.Choice?) {
+        if let (cli, model, effort) = try namedWorker(in: arguments) { return (cli, model, effort, "as named", nil) }
         let spec = original.spec
         let rating = original.rating?.score
         if rating.map({ $0 >= Self.redoWithSameWorker }) ?? true {
-            return (spec.cli, spec.model, spec.effort, "the same worker goes again\(rating.map { ", rated \($0)/5" } ?? "")")
+            return (spec.cli, spec.model, spec.effort, "the same worker goes again\(rating.map { ", rated \($0)/5" } ?? "")", nil)
         }
-        let offers = ModelCatalog.offers(ModelCatalog.cachedListing(executables))
-        guard let choice = WorkerPicker.pick(
-            kind: spec.kind ?? .other,
-            access: spec.access,
-            needsCommands: !spec.commands.isEmpty,
-            history: orchestrator.recent(limit: Self.historyLimit),
-            offers: offers,
-            installed: Set(executables.paths.keys),
-            excludedWorkers: [ModelCatalog.Offer(cli: spec.cli, model: spec.model, effort: spec.effort)],
-            difficulty: spec.difficulty ?? .normal
+        guard let choice = pick(
+            kind: spec.kind ?? .other, access: spec.access, commands: spec.commands,
+            difficulty: spec.difficulty ?? .normal,
+            excludedWorkers: [ModelCatalog.Offer(cli: spec.cli, model: spec.model, effort: spec.effort)]
         ) else {
             throw ToolError(
                 "its delivery was rated \(rating ?? 0)/5 and no other installed worker can take the piece: "
-                    + "name one with cli, model and effort (agent_models lists them)"
+                    + "check agent_models for what is installed and signed in"
             )
         }
         return (choice.offer.cli, choice.offer.model, choice.offer.effort,
-                "picked: \(choice.reason); \(spec.worker) delivered a \(rating ?? 0)/5")
+                "picked: \(choice.reason); \(spec.worker) delivered a \(rating ?? 0)/5", choice)
     }
 
     /// The lowest rating of its delivery with which the same worker is trusted
@@ -1092,7 +1095,8 @@ public struct AgentToolExecutor: ToolExecutor {
             implementer: run.spec,
             history: history,
             installed: Set(executables.paths.keys),
-            offers: ModelCatalog.offers(ModelCatalog.cachedListing(executables))
+            offers: ModelCatalog.offers(ModelCatalog.cachedListing(executables)),
+            lineup: Lineup.load(from: lineupFile)
         ) else {
             return Gate(line: "gate: no auditor from another provider is available — review this delivery yourself.")
         }

@@ -78,16 +78,19 @@ private func reviews(_ cli: WorkerCLI, _ model: String, effort: String? = nil, c
     }
 }
 
-@Test func theAuditorsEffortCountsNotJustItsModel() {
-    // haiku at low has its two deliveries, haiku at medium none: the audit
-    // goes to medium. Matching on the model alone would take it for done.
-    let history = reviews(.claude, "haiku", effort: "low")
-        + reviews(.opencode, "opencode/glm-5.3-flash-free")
-        + reviews(.cursor, "grok-4.7-low-fast")
-    let chosen = Audit.chooseAuditor(implementer: implementer(.opencode), history: history, installed: everyCLI, offers: offers)
-    #expect(chosen?.cli == .claude)
-    #expect(chosen?.model == "haiku")
-    #expect(chosen?.effort == "medium")
+@Test func theAuditorFollowsTheEasyLineupAmongThoseAllowed() {
+    let glm = ModelCatalog.Offer(cli: .opencode, model: "opencode/glm-5.3-flash-free", effort: nil)
+    let haiku = ModelCatalog.Offer(cli: .claude, model: "haiku", effort: "low")
+    func auditor(_ cli: WorkerCLI, _ easy: [ModelCatalog.Offer]) -> String? {
+        Audit.chooseAuditor(
+            implementer: implementer(cli), history: [], installed: everyCLI, offers: offers,
+            lineup: Lineup(hard: [], normal: [], easy: easy)
+        )?.model
+    }
+    #expect(auditor(.cursor, [glm, haiku]) == glm.model)
+    #expect(auditor(.cursor, [haiku, glm]) == haiku.model)
+    // Never the implementer's own provider, whatever the lineup says.
+    #expect(auditor(.opencode, [glm, haiku]) == haiku.model)
 }
 
 @Test func anUninstalledCLIIsNotAnAuditor() {

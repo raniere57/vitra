@@ -44,7 +44,12 @@ enum UISnapshot {
         Shot(name: "stage-hover", size: NSSize(width: 420, height: 720), build: { palco($0, $0.fixtures.palcoRuns(), hover: "p02") }),
         Shot(name: "stage-wide", size: NSSize(width: 720, height: 640), build: { palco($0, $0.fixtures.palcoRuns()) }),
         Shot(name: "ranking", size: NSSize(width: 420, height: 720), build: { context in
-            let view = RankingView()
+            let data = context.fixtures.lineupData()
+            let lineup = LineupSectionView(
+                file: context.fixtures.project.appendingPathComponent("lineup.json"),
+                loader: { done in MainActor.assumeIsolated { done(data) } }
+            )
+            let view = RankingView(lineup: lineup)
             view.show(WorkerBoard.ranking(context.fixtures.rankingScores()))
             return view
         }),

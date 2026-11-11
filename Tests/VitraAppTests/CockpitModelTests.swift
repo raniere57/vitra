@@ -97,6 +97,74 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(WorkerBoard.row(haiku, now: now, timeZone: zone).meta == "haiku (low) · 10:46 · 38s · só leitura")
 }
 
+@Test func aWorkerRowSaysWhoChoseItAndWhy() {
+    func meta(_ pick: PickReason?, picked: Bool = true, retryOf: String? = nil) -> String {
+        var worker = run()
+        worker.wasPicked = picked
+        worker.pick = pick
+        worker.retryOf = retryOf
+        return WorkerBoard.row(worker, now: now, timeZone: zone).meta
+    }
+    #expect(meta(PickReason(code: .lineup, text: "1st in your lineup for hard pieces", position: 1))
+        == "deepseek-v4.1-flash-free · Vitra · 1º da sua escalação · 10:46 · 38s · só leitura")
+    #expect(meta(PickReason(code: .lineup, text: "3rd", position: 3)).contains(" · Vitra · 3º da sua escalação · "))
+    #expect(meta(PickReason(code: .learning, text: "learning turn")).contains(" · Vitra · vez de teste · "))
+    #expect(meta(PickReason(code: .lineup, text: "2nd", position: 2, passed: "opus", cause: .quota))
+        .contains(" · Vitra · opus sem cota · "))
+    #expect(meta(PickReason(code: .lineup, text: "2nd", position: 2, passed: "opus", cause: .slow)).contains(" · Vitra · opus lento · "))
+    #expect(meta(PickReason(code: .record, text: "x")).contains(" · Vitra · fora da escalação, pelo histórico · "))
+    #expect(meta(PickReason(code: .learning, text: "x"), retryOf: "aaaaaaaa").contains(" · Vitra, após falha · vez de teste · "))
+    // Picked before reasons were kept, and named by hand.
+    #expect(meta(nil) == "deepseek-v4.1-flash-free · Vitra · 10:46 · 38s · só leitura")
+    #expect(meta(nil, picked: false) == "deepseek-v4.1-flash-free · 10:46 · 38s · só leitura")
+}
+
+@Test func theEscalacaoShowsEachTiersRecordAndItsDemotions() {
+    let opus = ModelCatalog.Offer(cli: .claude, model: "opus", effort: "low")
+    let sonnet = ModelCatalog.Offer(cli: .claude, model: "sonnet", effort: "high")
+    func rated(_ worker: ModelCatalog.Offer, _ score: Int, seconds: TimeInterval, _ difficulty: Difficulty) -> Run {
+        Run(
+            id: "0123abcd",
+            spec: WorkerSpec(cli: worker.cli, model: worker.model, prompt: "x", directory: "/w", kind: .implement,
+                             effort: worker.effort, difficulty: difficulty),
+            state: .finished(exitCode: 0), pid: 1, started: start, ended: start.addingTimeInterval(seconds),
+            output: WorkerOutput(text: "ok", isError: false, costUSD: 0), errorTail: nil,
+            rating: Rating(score: score, note: nil, rated: start)
+        )
+    }
+    let history = [rated(opus, 3, seconds: 60, .hard), rated(opus, 3, seconds: 80, .hard), rated(opus, 5, seconds: 10, .normal)]
+    let rows = LineupBoard.rows([opus, sonnet], difficulty: .hard, history: history)
+    #expect(rows.map(\.name) == ["opus (low)", "sonnet (high)"])
+    #expect(rows[0].score == "3.0")
+    #expect(rows[0].time == "1m 10s")
+    #expect(rows[0].demotion == "rebaixado: nota 3.7")
+    #expect(rows[1] == LineupRow(worker: sonnet, name: "sonnet (high)", score: "—", time: "—", demotion: nil))
+
+    #expect(LineupBoard.moved([opus, sonnet], from: 0, to: 2) == [sonnet, opus])
+    #expect(LineupBoard.moved([opus, sonnet], from: 1, to: 0) == [sonnet, opus])
+    #expect(LineupBoard.moved([opus, sonnet], from: 0, to: 1) == [opus, sonnet])
+    #expect(LineupBoard.addable([opus, sonnet], to: [opus]) == [sonnet])
+}
+
+@Test func aPickReasonSurvivesInTheRunRecord() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-pick-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fake = root.appendingPathComponent("fake-claude")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    try "#!/bin/sh\ncat >/dev/null\n".write(to: fake, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+    let executables = Executables(paths: [.claude: fake.path])
+    let reason = PickReason(code: .lineup, text: "2nd in your lineup: opus (low) is out of quota", position: 2, passed: "opus", cause: .quota)
+    let id = try Orchestrator(root: root.appendingPathComponent("runs"), executables: executables).spawn(
+        WorkerSpec(cli: .claude, model: "haiku", prompt: "go", directory: root.path, effort: "low"),
+        link: Orchestrator.SpawnLink(pick: reason)
+    )
+    // A fresh orchestrator, as after a restart, reads it back.
+    let read = try Orchestrator(root: root.appendingPathComponent("runs"), executables: executables).status(id)
+    #expect(read.pick == reason)
+    #expect(read.wasPicked)
+}
+
 @Test func aWorkersStartShowsTheClockWhenItStartedToday() {
     #expect(WorkerBoard.startedText(at(2026, 11, 10, 10, 42), now: at(2026, 11, 10, 15, 0), timeZone: zone) == "10:42")
 }
@@ -323,8 +391,11 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     // the maestro's sense of what counts as small.
     #expect(brief.contains("Do the small things yourself"))
     // Vitra picks the worker; the maestro tags the kind and passes commands.
-    #expect(brief.contains("Vitra picks the worker from the record"))
-    #expect(brief.contains("two deliveries"))
+    #expect(brief.contains("Vitra picks the worker from the user's lineup"))
+    // It never tells the maestro to name a worker or a model.
+    #expect(!brief.contains("cli and model"))
+    #expect(!brief.contains("agent_models"))
+    #expect(!brief.contains("Name a worker"))
     #expect(brief.contains("commands"))
     #expect(!brief.contains("override"))
     #expect(!brief.contains("call agent_scores"))

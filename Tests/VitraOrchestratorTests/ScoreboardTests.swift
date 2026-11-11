@@ -240,13 +240,15 @@ private func run(
     let offers = [ModelCatalog.Offer(cli: .opencode, model: "opencode/glm-5.3-flash-free", effort: nil)]
     let text = Scoreboard.summary(Scoreboard.scores(history, kind: .review), kind: .review, offers: offers, history: history)
 
-    #expect(text == """
+    #expect(text.hasPrefix("""
     Worker models by kind of task, best first (score is the average of your agent_rate ratings, 1 to 5):
     review
       claude haiku (low) — 5.0/5 over 1 rated · 1 run · 0 failed · median 10s · $0.00
-      vitra picks next: opencode opencode/glm-5.3-flash-free — learning, 0 of 2 runs on review
+      vitra picks next: opencode opencode/glm-5.3-flash-free — 3rd in your lineup for normal pieces
       not tried yet: opencode opencode/glm-5.3-flash-free
-    """)
+    the user's lineup (Vitra picks the first that may run and is not demoted)
+      hard: 1. claude opus (low),
+    """))
 }
 
 @Test func aKindWithNoRunsAtAllStillSaysWhoIsNextAndWhatIsUntried() {
@@ -256,12 +258,13 @@ private func run(
     ]
     let text = Scoreboard.summary([], kind: .docs, offers: offers, history: [])
 
-    #expect(text == """
+    #expect(text.hasPrefix("""
     Worker models by kind of task, best first (score is the average of your agent_rate ratings, 1 to 5):
     docs
-      vitra picks next: opencode opencode/glm-5.3-flash-free — learning, 0 of 2 runs on docs
+      vitra picks next: claude haiku (low) — 2nd in your lineup for normal pieces
       not tried yet: opencode opencode/glm-5.3-flash-free, claude haiku (low)
-    """)
+    the user's lineup
+    """))
     // Without a kind every kind is covered, the empty ones included.
     let all = Scoreboard.summary([], offers: offers, history: [])
     for kind in TaskKind.allCases { #expect(all.contains("\n\(kind.rawValue)\n")) }
