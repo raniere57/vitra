@@ -411,7 +411,8 @@ enum Maestro {
     well sends the next task to the wrong worker.
 
     A delivery that changed forty lines or more is audited by a cheap read-only worker from another provider: \
-    agent_wait starts that audit and gives its id. Do not sit waiting for it: read the change yourself while the \
+    agent_wait starts that audit and gives its id. The audit is specialised by what the change touches, and a \
+    change to security, data or concurrency gets a strong auditor. Do not sit waiting for it: read the change yourself while the \
     auditor reads, then take its verdict and check the places it points at; rate the auditor too. A smaller change \
     has no audit, and your own read is the review. When the verdict asks for fixes, send them back to the \
     implementer before you report.

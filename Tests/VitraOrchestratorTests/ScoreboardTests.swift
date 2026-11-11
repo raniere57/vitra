@@ -315,3 +315,49 @@ private func run(
     ]))
     #expect(mixed.contains(" · 2 easy, 1 normal, 1 hard"))
 }
+
+/// A finished audit of `focuses` by one worker.
+private func audit(_ cli: WorkerCLI, _ model: String, effort: String? = nil, _ focuses: [AuditFocus], score: Int?) -> Run {
+    Run(
+        id: "a1b2c3d4",
+        spec: WorkerSpec(
+            cli: cli, model: model, prompt: "audit", directory: "/tmp", access: .read, kind: .review,
+            effort: effort, auditFocus: focuses
+        ),
+        state: .finished(exitCode: 0), pid: 1, started: start, ended: start.addingTimeInterval(30),
+        output: WorkerOutput(text: "ship", isError: false), errorTail: nil,
+        rating: score.map { Rating(score: $0, note: nil, rated: start) }
+    )
+}
+
+@Test func theReviewKindNamesTheBestRatedAuditorPerFocusOnceTwoAuditsAreRated() {
+    let history = [
+        audit(.claude, "opus", effort: "low", [.security, .general], score: 5),
+        audit(.cursor, "grok-4.7-high-fast", [.security, .general], score: 3),
+        audit(.cursor, "grok-4.7-high-fast", [.security], score: 4),
+        audit(.opencode, "opencode/glm-5.3-flash-free", [.interface, .general], score: 4),
+        // An unrated audit says nothing about who audits well.
+        audit(.opencode, "opencode/glm-5.3-flash-free", [.interface], score: nil),
+    ]
+    let lines = Scoreboard.focusLines(history)
+    #expect(lines.contains("  audits of security: best rated claude opus (low) — 5.0/5 over 1 of 3 rated"))
+    #expect(lines.contains("  audits of general: best rated claude opus (low) — 5.0/5 over 1 of 3 rated"))
+    // One rated interface audit is not a record yet.
+    #expect(!lines.contains { $0.contains("audits of interface") })
+
+    let summary = Scoreboard.summary(Scoreboard.scores(history, kind: .review), kind: .review, history: history)
+    #expect(summary.contains("  audits of security: best rated claude opus (low)"))
+    // A delivery that forced a focus is not an audit.
+    let delivery = WorkerSpec(cli: .claude, model: "haiku", prompt: "x", directory: "/tmp", access: .edit, auditFocus: [.security])
+    #expect(!delivery.isAudit)
+}
+
+@Test func anAuditorsFocusesSurviveTheRecordAndAnUnknownOneIsDropped() throws {
+    let spec = WorkerSpec(cli: .claude, model: "opus", prompt: "a", directory: "/tmp", auditFocus: [.security, .general])
+    let decoded = try JSONDecoder().decode(WorkerSpec.self, from: JSONEncoder().encode(spec))
+    #expect(decoded.auditFocus == [.security, .general])
+    let future = #"{"cli":"claude","model":"opus","prompt":"a","directory":"/tmp","auditFocus":["security","privacy"]}"#
+    #expect(try JSONDecoder().decode(WorkerSpec.self, from: Data(future.utf8)).auditFocus == [.security])
+    let old = #"{"cli":"claude","model":"opus","prompt":"a","directory":"/tmp"}"#
+    #expect(try JSONDecoder().decode(WorkerSpec.self, from: Data(old.utf8)).auditFocus == nil)
+}

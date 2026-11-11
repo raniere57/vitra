@@ -19,7 +19,8 @@ public enum AgentTools {
             Spawn several and then agent_wait on all of them to run work in parallel. \
             In a git repository each editing worker is given a worktree and a branch of its own automatically, so several can edit at once; when its delivery is done and its audit read, agent_merge with its id puts the branch on your checkout and cleans up, and agent_merge with discard drops it instead. \
             Outside a repository, give workers that edit at the same time a directory each: two editing the same checkout will overwrite one another. \
-            A finished editing delivery of 40 changed lines or more is audited by a cheap read-only worker from another provider: agent_wait starts it and says its id. Pass audit true to have a smaller change audited too, false to skip the gate.
+            A finished editing delivery of 40 changed lines or more is audited by a read-only worker from another provider: agent_wait starts it and says its id. Pass audit true to have a smaller change audited too, false to skip the gate. \
+            The audit is specialised by what the change touches (security, data, concurrency, interface, tests, on top of a general read); security, data and concurrency go to a strong auditor, and a large change that is both those and interface or tests gets two audits side by side.
             """,
             properties: [
                 "prompt": MCPTools.string("The whole task, self-contained."),
@@ -42,11 +43,16 @@ public enum AgentTools {
                 ],
                 "audit": [
                     "type": "boolean",
-                    "description": "Left out: a finished editing delivery is audited by a cheap read-only worker from another provider when it changed 40 lines or more, and agent_wait gives the audit's id. true audits it whatever its size; false skips the gate.",
+                    "description": "Left out: a finished editing delivery is audited by a read-only worker from another provider when it changed 40 lines or more, and agent_wait gives the audit's id. true audits it whatever its size; false skips the gate.",
+                ],
+                "audit_focus": [
+                    "type": "array",
+                    "items": ["type": "string", "enum": .array(AuditFocus.allCases.map { .string($0.rawValue) })],
+                    "description": "What the audit of an editing delivery looks at, instead of what Vitra reads from the diff: any of security, data, concurrency, interface, tests (a general read is always added). Naming any audits the delivery whatever its size, unless audit is false.",
                 ],
                 "minutes": [
                     "type": "number",
-                    "description": "Time limit for this worker, 1 to 180. Left out: 45. A worker still running past it is cancelled the next time agent_wait or agent_cancel reads it, and reported as failed (timed out after N min). The automatic auditor gets 8.",
+                    "description": "Time limit for this worker, 1 to 180. Left out: 45. A worker still running past it is cancelled the next time agent_wait or agent_cancel reads it, and reported as failed (timed out after N min). The automatic auditor gets 8, or 12 when it audits security, data or concurrency.",
                 ],
                 "difficulty": [
                     "type": "string",
@@ -159,11 +165,25 @@ public enum AgentTools {
     public static let names: [String] = all.compactMap { $0["name"]?.stringValue }
 }
 
-/// The gate on one run: what to add to its report, and, while an auditor is
-/// reading, the audit's id (or "an auditor" while it is still being claimed).
+/// The gate on one run: what to add to its report, and, while auditors are
+/// reading, their ids (or "an auditor" while one is still being claimed).
 private struct Gate {
     var line: String? = nil
-    var reading: String? = nil
+    var reading: [String] = []
+
+    init(line: String? = nil, reading: String? = nil) {
+        self.line = line
+        self.reading = reading.map { [$0] } ?? []
+    }
+
+    /// Two audits' gates as one: their lines one under the other.
+    static func joined(_ gates: [Gate]) -> Gate {
+        var gate = Gate()
+        let lines = gates.compactMap(\.line)
+        gate.line = lines.isEmpty ? nil : lines.joined(separator: "\n")
+        gate.reading = gates.flatMap(\.reading)
+        return gate
+    }
 }
 
 /// Runs the agent tools against an orchestrator.
@@ -192,6 +212,12 @@ public struct AgentToolExecutor: ToolExecutor {
 
     /// How long the automatic auditor may run before it is cancelled as hung.
     static let auditMinutes = 8
+    /// The same for a strong auditor of security, data or concurrency, which
+    /// reads more carefully and is slower for it.
+    static let hardAuditMinutes = 12
+    /// The claim files beside a delivery, one per audit: the first is the only
+    /// one, or the strong one of two run side by side; the second the cheap.
+    static let auditRecords = ["audit", "audit-2"]
     /// A `pending` audit claim older than this was left by a helper that died
     /// between taking it and writing the auditor's id.
     static let staleClaimAge: TimeInterval = 60
@@ -305,6 +331,7 @@ public struct AgentToolExecutor: ToolExecutor {
         let commands = try Self.commands(in: arguments)
         let prompt = try Self.string("prompt", in: arguments)
         let difficulty = try Self.difficulty(in: arguments) ?? Difficulty.estimate(prompt: prompt, kind: kind, access: access)
+        let forcedFocus = try Self.auditFocus(in: arguments)
 
         // Vitra picks; only a test may name the worker.
         var picked: WorkerPicker.Choice?
@@ -343,7 +370,10 @@ public struct AgentToolExecutor: ToolExecutor {
             // the gate off, and an explicit true is kept as it was asked.
             audit: arguments["audit"]?.boolValue,
             minutes: try Self.minutes(in: arguments),
-            difficulty: difficulty
+            difficulty: difficulty,
+            // Only an editing delivery is audited; on a read-only run a focus
+            // would make it pass for an auditor.
+            auditFocus: access == .edit ? forcedFocus : nil
         )
         // A worker Vitra picked may be failed over to another if its provider
         // is out; one a test named is only reported.
@@ -451,7 +481,7 @@ public struct AgentToolExecutor: ToolExecutor {
         }
         // An auditor past its deadline is cancelled by this read, which can
         // take seconds: do it before the lock, not under it.
-        for member in members { if let audit = auditID(member.id) { _ = try? orchestrator.status(audit) } }
+        for member in members { for audit in auditIDs(member.id) { _ = try? orchestrator.status(audit) } }
 
         // Everything from here to the end is one critical section per
         // repository: the checks and the merge are not atomic, and another
@@ -697,22 +727,25 @@ public struct AgentToolExecutor: ToolExecutor {
     /// was recorded.
     private func auditRefusal(_ id: String) -> String? {
         guard let directory = orchestrator.directory(of: id) else { return nil }
-        let record = directory.appendingPathComponent("audit")
-        guard let audit = Self.claimText(record) else { return nil }
-        if audit.isEmpty || audit == "pending" {
-            return Self.isAbandoned(record) ? nil : "an audit is still reading this worktree; agent_wait on it first"
+        for name in Self.auditRecords {
+            let record = directory.appendingPathComponent(name)
+            guard let audit = Self.claimText(record) else { continue }
+            if audit.isEmpty || audit == "pending" {
+                if Self.isAbandoned(record) { continue }
+                return "an audit is still reading this worktree; agent_wait on it first"
+            }
+            guard let reading = try? orchestrator.status(audit), reading.state == .running else { continue }
+            return "the audit \(audit) is still reading this worktree; agent_wait on it first"
         }
-        guard let reading = try? orchestrator.status(audit), reading.state == .running else { return nil }
-        return "the audit \(audit) is still reading this worktree; agent_wait on it first"
+        return nil
     }
 
-    /// The id of the audit recorded for run `id`, when there is one.
-    private func auditID(_ id: String) -> String? {
-        guard let directory = orchestrator.directory(of: id),
-              let text = Self.claimText(directory.appendingPathComponent("audit")),
-              !text.isEmpty, text != "pending"
-        else { return nil }
-        return text
+    /// The ids of the audits recorded for run `id`.
+    private func auditIDs(_ id: String) -> [String] {
+        guard let directory = orchestrator.directory(of: id) else { return [] }
+        return Self.auditRecords.compactMap { name in
+            Self.claimText(directory.appendingPathComponent(name)).flatMap { $0.isEmpty || $0 == "pending" ? nil : $0 }
+        }
     }
 
     /// What the claim file says, trimmed, or nil when there is no claim.
@@ -761,6 +794,17 @@ public struct AgentToolExecutor: ToolExecutor {
             throw ToolError("minutes must be a whole number from 1 to 180")
         }
         return Int(number)
+    }
+
+    /// The audit focuses named in the arguments, or nil when none were.
+    private static func auditFocus(in arguments: JSONValue) throws -> [AuditFocus]? {
+        guard let value = arguments["audit_focus"], value != .null else { return nil }
+        let names = value.arrayValue?.compactMap(\.stringValue) ?? []
+        let focuses = names.compactMap(AuditFocus.init(rawValue:))
+        guard let array = value.arrayValue, !array.isEmpty, focuses.count == array.count else {
+            throw ToolError("audit_focus must be a non-empty array of: security, data, concurrency, interface, tests, general")
+        }
+        return focuses
     }
 
     /// The commands the worker may run, when any were named.
@@ -832,7 +876,7 @@ public struct AgentToolExecutor: ToolExecutor {
         }
         return runs.enumerated().map { index, run in
             let gate = gates[run.id]
-            var report = AgentReport.full(run, audit: gate?.reading)
+            var report = AgentReport.full(run, audits: gate?.reading ?? [])
             if let line = failovers[index] { report = line + "\n" + report }
             guard let line = gate?.line else { return report }
             return report + "\n" + line
@@ -855,7 +899,9 @@ public struct AgentToolExecutor: ToolExecutor {
     /// and later calls report it. A worker the maestro named, and a run that
     /// is itself a retry, are only reported.
     private func failover(_ run: Run) -> Failover? {
-        guard let failure = run.providerFailure, run.wasPicked, run.retryOf == nil,
+        // An audit is not failed over: its delivery's claim names it, and a
+        // successor nobody claimed would read the worktree unguarded.
+        guard let failure = run.providerFailure, run.wasPicked, run.retryOf == nil, !run.spec.isAudit,
               let directory = orchestrator.directory(of: run.id)
         else { return nil }
         let record = directory.appendingPathComponent("retry")
@@ -888,7 +934,7 @@ public struct AgentToolExecutor: ToolExecutor {
             cli: choice.offer.cli, model: choice.offer.model, prompt: run.spec.prompt, directory: run.spec.directory,
             access: run.spec.access, label: run.spec.label, kind: run.spec.kind, effort: choice.offer.effort,
             project: run.spec.project, commands: run.spec.commands, audit: run.spec.audit,
-            minutes: run.spec.minutes, difficulty: run.spec.difficulty
+            minutes: run.spec.minutes, difficulty: run.spec.difficulty, auditFocus: run.spec.auditFocus
         )
         do {
             let successor = try orchestrator.spawn(spec, link: Orchestrator.SpawnLink(picked: true, pick: choice.pick, retryOf: run.id))
@@ -935,7 +981,7 @@ public struct AgentToolExecutor: ToolExecutor {
             throw ToolError("agent \(busy.id) is still running on the same branch: wait for it to finish before redoing")
         }
         for member in members {
-            if let audit = auditID(member.id) { _ = try? orchestrator.status(audit) }
+            for audit in auditIDs(member.id) { _ = try? orchestrator.status(audit) }
             if let refusal = auditRefusal(member.id) { throw ToolError(refusal) }
         }
 
@@ -948,7 +994,7 @@ public struct AgentToolExecutor: ToolExecutor {
             directory: spec.directory, access: spec.access,
             label: ((spec.label ?? "").isEmpty ? spec.worker : spec.label ?? "") + " (redo)",
             kind: spec.kind, effort: effort, project: spec.project, commands: spec.commands,
-            audit: spec.audit, minutes: spec.minutes, difficulty: spec.difficulty
+            audit: spec.audit, minutes: spec.minutes, difficulty: spec.difficulty, auditFocus: spec.auditFocus
         )
         // Vitra decides every redo, so it fails over like any other pick; the
         // same worker going again keeps the reason it was first chosen.
@@ -979,7 +1025,7 @@ public struct AgentToolExecutor: ToolExecutor {
         // for it, and the old run must not start another of its own.
         for member in members {
             guard let directory = orchestrator.directory(of: member.id) else { continue }
-            try? FileManager.default.removeItem(at: directory.appendingPathComponent("audit"))
+            for name in Self.auditRecords { try? FileManager.default.removeItem(at: directory.appendingPathComponent(name)) }
             try? FileManager.default.removeItem(at: directory.appendingPathComponent("paused"))
         }
         if let directory = orchestrator.directory(of: id) {
@@ -1043,9 +1089,10 @@ public struct AgentToolExecutor: ToolExecutor {
         return prompt + "\n\nWhat the previous attempt got wrong, fix exactly this:\n" + notes + site
     }
 
-    /// The quality gate on a finished editing delivery: starts a cheap
-    /// read-only auditor from another provider once, and reports the audit
-    /// that already exists on every later wait.
+    /// The quality gate on a finished editing delivery: starts a read-only
+    /// auditor from another provider once — strong for security, data or
+    /// concurrency, cheap otherwise, two side by side for a large change that
+    /// is both — and reports the audits that exist on every later wait.
     ///
     /// An empty gate means there is nothing to gate: the run did not finish
     /// cleanly, did not edit, has no branch or no commit on it, or its spawn
@@ -1067,10 +1114,11 @@ public struct AgentToolExecutor: ToolExecutor {
         if let redone = Self.claimText(directory.appendingPathComponent("redo")), !redone.isEmpty {
             return Gate(line: "gate: agent \(redone) redid this delivery — audit and merge that one.")
         }
-        let record = directory.appendingPathComponent("audit")
+        let records = Self.auditRecords.map { directory.appendingPathComponent($0) }
         // A claim abandoned half-way is not an audit: it is taken over below.
-        if FileManager.default.fileExists(atPath: record.path), !Self.isAbandoned(record) {
-            return Self.existingGate(record, orchestrator: orchestrator)
+        let claimed = records.filter { FileManager.default.fileExists(atPath: $0.path) && !Self.isAbandoned($0) }
+        if !claimed.isEmpty {
+            return Gate.joined(claimed.map { Self.existingGate($0, orchestrator: orchestrator) })
         }
         guard run.spec.audit != false else { return Gate() }
 
@@ -1083,22 +1131,10 @@ public struct AgentToolExecutor: ToolExecutor {
 
         // A small change is quicker for the orchestrator to read than for an
         // auditor to start on: the gate is for changes big enough to hide
-        // something, unless the spawn asked for it by name.
-        if run.spec.audit != true,
-           let lines = Self.changedLines(from: base, to: branch, in: repository),
-           lines < Self.auditFromLines {
+        // something, unless the spawn asked for it, or for a focus, by name.
+        let changed = Self.changedLines(from: base, to: branch, in: repository)
+        if run.spec.audit != true, run.spec.auditFocus == nil, let lines = changed, lines < Self.auditFromLines {
             return Gate(line: "gate: no audit — a small change (\(lines) \(lines == 1 ? "line" : "lines")); review it yourself.")
-        }
-
-        let history = orchestrator.recent(limit: Self.scoredRuns)
-        guard let choice = Audit.chooseAuditor(
-            implementer: run.spec,
-            history: history,
-            installed: Set(executables.paths.keys),
-            offers: ModelCatalog.offers(ModelCatalog.cachedListing(executables)),
-            lineup: Lineup.load(from: lineupFile)
-        ) else {
-            return Gate(line: "gate: no auditor from another provider is available — review this delivery yourself.")
         }
 
         // A diff that cannot be read is not an empty diff: an auditor started
@@ -1110,28 +1146,42 @@ public struct AgentToolExecutor: ToolExecutor {
                 + (reason.isEmpty ? "git gave no reason" : reason))
         }
 
-        let label = run.spec.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let spec = WorkerSpec(
-            cli: choice.cli,
-            model: choice.model,
-            prompt: Audit.prompt(task: run.spec.prompt, diff: read.output, label: run.spec.label),
-            directory: worktree,
-            access: .read,
-            label: "auditoria: " + (label.isEmpty ? run.id : label),
-            kind: .review,
-            effort: choice.effort,
-            project: run.spec.project,
-            minutes: Self.auditMinutes
-        )
+        // What the change touches decides what the audit looks at, and how
+        // strong an auditor it gets; a spawn may name the focuses instead.
+        let focuses = run.spec.auditFocus.map(AuditFocus.forced) ?? AuditFocus.classify(read.output)
+        let plans = Audit.plan(focuses, changedLines: changed ?? 0)
+        let history = orchestrator.recent(limit: Self.scoredRuns)
+        let installed = Set(executables.paths.keys)
+        let offers = ModelCatalog.offers(ModelCatalog.cachedListing(executables))
+        let lineup = Lineup.load(from: lineupFile)
+        func auditor(_ plan: [AuditFocus.Match]) -> (cli: WorkerCLI, model: String, effort: String?, pick: PickReason)? {
+            Audit.chooseAuditor(
+                implementer: run.spec, history: history, installed: installed, offers: offers,
+                lineup: lineup, focuses: plan.map(\.focus)
+            )
+        }
+        var chosen = plans.map { ($0, auditor($0)) }
+        // Two audits only when both have an auditor; else one, with everything.
+        if chosen.count > 1, chosen.contains(where: { $0.1 == nil }) {
+            chosen = [(focuses, auditor(focuses))]
+        }
+        let specs = chosen.compactMap { plan, choice in
+            choice.map { auditSpec(for: run, worktree: worktree, diff: read.output, focuses: plan, choice: $0) }
+        }
+        guard specs.count == chosen.count, !specs.isEmpty else {
+            return Gate(line: "gate: no auditor from another provider is available — review this delivery yourself.")
+        }
 
         // Claim and spawn hold the repository's lock, the same one a merge
         // holds while it removes the worktree: a merge cannot delete the tree
         // an auditor is being started in, and an auditor cannot be started in
         // a tree already deleted. The diff and the choice above were made
-        // outside it, so the lock is held for the spawn only.
+        // outside it, so the lock is held for the spawns only.
         do {
             return try RepositoryLock.withLock(repository, timeout: lockTimeout) {
-                claimAndSpawn(spec, run: run, worktree: worktree, record: record)
+                Gate.joined(zip(specs, records).map { spec, record in
+                    claimAndSpawn(spec.spec, pick: spec.pick, run: run, worktree: worktree, record: record)
+                })
             }
         } catch let error as RepositoryLockError {
             if case .busy = error {
@@ -1143,8 +1193,34 @@ public struct AgentToolExecutor: ToolExecutor {
         }
     }
 
+    /// The auditor's spec for one audit of `run`'s delivery: read-only, in
+    /// its worktree, given the focuses' checklists, and given longer, as a
+    /// hard piece, when a focus is security, data or concurrency.
+    private func auditSpec(
+        for run: Run, worktree: String, diff: String, focuses: [AuditFocus.Match],
+        choice: (cli: WorkerCLI, model: String, effort: String?, pick: PickReason)
+    ) -> (spec: WorkerSpec, pick: PickReason) {
+        let label = run.spec.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let hard = focuses.contains { $0.focus.isHard }
+        let spec = WorkerSpec(
+            cli: choice.cli,
+            model: choice.model,
+            prompt: Audit.prompt(task: run.spec.prompt, diff: diff, label: run.spec.label, focuses: focuses),
+            directory: worktree,
+            access: .read,
+            label: "auditoria: " + (label.isEmpty ? run.id : label),
+            kind: .review,
+            effort: choice.effort,
+            project: run.spec.project,
+            minutes: hard ? Self.hardAuditMinutes : Self.auditMinutes,
+            difficulty: hard ? .hard : .easy,
+            auditFocus: focuses.map(\.focus)
+        )
+        return (spec, choice.pick)
+    }
+
     /// The claim and the auditor's spawn, under the repository's lock.
-    private func claimAndSpawn(_ spec: WorkerSpec, run: Run, worktree: String, record: URL) -> Gate {
+    private func claimAndSpawn(_ spec: WorkerSpec, pick: PickReason, run: Run, worktree: String, record: URL) -> Gate {
         // A merge that got the lock first has taken the worktree away.
         guard FileManager.default.fileExists(atPath: worktree) else { return Gate() }
 
@@ -1165,7 +1241,7 @@ public struct AgentToolExecutor: ToolExecutor {
         }
 
         do {
-            let id = try orchestrator.spawn(spec)
+            let id = try orchestrator.spawn(spec, link: Orchestrator.SpawnLink(pick: pick))
             do {
                 // Atomic replace of the claim: a reader sees `pending` or the
                 // id, never half of either.
@@ -1178,7 +1254,8 @@ public struct AgentToolExecutor: ToolExecutor {
                 return Gate(line: "gate: could not record the audit — review this delivery yourself.")
             }
             return Gate(
-                line: "gate: audit \(id) by \(spec.worker) started — agent_wait on it and read its verdict before reviewing yourself.",
+                line: "gate: audit \(id) (\(AuditFocus.names(spec.auditFocus ?? []))) by \(spec.worker) started — "
+                    + "agent_wait on it and read its verdict before reviewing yourself.",
                 reading: id
             )
         } catch {
@@ -1307,10 +1384,10 @@ enum AgentReport {
 
     /// The headline, then the worker's answer and anything it left on stderr.
     ///
-    /// `audit` is the auditor reading the worktree, when one is: while it
-    /// runs, the report must not tell the orchestrator to take that worktree
-    /// away underneath it.
-    static func full(_ run: Run, audit: String? = nil) -> String {
+    /// `audits` are the auditors reading the worktree, when any are: while
+    /// they run, the report must not tell the orchestrator to take that
+    /// worktree away underneath them.
+    static func full(_ run: Run, audits: [String] = []) -> String {
         var lines = [headline(run)]
         if let text = run.output?.text, !text.isEmpty {
             lines.append(text.count > longestAnswer
@@ -1324,7 +1401,7 @@ enum AgentReport {
             // (When stderr was all the worker said, it is already the answer above.)
             lines.append("stderr: " + errorTail)
         }
-        lines.append(contentsOf: branchLines(run, audit: audit))
+        lines.append(contentsOf: branchLines(run, audits: audits))
         if !run.worktreeSkipped.isEmpty {
             lines.append("worktree setup skipped: " + run.worktreeSkipped.joined(separator: "; "))
         }
@@ -1337,7 +1414,8 @@ enum AgentReport {
     /// An audit that did not give a verdict — timed out, failed, cancelled,
     /// lost — blocks nothing: the line says to review the delivery oneself.
     static func gate(_ audit: Run) -> String {
-        let who = "gate: audit \(audit.id) by \(audit.spec.worker)"
+        let focus = audit.spec.auditFocus.map { " (" + AuditFocus.names($0) + ")" } ?? ""
+        let who = "gate: audit \(audit.id)\(focus) by \(audit.spec.worker)"
         let readIt = " — read its verdict before reviewing yourself."
         let noVerdict = " — review this delivery yourself."
         switch audit.state {
@@ -1376,7 +1454,7 @@ enum AgentReport {
     /// When the commit failed the first line says so instead of reporting "no
     /// changes", which would leave the worker's edits stranded and unmentioned
     /// in the worktree.
-    private static func branchLines(_ run: Run, audit: String?) -> [String] {
+    private static func branchLines(_ run: Run, audits: [String]) -> [String] {
         guard let branch = run.branch, let base = run.baseCommit,
               let top = run.repository, let tree = run.worktree
         else { return [] }
@@ -1393,10 +1471,12 @@ enum AgentReport {
             )
             lines.append(contentsOf: fileLines(base: base, branch: branch, in: top))
         }
-        if let audit {
+        if !audits.isEmpty {
             // The auditor is reading this worktree: the merge waits, and the
             // cleanup above all, or it would pull the files out from under it.
-            lines.append("merge after the audit: \(audit) is reading this worktree")
+            lines.append(audits.count == 1
+                ? "merge after the audit: \(audits[0]) is reading this worktree"
+                : "merge after the audits: \(audits.joined(separator: " and ")) are reading this worktree")
         } else if run.isPaused {
             lines.append(
                 "paused: worktree removed, branch \(branch) kept — agent_redo \(run.id) to continue it, "

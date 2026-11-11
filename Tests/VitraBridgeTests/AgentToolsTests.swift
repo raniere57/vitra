@@ -460,7 +460,7 @@ private func reviewRuns(in orchestrator: Orchestrator) -> [Run] {
     // Waiting again reports the audit that exists; it does not start another.
     let again = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
     let againGate = try #require(again.split(separator: "\n").map(String.init).last)
-    #expect(againGate.hasPrefix("gate: audit \(auditID) by opencode opencode/glm-5.3-flash-free "))
+    #expect(againGate.hasPrefix("gate: audit \(auditID) (general) by opencode opencode/glm-5.3-flash-free "))
     #expect(reviewRuns(in: fixture.orchestrator).count == 1)
 }
 
@@ -1366,7 +1366,7 @@ echo '{"type":"text","part":{"text":"redone"}}'
     let id = try await fixture.spawn(["access": "edit", "audit": true, "directory": .string(repository.path), "label": "add logout"])
     let first = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
     let firstAudit = try String(contentsOf: fixture.root.appendingPathComponent("runs/\(id)/audit"), encoding: .utf8)
-    #expect(first.contains("gate: audit \(firstAudit) by opencode"))
+    #expect(first.contains("gate: audit \(firstAudit) (general) by opencode"))
     _ = try await fixture.orchestrator.wait(ids: [firstAudit], timeout: 10)
 
     let started = try await fixture.call("agent_redo", ["id": .string(id), "notes": "the null case crashes"])
@@ -1392,7 +1392,7 @@ echo '{"type":"text","part":{"text":"redone"}}'
     #expect(report.contains(" · redo of \(id) · add logout (redo)\n"))
     let secondAudit = try String(contentsOf: fixture.root.appendingPathComponent("runs/\(redoID)/audit"), encoding: .utf8)
     #expect(secondAudit != firstAudit)
-    #expect(report.contains("gate: audit \(secondAudit) by opencode"))
+    #expect(report.contains("gate: audit \(secondAudit) (general) by opencode"))
     #expect(reviewRuns(in: fixture.orchestrator).count == 2)
     _ = try await fixture.orchestrator.wait(ids: [secondAudit], timeout: 10)
     // The original, waited for again, points at its redo and starts no audit.
@@ -1610,4 +1610,136 @@ echo '{"type":"text","part":{"text":"redone"}}'
     // Waited on by its own id, the successor still says whom it replaced.
     let again = try await fixture.call("agent_wait", ["ids": [.string(successor)], "timeout_seconds": 10])
     #expect(again.hasPrefix("[\(redo)] did not run (quota) — retried as [\(successor)] on claude "))
+}
+
+// MARK: Specialised audits
+
+/// A fake claude that does `work` when it implements and keeps reading when
+/// it is the auditor.
+private func implementsOrAudits(_ work: String) -> String {
+    """
+    prompt=$(cat)
+    case "$prompt" in
+      *"You are auditing"*) sleep 30 ;;
+      *) \(work)
+         echo '{"result":"done","is_error":false}' ;;
+    esac
+    """
+}
+
+/// The ids in a gate's `gate: audit <id> …` lines.
+private func gateIDs(_ report: String) -> [String] {
+    report.split(separator: "\n").filter { $0.hasPrefix("gate: audit ") }
+        .map { String($0.dropFirst("gate: audit ".count).prefix(8)) }
+}
+
+@Test func aForcedCheapFocusAuditsASmallChangeOnTheCheapPickAndTheGateNamesIt() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: audits)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn([
+        "access": "edit", "directory": .string(repository.path), "audit_focus": ["interface"],
+    ])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let gate = try #require(report.split(separator: "\n").map(String.init).last)
+    #expect(gate.hasPrefix("gate: audit "))
+    #expect(gate.contains(" (interface) by opencode opencode/glm-5.3-flash-free started — agent_wait on it"))
+
+    let auditor = try #require(reviewRuns(in: fixture.orchestrator).first)
+    #expect(auditor.spec.auditFocus == [.interface, .general])
+    #expect(auditor.spec.minutes == 8)
+    #expect(auditor.spec.difficulty == .easy)
+    #expect(auditor.pick?.text.hasPrefix("audit of interface: ") == true)
+    #expect(auditor.spec.prompt.contains("Focus: interface — look for:"))
+    #expect(!auditor.spec.prompt.contains("Focus: security"))
+
+    // Later waits name the focus too.
+    let again = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+    #expect(again.contains("gate: audit \(auditor.id) (interface) by opencode "))
+}
+
+@Test func auditFalseStillSkipsTheGateWhenAFocusIsNamed() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: audits)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn([
+        "access": "edit", "directory": .string(repository.path), "audit": false, "audit_focus": ["security"],
+    ])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    #expect(!report.contains("gate:"))
+    #expect(reviewRuns(in: fixture.orchestrator).isEmpty)
+
+    await #expect(throws: ToolError("audit_focus must be a non-empty array of: security, data, concurrency, interface, tests, general")) {
+        try await fixture.spawn(["access": "edit", "audit_focus": ["privacy"]])
+    }
+}
+
+@Test func aSecurityAuditIsAHardPieceOnAStrongAuditorWithTwelveMinutes() async throws {
+    // Nobody strong is installed outside claude: a strong claude other than
+    // the implementer audits it.
+    let fixture = try Fixture(claude: implementsOrAudits("printf 'changed\\n' > from-worker.txt"), opencode: audits)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn([
+        "access": "edit", "directory": .string(repository.path), "audit_focus": ["security"],
+    ])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    #expect(report.contains(" (security) by claude opus (low) started — "))
+
+    let auditor = try #require(reviewRuns(in: fixture.orchestrator).first)
+    #expect(auditor.spec.difficulty == .hard)
+    #expect(try fixture.allowedSeconds(auditor.id) == 12 * 60)
+    #expect(auditor.pick?.text.hasPrefix("audit of security: no strong worker from another provider; ") == true)
+    _ = try await fixture.call("agent_cancel", ["id": .string(auditor.id)])
+}
+
+/// A delivery of 421 lines that is both security (a login, a process) and
+/// interface (a view): two audits side by side.
+private let writesALargeLoginView = implementsOrAudits(#"""
+{ echo 'import SwiftUI'; i=0; while [ $i -lt 420 ]; do echo "let p$i = Process()"; i=$((i+1)); done; } > LoginView.swift
+"""#)
+
+@Test func aLargeChangeThatIsBothHardAndNotGetsTwoAuditsAndTheMergeWaitsForBoth() async throws {
+    let fixture = try Fixture(claude: writesALargeLoginView, opencode: keepsReading)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn(["access": "edit", "directory": .string(repository.path)])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+
+    // Both are started, each with its own claim, and the report names both.
+    #expect(report.contains(" (security) by claude opus (low) started — "))
+    #expect(report.contains(" (interface, tests) by opencode opencode/glm-5.3-flash-free started — "))
+    let strong = try String(contentsOf: fixture.root.appendingPathComponent("runs/\(id)/audit"), encoding: .utf8)
+    let cheap = try String(contentsOf: fixture.root.appendingPathComponent("runs/\(id)/audit-2"), encoding: .utf8)
+    #expect(gateIDs(report) == [strong, cheap])
+    #expect(report.contains("merge after the audits: \(strong) and \(cheap) are reading this worktree"))
+    #expect(reviewRuns(in: fixture.orchestrator).count == 2)
+    #expect(try fixture.orchestrator.status(strong).spec.auditFocus == [.security])
+    #expect(try fixture.orchestrator.status(cheap).spec.auditFocus == [.interface, .tests, .general])
+
+    // A later wait reports both and starts nothing more.
+    let again = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+    #expect(gateIDs(again) == [strong, cheap])
+    #expect(reviewRuns(in: fixture.orchestrator).count == 2)
+
+    // The merge waits while either reads.
+    await #expect(throws: ToolError("the audit \(strong) is still reading this worktree; agent_wait on it first")) {
+        try await fixture.call("agent_merge", ["id": .string(id)])
+    }
+    _ = try await fixture.call("agent_cancel", ["id": .string(strong)])
+    await #expect(throws: ToolError("the audit \(cheap) is still reading this worktree; agent_wait on it first")) {
+        try await fixture.call("agent_merge", ["id": .string(id)])
+    }
+    // Timed out is ended too: the merge goes through.
+    try fixture.expire(cheap)
+    let merged = try await fixture.call("agent_merge", ["id": .string(id)])
+    #expect(merged.contains("Merged vitra/\(id)"))
 }
