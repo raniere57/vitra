@@ -91,6 +91,30 @@ private let answers = #"cat >/dev/null; echo '{"result":"the answer","is_error":
     #expect(lines.last == "the answer")
 }
 
+@Test func cleanupSaysWhatItWouldDoAndACompactedRunIsStillReported() async throws {
+    let fixture = try Fixture(claude: answers)
+    defer { fixture.cleanUp() }
+    let id = try await fixture.spawn(["label": "probe"])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    // As if it had run forty days ago.
+    let record = fixture.root.appendingPathComponent("runs/\(id)/run.json")
+    var fields = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: record)) as? [String: Any])
+    fields["started"] = Date().addingTimeInterval(-40 * 86400).timeIntervalSinceReferenceDate
+    try JSONSerialization.data(withJSONObject: fields).write(to: record, options: .atomic)
+    let stdout = fixture.root.appendingPathComponent("runs/\(id)/stdout").path
+
+    let dry = try await fixture.call("agent_cleanup")
+    #expect(dry.hasPrefix("dry run — would compact 1 run(s)"))
+    #expect(FileManager.default.fileExists(atPath: stdout))
+
+    let done = try await fixture.call("agent_cleanup", ["dry_run": false])
+    #expect(done.hasPrefix("compacted 1 run(s)"))
+    #expect(!FileManager.default.fileExists(atPath: stdout))
+    let again = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    #expect(again.split(separator: "\n").last == "the answer")
+    #expect(again.split(separator: "\n").count == report.split(separator: "\n").count)
+}
+
 @Test func theOrchestratorRatesADeliveryAndTheScoreboardShowsIt() async throws {
     let fixture = try Fixture(claude: answers)
     defer { fixture.cleanUp() }
@@ -874,7 +898,7 @@ echo '{"result":"done","is_error":false}'
     #expect(try await router.run(tool: "browser_open", arguments: [:], pane: nil) == "panel:browser_open")
     #expect(AgentTools.names == [
         "agent_spawn", "agent_redo", "agent_wait", "agent_list", "agent_cancel", "agent_merge", "agent_models",
-        "agent_rate", "agent_scores",
+        "agent_rate", "agent_scores", "agent_cleanup",
     ])
 }
 

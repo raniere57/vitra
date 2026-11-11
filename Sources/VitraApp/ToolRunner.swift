@@ -63,10 +63,20 @@ final class ToolRunner {
     /// in the arguments from its own environment, never from the model.
     private var callingAgent: String?
 
+    /// Whether the call in flight is a worker's: held to its tier, and shown
+    /// only its own tab.
+    private var callingWorker = false
+
     func run(tool: String, arguments: JSONValue, pane: String?) async throws -> String {
+        // A worker's tier is read here from its run's record, not taken from
+        // the helper: the helper only names the run.
+        if let refusal = WorkerToolPolicy.appRefusal(tool: tool, arguments: arguments) {
+            throw ToolError(refusal)
+        }
         callingPane = pane
         callingAgent = arguments["_agent"]?.stringValue
-        defer { (callingPane, callingAgent) = (nil, nil) }
+        callingWorker = WorkerToolPolicy.isWorkerCall(arguments)
+        defer { (callingPane, callingAgent, callingWorker) = (nil, nil, false) }
         do {
             return try await dispatch(tool: tool, arguments: arguments)
         } catch let failure as ToolFailure {
@@ -84,7 +94,8 @@ final class ToolRunner {
         case "terminal_read": return try terminalRead(arguments)
         case "terminal_run": return try await terminalRun(arguments)
         case "browser_tabs":
-            let tabs = try host.browserTabs(pane: callingPane, agent: callingAgent)
+            let all = try host.browserTabs(pane: callingPane, agent: callingAgent)
+            let tabs = callingWorker ? WorkerToolPolicy.ownTabs(all, agent: callingAgent) : all
             return tabs.isEmpty ? "(no tabs open)" : tabs.joined(separator: "\n")
         case "browser_click": return try await browserClick(arguments)
         case "browser_type": return try await browserType(arguments)

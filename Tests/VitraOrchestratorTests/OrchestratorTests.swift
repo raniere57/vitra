@@ -179,6 +179,27 @@ echo '{"result":"done","is_error":false,"total_cost_usd":0.5,"usage":{"input_tok
     #expect(run.spec.prompt == "fix the sidebar")
 }
 
+@Test func aWorkerServedFewerOfVitrasToolsIsToldWhichFirst() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    let script = sandbox.root.appendingPathComponent("fake-claude")
+    try ("#!/bin/sh\n" + answersDone + "\n").write(to: script, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+    // A worker is served Vitra only when there is a configuration to serve it.
+    let orchestrator = Orchestrator(
+        root: sandbox.root.appendingPathComponent("runs"), executables: Executables(paths: [.claude: script.path]),
+        browserConfig: "/dev/null", vitraBinary: "/usr/bin/true", memoryRoot: sandbox.memoryRoot
+    )
+    let read = { try String(contentsOf: sandbox.project.appendingPathComponent("got-prompt.txt"), encoding: .utf8) }
+
+    _ = try await orchestrator.wait(ids: [orchestrator.spawn(sandbox.spec(prompt: "look"))], timeout: 10)
+    #expect(try read() == (WorkerToolTier.reader.promptLine ?? "") + "\n\nlook")
+
+    let review = WorkerSpec(cli: .claude, model: "haiku", prompt: "judge", directory: sandbox.project.path, kind: .review, effort: "low")
+    _ = try await orchestrator.wait(ids: [orchestrator.spawn(review)], timeout: 10)
+    #expect(try read() == (WorkerToolTier.auditor.promptLine ?? "") + "\n\njudge")
+}
+
 @Test func aDeliveryCanBeRatedAndTheRatingStaysWithTheRun() async throws {
     let sandbox = try Sandbox()
     defer { sandbox.cleanUp() }

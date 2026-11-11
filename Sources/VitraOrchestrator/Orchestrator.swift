@@ -39,9 +39,6 @@ public struct Orchestrator: Sendable {
     /// How long a cancelled worker is given to stop before it is killed outright.
     private static let terminationGrace: TimeInterval = 2
     private static let idAttempts = 5
-    /// How much later than its directory's creation a run's `started` can be:
-    /// the worktree is made in between.
-    private static let startSkew: TimeInterval = 600
     /// What a shell reports for a child killed by the signals `cancel` sends:
     /// 128 plus SIGTERM, and 128 plus SIGKILL.
     private static let cancelExitCodes: Set<Int32> = [128 + SIGTERM, 128 + SIGKILL]
@@ -53,7 +50,7 @@ public struct Orchestrator: Sendable {
     /// and needs no new state for it.
     public static let timeoutExitCode: Int32 = 124
 
-    private let root: URL
+    let root: URL
     private let memoryRoot: URL
     private let executables: Executables
     /// What a worker's environment is made from; nil for this process's own.
@@ -65,7 +62,7 @@ public struct Orchestrator: Sendable {
     private let vitraBinary: String?
     /// What was already read about runs, so a finished run's stdout is parsed
     /// once however often it is listed.
-    private let cache = RunCache()
+    let cache: RunCache
 
     /// `browserConfig` is the MCP configuration that hands workers Vitra's
     /// browser. Left out, it is the one the app installed — for the real run
@@ -86,6 +83,7 @@ public struct Orchestrator: Sendable {
         self.spawnEnvironment = spawnEnvironment
         let isRealStore = root == Orchestrator.defaultRoot
         self.root = root
+        cache = RunCache.shared(for: root)
         self.memoryRoot = memoryRoot
         self.executables = executables
         self.browserConfig = browserConfig ?? (isRealStore ? Self.installedBrowserConfig : nil)
@@ -146,12 +144,6 @@ public struct Orchestrator: Sendable {
         guard let executable = executables.paths[spec.cli] else { throw .executableNotFound(spec.cli) }
 
         let (id, directory) = try makeRunDirectory()
-        do {
-            try Data(promptWithNotes(spec).utf8).write(to: directory.appendingPathComponent("prompt"))
-        } catch {
-            try? FileManager.default.removeItem(at: directory)
-            throw .spawnFailed("\(error.localizedDescription)")
-        }
 
         // The worker's MCP configuration, which names this run. Written before
         // anything is started, so a failure leaves nothing behind but the run
@@ -162,6 +154,13 @@ public struct Orchestrator: Sendable {
         } catch {
             try? FileManager.default.removeItem(at: directory)
             throw error
+        }
+        do {
+            let prompt = promptWithNotes(spec, servedVitra: served.config != nil)
+            try Data(prompt.utf8).write(to: directory.appendingPathComponent("prompt"))
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw .spawnFailed("\(error.localizedDescription)")
         }
 
         // An editing worker is given a tree of its own before it starts, so
@@ -434,12 +433,20 @@ public struct Orchestrator: Sendable {
     /// Only the file the worker reads carries the notes. The record keeps the
     /// prompt as it was asked, so the history stays the request, not the notes
     /// as they stood that day.
-    private func promptWithNotes(_ spec: WorkerSpec) -> String {
-        guard let project = spec.project else { return spec.prompt }
-        let notes = ProjectMemory(root: memoryRoot).read(project: project)
-        guard !notes.isEmpty else { return spec.prompt }
-        return """
-        Notes on this project left by earlier agents. Read them first, and add one with memory_add when you learn something the next agent should know:
+    ///
+    /// A worker served Vitra's tools but held to fewer of them is told which
+    /// it has, first, so it does not spend turns finding out.
+    func promptWithNotes(_ spec: WorkerSpec, servedVitra: Bool) -> String {
+        let tier = WorkerToolTier(spec: spec)
+        let tools = servedVitra ? tier.promptLine.map { $0 + "\n\n" } ?? "" : ""
+        let notes = spec.project.map { ProjectMemory(root: memoryRoot).read(project: $0) } ?? ""
+        guard !notes.isEmpty else { return tools + spec.prompt }
+        // An auditor reads the notes and adds none.
+        let invitation = !servedVitra || tier.tools.contains("memory_add")
+            ? "Read them first, and add one with memory_add when you learn something the next agent should know:"
+            : "Read them first:"
+        return tools + """
+        Notes on this project left by earlier agents. \(invitation)
         \(notes)
 
         ---
@@ -597,7 +604,21 @@ public struct Orchestrator: Sendable {
         if let deadline = record.deadline, Date() >= deadline {
             stop(id, record, timedOutAfter: record.spec.minutes ?? Self.defaultMinutes)
         }
-        return run(id, record, fullText: fullText)
+        let found = run(id, record, fullText: fullText)
+        if isSettled(found, record) { index(id, record) }
+        return found
+    }
+
+    /// Writes `id` into the index when the index does not have it as it is
+    /// now: a run is indexed when it is first seen settled, and again when it
+    /// is rated, so the next `recent` finds it without reading it.
+    func index(_ id: String, _ record: RunRecord) {
+        guard let stamp = RunIndex.Stamp(of: root.appendingPathComponent(id).path),
+              cache.index.entries(syncing: false)[id]?.stamp != stamp
+        else { return }
+        let run = run(id, record, fullText: false)
+        guard isSettled(run, record), let entry = RunIndex.Entry(run, record: record, stamp: stamp) else { return }
+        cache.index.append([entry], live: Set(cache.runIDs()))
     }
 
     /// Waits until every run has stopped or `timeout` seconds have passed, and
@@ -629,32 +650,45 @@ public struct Orchestrator: Sendable {
     /// A finished run's answer is cut at `RunSummary.textLimit` characters
     /// here; `status` has it whole.
     ///
-    /// Only the newest are opened. The run directories are ordered by when
-    /// they were made, which is a moment before `started`: two spawns racing
-    /// can swap places, so everything made within `startSkew` of the last one
-    /// kept is opened as well, and the result is ordered by `started`.
+    /// A settled run is taken from the index (`RunIndex`) while its directory
+    /// is as it was when the index read it, and read whole otherwise; what is
+    /// read whole and has settled goes into the index for the next look. So a
+    /// missing index is rebuilt by the first look that needs it, and either
+    /// way the runs are exactly those `status(id, fullText: false)` gives.
     public func recent(limit: Int) -> [Run] {
         let wanted = max(limit, 0)
         guard wanted > 0 else { return [] }
-        let keys: [URLResourceKey] = [.creationDateKey]
-        let urls = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: keys)) ?? []
-        // No date sorts as the newest: it is opened rather than skipped.
-        let newestFirst = urls
-            .map { ($0.lastPathComponent, (try? $0.resourceValues(forKeys: Set(keys)))?.creationDate ?? .distantFuture) }
-            .sorted { $0.1 > $1.1 }
+        let (indexed, starts) = cache.index.snapshot()
+        // Every run's start, from the index or its record: started never
+        // changes, so ordering needs no look at the disk for an indexed run.
+        let newest = cache.newestFirst { id in starts[id] ?? record(id)?.started }.prefix(wanted)
 
-        var found: [(id: String, record: RunRecord)] = []
-        var cutoff = Date.distantPast
-        for (id, created) in newestFirst {
-            if created < cutoff { break }
-            guard let record = record(id) else { continue }
-            found.append((id, record))
-            if found.count == wanted { cutoff = created.addingTimeInterval(-Self.startSkew) }
+        var fresh: [RunIndex.Entry] = []
+        let runs = newest.compactMap { item -> Run? in
+            // The stamp is taken before anything is read, so a change made
+            // while reading leaves the entry stale rather than wrong.
+            let stamp = RunIndex.Stamp(of: root.appendingPathComponent(item.id).path)
+            if let entry = indexed[item.id], let stamp, entry.stamp == stamp { return entry.run }
+            guard let record = record(item.id) else { return nil }
+            let run = run(item.id, record, fullText: false)
+            if let stamp, isSettled(run, record), let entry = RunIndex.Entry(run, record: record, stamp: stamp) {
+                fresh.append(entry)
+            }
+            return run
         }
-        return found
-            .sorted { $0.record.started > $1.record.started }
-            .prefix(wanted)
-            .map { run($0.id, $0.record, fullText: false) }
+        cache.index.append(fresh, live: Set(cache.runIDs()))
+        return runs
+    }
+
+    /// Whether nothing about `run` will change but by a file being added,
+    /// renamed or removed in its directory: finished, or cancelled with
+    /// nothing of its process group left to write to stderr.
+    private func isSettled(_ run: Run, _ record: RunRecord) -> Bool {
+        switch run.state {
+        case .finished: true
+        case .cancelled: !Self.isGroupAlive(record)
+        case .running, .lost: false
+        }
     }
 
     // MARK: - Rating
@@ -679,6 +713,7 @@ public struct Orchestrator: Sendable {
         } catch {
             throw .spawnFailed("could not record the rating: \(error.localizedDescription)")
         }
+        if let record = record(id) { index(id, record) }
     }
 
     // MARK: - Cancelling
@@ -717,7 +752,14 @@ public struct Orchestrator: Sendable {
 
     // MARK: - On disk
 
-    private func file(_ id: String, _ name: String) -> URL {
+    /// Whether `id` has exactly the shape `spawn` hands out: eight lowercase
+    /// hex digits. Ids reach Vitra from models and from other processes, and
+    /// this is checked before one becomes part of a path.
+    public static func isRunID(_ id: String) -> Bool {
+        id.utf8.count == 8 && id.utf8.allSatisfy { (0x30...0x39).contains($0) || (0x61...0x66).contains($0) }
+    }
+
+    func file(_ id: String, _ name: String) -> URL {
         root.appendingPathComponent(id).appendingPathComponent(name)
     }
 
@@ -731,8 +773,8 @@ public struct Orchestrator: Sendable {
     /// this process's own group, 1 every process the user owns, and a negative
     /// one a single process that was never ours. A record like that is not a
     /// run.
-    private func record(_ id: String) -> RunRecord? {
-        guard id.range(of: "^[0-9a-f]{8}$", options: .regularExpression) != nil,
+    func record(_ id: String) -> RunRecord? {
+        guard Self.isRunID(id),
               let modified = modified(file(id, "run.json"))
         else { return nil }
         // run.json is written once, but whoever replaces it is believed: the
@@ -767,7 +809,9 @@ public struct Orchestrator: Sendable {
             commitError = settled.commitError
             worktreeSkipped = settled.worktreeSkipped
             providerFailure = settled.providerFailure
-            output = fullText && settled.isTextCut
+            // A compacted run has no stdout left: its summary is all there
+            // is, and its answer stays cut where the summary cut it.
+            output = fullText && settled.isTextCut && FileManager.default.fileExists(atPath: file(id, "stdout").path)
                 ? parsedOutput(id, record, exitCode: exitCode, errorTail: settled.errorTail)
                 : settled.output
         } else {
@@ -882,7 +926,7 @@ public struct Orchestrator: Sendable {
         return summary
     }
 
-    private func loadSummary(_ id: String) -> RunSummary? {
+    func loadSummary(_ id: String) -> RunSummary? {
         guard let data = try? Data(contentsOf: file(id, "summary.json")),
               let summary = try? JSONDecoder().decode(RunSummary.self, from: data),
               summary.version == RunSummary.version
@@ -920,7 +964,7 @@ public struct Orchestrator: Sendable {
 
     /// `knownExit` is the exit code of a run already seen finished; the code
     /// is written once, so the file need not be read again.
-    private func state(_ id: String, _ record: RunRecord, knownExit: Int32? = nil) -> Run.State {
+    func state(_ id: String, _ record: RunRecord, knownExit: Int32? = nil) -> Run.State {
         // An exit code outranks the cancelled marker. A cancelled worker is
         // killed before it can write one, so both being there means the worker
         // finished in the instant before the cancel reached it: its answer is

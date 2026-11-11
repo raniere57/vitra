@@ -1,7 +1,7 @@
 import Foundation
 
 /// What a worker reported when it finished, whichever CLI it was.
-public struct WorkerOutput: Equatable, Sendable {
+public struct WorkerOutput: Codable, Equatable, Sendable {
     /// The worker's answer, or the reason it failed.
     public let text: String
     public let isError: Bool
