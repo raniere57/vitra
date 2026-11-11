@@ -205,9 +205,33 @@ enum WorkerBoard {
             kind: kind,
             stateText: (delivered(run) && run.rating?.isSatisfactory == false ? "insatisfatório" : stateText(run.state, kind))
                 + (run.rating.map { " · \($0.score)/5" } ?? ""),
-            meta: [model, started, elapsed, tail].joined(separator: " · "),
+            meta: ([model, chooser(run), started, elapsed, tail].compactMap { $0 }).joined(separator: " · "),
             detail: run.output?.text
         )
+    }
+
+    /// Who chose the worker and why, as few words: `Vitra · 1º da sua
+    /// escalação`, `Vitra · opus sem cota`. Nil for a worker named by hand.
+    static func chooser(_ run: Run) -> String? {
+        guard run.wasPicked else { return nil }
+        guard let pick = run.pick else { return "Vitra" }
+        let why: String
+        switch pick.code {
+        case .learning: why = "vez de teste"
+        case .record: why = "fora da escalação, pelo histórico"
+        case .cheapest: why = "fora da escalação, o mais barato"
+        case .lineup:
+            if let passed = pick.passed, let cause = pick.cause {
+                let causes: [PickReason.Cause: String] = [
+                    .quota: "sem cota", .signedOut: "sem login", .down: "fora do ar", .resting: "em pausa",
+                    .demoted: "rebaixado", .slow: "lento", .unavailable: "indisponível",
+                ]
+                why = "\(passed) \(causes[cause] ?? "indisponível")"
+            } else {
+                why = "\(pick.position ?? 1)º da sua escalação"
+            }
+        }
+        return (run.retryOf == nil ? "Vitra · " : "Vitra, após falha · ") + why
     }
 
     /// "2 rodando · 1 pronto", for the panel's header.
@@ -334,7 +358,7 @@ enum Maestro {
     /// What the maestro is told about its job, on top of its own instructions.
     static let brief = """
     You are the orchestrator in Vitra. Your job is to plan, delegate, review and answer — not to do the work yourself. \
-    Workers on cheaper models do the work: you reach them with the vitra agent_spawn tool (agent_models lists them), \
+    Workers do the work: you reach them with the vitra agent_spawn tool, \
     collect what they deliver with agent_wait, and review every delivery before you report.
 
     Delegate what is big or can run in parallel: a change that spans several files or more than about thirty \
@@ -354,11 +378,9 @@ enum Maestro {
     whether it followed the procedure, watched the deploy through to the end instead of assuming, said plainly when \
     something failed, and how long it took. The best and fastest becomes the one who deploys.
 
-    Tag every agent_spawn with its kind of task and pass the commands the piece needs. Leave cli and model out and \
-    Vitra picks the worker from the record: the fastest of those rated 4 or more on that kind, then the cheaper; \
-    one piece in five goes to an untried cheap worker, until each has two deliveries. Name a worker yourself only when the piece truly needs that \
-    model, and say why in the label. Say how hard a piece is with difficulty (easy, normal or hard) when the default, judged from the \
-    prompt, would misjudge it. After reviewing a delivery, always record your verdict with agent_rate, honestly; a poor delivery rated \
+    Tag every agent_spawn with its kind of task, how hard it is (difficulty: easy, normal or hard) and the commands \
+    the piece needs. That is all you say about who does it: Vitra picks the worker from the user's lineup for that \
+    difficulty and the record, and the result says who and why. After reviewing a delivery, always record your verdict with agent_rate, honestly; a poor delivery rated \
     well sends the next task to the wrong worker.
 
     A delivery that changed forty lines or more is audited by a cheap read-only worker from another provider: \
@@ -387,15 +409,14 @@ enum Maestro {
     A worker fails in one of two ways, and each has its answer.
 
     It did not run: it crashed, timed out, or its CLI was signed out or its API down. Nothing was delivered, so there \
-    is nothing to rate. Give the piece straight to another worker, preferably one from another provider — a different \
-    cli — since whatever stopped this one may stop its neighbours too. A provider that is out of quota is retried on \
-    another by Vitra, so there is nothing to do about it.
+    is nothing to rate. Spawn the piece again; Vitra passes over a worker that keeps failing. A provider that is out of \
+    quota is retried on another by Vitra, so there is nothing to do about it.
 
     It ran but did not do what was asked: the result is wrong, incomplete, or needed real fixes from you. That is a \
     failure too, and the more important one. Rate it for what it is — below 4 — and say why in the note. You may give \
     the same worker one more try. A delivery that needs fixes goes back with agent_redo and notes rather than a new \
-    prompt from scratch. If it falls short a second time, stop retrying: give the piece \
-    to a more capable worker, a stronger model or a higher effort, whichever you judge fits the task.
+    prompt from scratch. If it falls short a second time, rate it below 3 and redo it again: Vitra then gives it to \
+    another worker. If the piece is harder than you said, spawn it again as hard.
     """
 
     /// The MCP configuration that gives the maestro Vitra's tools, as JSON.

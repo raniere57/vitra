@@ -206,6 +206,7 @@ public enum Scoreboard {
         kind: TaskKind? = nil,
         offers: [ModelCatalog.Offer] = [],
         history: [Run] = [],
+        lineup: Lineup = .standard,
         now: Date = Date()
     ) -> String {
         guard !scores.isEmpty || !offers.isEmpty else {
@@ -217,7 +218,7 @@ public enum Scoreboard {
         for each in kind.map({ [$0] }) ?? TaskKind.allCases {
             let ofKind = scores.filter { $0.kind == each }
             let extra = [
-                nextLine(offers, history: history, kind: each, now: now),
+                nextLine(offers, history: history, kind: each, lineup: lineup, now: now),
                 untriedLine(offers, history: history, kind: each),
             ].compactMap { $0 }
             guard !ofKind.isEmpty || !extra.isEmpty else { continue }
@@ -232,15 +233,41 @@ public enum Scoreboard {
                 "  \($0.key.name) — resting until \(WorkerPicker.clock($0.value)) after \(WorkerPicker.restingAfter) failures in a row"
             })
         }
+        lines.append(contentsOf: lineupLines(lineup, history: history, kinds: kind.map { [$0] } ?? TaskKind.allCases))
         return lines.joined(separator: "\n")
+    }
+
+    /// The user's three lineups, in order, each worker marked where its record
+    /// demotes it.
+    static func lineupLines(_ lineup: Lineup, history: [Run], kinds: [TaskKind]) -> [String] {
+        var lines = ["the user's lineup (Vitra picks the first that may run and is not demoted)"]
+        for difficulty in [Difficulty.hard, .normal, .easy] {
+            let tier = lineup.tier(difficulty)
+            let workers = tier.enumerated().map { index, worker in
+                let next = tier.dropFirst(index + 1).first
+                let marks = kinds.compactMap { kind -> String? in
+                    switch WorkerPicker.demotion(of: worker, kind: kind, difficulty: difficulty, history: history, next: next) {
+                    case let .rating(average)?: return "rated \(String(format: "%.1f", average)) on \(kind.rawValue)"
+                    case .slow?: return "slow on \(kind.rawValue)"
+                    case nil: return nil
+                    }
+                }
+                let mark = marks.isEmpty ? "" : " [demoted: " + marks.joined(separator: ", ") + "]"
+                return "\(index + 1). \(worker.name)\(mark)"
+            }
+            lines.append("  \(difficulty.rawValue): " + (workers.isEmpty ? "empty" : workers.joined(separator: ", ")))
+        }
+        return lines
     }
 
     /// Who the picker would choose next for `kind` (a piece that only reads
     /// and runs no commands), and why; nil when nothing is offered or may run.
-    static func nextLine(_ offers: [ModelCatalog.Offer], history: [Run], kind: TaskKind, now: Date = Date()) -> String? {
+    static func nextLine(
+        _ offers: [ModelCatalog.Offer], history: [Run], kind: TaskKind, lineup: Lineup = .standard, now: Date = Date()
+    ) -> String? {
         guard let choice = WorkerPicker.pick(
             kind: kind, access: .read, needsCommands: false, history: history,
-            offers: offers, installed: Set(offers.map(\.cli)), now: now
+            offers: offers, installed: Set(offers.map(\.cli)), lineup: lineup, now: now
         ) else { return nil }
         return "  vitra picks next: \(choice.offer.name) — \(choice.reason)"
     }

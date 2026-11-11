@@ -25,7 +25,10 @@ private struct Fixture {
         }
         let executables = Executables(paths: paths)
         orchestrator = Orchestrator(root: scratch.appendingPathComponent("runs"), executables: executables)
-        executor = AgentToolExecutor(orchestrator: orchestrator, executables: executables, lockTimeout: lockTimeout)
+        executor = AgentToolExecutor(
+            orchestrator: orchestrator, executables: executables, lockTimeout: lockTimeout,
+            lineupFile: scratch.appendingPathComponent("lineup.json"), honoursNamedWorkers: true
+        )
     }
 
     /// Moves a run's deadline to the past, as if its time had run out.

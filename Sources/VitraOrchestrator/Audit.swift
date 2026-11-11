@@ -31,8 +31,10 @@ public enum Audit {
         history: [Run],
         installed: Set<WorkerCLI>,
         offers: [ModelCatalog.Offer],
+        lineup: Lineup = .standard,
         now: Date = Date()
     ) -> (cli: WorkerCLI, model: String, effort: String?)? {
+        // Cheap, so an easy piece: the easy tier's order among those allowed.
         WorkerPicker.pick(
             kind: .review,
             access: .read,
@@ -41,6 +43,8 @@ public enum Audit {
             offers: offers,
             installed: installed,
             excluded: [implementer.cli, .gemini],
+            difficulty: .easy,
+            lineup: lineup,
             now: now
         ).map { ($0.offer.cli, $0.offer.model, $0.offer.effort) }
     }
