@@ -1,4 +1,5 @@
 import Foundation
+import VitraOrchestrator
 
 /// `vitra mcp`: JSON-RPC on stdio in front, the GUI's socket behind.
 ///
@@ -17,25 +18,7 @@ public enum StdioBridge {
         // the browser and the preview, and nothing to delegate with: the
         // maestro hands work out, a worker does it.
         let role = AgentIdentity.ServedRole.decide(own: ProcessInfo.processInfo.environment)
-        // The notes are served here for both, so a worker reads what the
-        // maestro and earlier workers left, and adds to it the same way.
-        let memory = MemoryToolExecutor()
-        let server = switch role {
-        case .maestro:
-            MCPServer(
-                executor: LocalToolRouter(
-                    names: MemoryTools.names,
-                    local: memory,
-                    otherwise: RoutingExecutor(agents: AgentToolExecutor(), panel: RemoteExecutor())
-                ),
-                tools: MCPTools.all
-            )
-        case .solo, .worker:
-            MCPServer(
-                executor: LocalToolRouter(names: MemoryTools.names, local: memory, otherwise: RemoteExecutor()),
-                tools: MCPTools.tools(for: role)
-            )
-        }
+        let server = makeServer(role: role, agent: AgentIdentity.current.agent)
         let out = OutputQueue()
         let group = DispatchGroup()
 
@@ -64,6 +47,51 @@ public enum StdioBridge {
         // stdin closed: let the calls already in flight finish writing before
         // the process goes, so a reply is never cut off mid-line.
         group.wait()
+    }
+
+    /// The server a helper of `role` runs, for the worker run `agent` when it
+    /// is one. The executors are parameters so a test drives the same server.
+    ///
+    /// A worker is served its tier's tools and refused the rest, its tier read
+    /// from its run's record under `runsRoot`; a worker whose run cannot be
+    /// found gets the least. The app checks every call again on its side.
+    static func makeServer(
+        role: AgentIdentity.ServedRole,
+        agent: String?,
+        runsRoot: URL = Orchestrator.defaultRoot,
+        memory: any ToolExecutor = MemoryToolExecutor(),
+        remote: (any ToolExecutor)? = nil,
+        agents: @autoclosure () -> any ToolExecutor = AgentToolExecutor()
+    ) -> MCPServer {
+        // The notes are served here for all, so a worker reads what the
+        // maestro and earlier workers left, and adds to it the same way.
+        switch role {
+        case .maestro:
+            return MCPServer(
+                executor: LocalToolRouter(
+                    names: MemoryTools.names,
+                    local: memory,
+                    otherwise: RoutingExecutor(agents: agents(), panel: remote ?? RemoteExecutor())
+                ),
+                tools: MCPTools.all
+            )
+        case .solo:
+            return MCPServer(
+                executor: LocalToolRouter(names: MemoryTools.names, local: memory, otherwise: remote ?? RemoteExecutor()),
+                tools: MCPTools.solo
+            )
+        case .worker:
+            let tier = WorkerToolTier.of(run: agent, root: runsRoot)
+            return MCPServer(
+                executor: LocalToolRouter(
+                    names: MemoryTools.names, local: memory, otherwise: remote ?? RemoteExecutor(isWorker: true)
+                ),
+                tools: MCPTools.worker(tier),
+                gate: { tool, arguments in
+                    WorkerToolPolicy.refusal(tool: tool, arguments: arguments, tier: tier, agent: agent)
+                }
+            )
+        }
     }
 }
 
@@ -108,14 +136,21 @@ struct RemoteExecutor: ToolExecutor {
         }
     }
 
+    /// Whether this helper serves a worker. Said to the app as `_worker`, so a
+    /// worker whose run could not be named is still held to a worker's tier
+    /// there, and not taken for the maestro.
+    var isWorker = false
+
     /// The arguments as the app receives them: with the worker that is
     /// calling named under `_agent`, or with no such key for the maestro.
     ///
-    /// Which tab an agent may drive hangs on this, so the name is only ever
-    /// the one from the environment; one the model wrote itself is dropped.
-    static func arguments(_ arguments: JSONValue, agent: String?) -> JSONValue {
+    /// Which tab an agent may drive and which tools it has hang on this, so
+    /// both keys are only ever the helper's own; what the model wrote there
+    /// itself is dropped.
+    static func arguments(_ arguments: JSONValue, agent: String?, isWorker: Bool = false) -> JSONValue {
         guard case var .object(fields) = arguments else { return arguments }
         fields["_agent"] = (agent?.isEmpty == false) ? agent.map(JSONValue.string) : nil
+        fields["_worker"] = isWorker ? .bool(true) : nil
         return .object(fields)
     }
 
@@ -123,7 +158,9 @@ struct RemoteExecutor: ToolExecutor {
         // The agent spawned this helper from inside a pane, and the pane put
         // its name in the environment on the way: that is the whole routing.
         let identity = AgentIdentity.current
-        var params: [String: JSONValue] = ["name": .string(tool), "arguments": Self.arguments(arguments, agent: identity.agent)]
+        var params: [String: JSONValue] = [
+            "name": .string(tool), "arguments": Self.arguments(arguments, agent: identity.agent, isWorker: isWorker),
+        ]
         if let id = identity.pane {
             params["pane"] = .string(id)
         }

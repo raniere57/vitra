@@ -111,22 +111,14 @@ public enum MCPTools {
         "description": "Id of another agent's tab to look at, from browser_tabs. Leave out for your own tab.",
     ]
 
-    /// What a worker is served: the panel's tools, less the one that types
-    /// in the shared terminal — that would be a way round the list of
-    /// commands the maestro allowed it.
-    public static let worker: [JSONValue] = panel.filter { $0["name"]?.stringValue != "terminal_run" } + MemoryTools.all
+    /// The most a worker is served — an editing worker's set: the panel's
+    /// tools less the one that types in the shared terminal, which would be a
+    /// way round the list of commands the maestro allowed it. Read-only
+    /// workers and auditors get less; see `WorkerToolTier`.
+    public static let worker: [JSONValue] = worker(.editor)
 
-    /// Every tool `vitra mcp` serves: the panel's, the orchestrator's, and the notes.
     /// A maestro working alone: the panel, the shared terminal and the notes, no agents.
     public static let solo: [JSONValue] = panel + MemoryTools.all
-
-    static func tools(for role: AgentIdentity.ServedRole) -> [JSONValue] {
-        switch role {
-        case .maestro: all
-        case .solo: solo
-        case .worker: worker
-        }
-    }
 
     public static let all: [JSONValue] = panel + AgentTools.all + MemoryTools.all
 

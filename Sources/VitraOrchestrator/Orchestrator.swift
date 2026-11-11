@@ -146,12 +146,6 @@ public struct Orchestrator: Sendable {
         guard let executable = executables.paths[spec.cli] else { throw .executableNotFound(spec.cli) }
 
         let (id, directory) = try makeRunDirectory()
-        do {
-            try Data(promptWithNotes(spec).utf8).write(to: directory.appendingPathComponent("prompt"))
-        } catch {
-            try? FileManager.default.removeItem(at: directory)
-            throw .spawnFailed("\(error.localizedDescription)")
-        }
 
         // The worker's MCP configuration, which names this run. Written before
         // anything is started, so a failure leaves nothing behind but the run
@@ -162,6 +156,13 @@ public struct Orchestrator: Sendable {
         } catch {
             try? FileManager.default.removeItem(at: directory)
             throw error
+        }
+        do {
+            let prompt = promptWithNotes(spec, servedVitra: served.config != nil)
+            try Data(prompt.utf8).write(to: directory.appendingPathComponent("prompt"))
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw .spawnFailed("\(error.localizedDescription)")
         }
 
         // An editing worker is given a tree of its own before it starts, so
@@ -434,12 +435,20 @@ public struct Orchestrator: Sendable {
     /// Only the file the worker reads carries the notes. The record keeps the
     /// prompt as it was asked, so the history stays the request, not the notes
     /// as they stood that day.
-    private func promptWithNotes(_ spec: WorkerSpec) -> String {
-        guard let project = spec.project else { return spec.prompt }
-        let notes = ProjectMemory(root: memoryRoot).read(project: project)
-        guard !notes.isEmpty else { return spec.prompt }
-        return """
-        Notes on this project left by earlier agents. Read them first, and add one with memory_add when you learn something the next agent should know:
+    ///
+    /// A worker served Vitra's tools but held to fewer of them is told which
+    /// it has, first, so it does not spend turns finding out.
+    func promptWithNotes(_ spec: WorkerSpec, servedVitra: Bool) -> String {
+        let tier = WorkerToolTier(spec: spec)
+        let tools = servedVitra ? tier.promptLine.map { $0 + "\n\n" } ?? "" : ""
+        let notes = spec.project.map { ProjectMemory(root: memoryRoot).read(project: $0) } ?? ""
+        guard !notes.isEmpty else { return tools + spec.prompt }
+        // An auditor reads the notes and adds none.
+        let invitation = !servedVitra || tier.tools.contains("memory_add")
+            ? "Read them first, and add one with memory_add when you learn something the next agent should know:"
+            : "Read them first:"
+        return tools + """
+        Notes on this project left by earlier agents. \(invitation)
         \(notes)
 
         ---
@@ -717,7 +726,14 @@ public struct Orchestrator: Sendable {
 
     // MARK: - On disk
 
-    private func file(_ id: String, _ name: String) -> URL {
+    /// Whether `id` has exactly the shape `spawn` hands out: eight lowercase
+    /// hex digits. Ids reach Vitra from models and from other processes, and
+    /// this is checked before one becomes part of a path.
+    public static func isRunID(_ id: String) -> Bool {
+        id.utf8.count == 8 && id.utf8.allSatisfy { (0x30...0x39).contains($0) || (0x61...0x66).contains($0) }
+    }
+
+    func file(_ id: String, _ name: String) -> URL {
         root.appendingPathComponent(id).appendingPathComponent(name)
     }
 
@@ -731,8 +747,8 @@ public struct Orchestrator: Sendable {
     /// this process's own group, 1 every process the user owns, and a negative
     /// one a single process that was never ours. A record like that is not a
     /// run.
-    private func record(_ id: String) -> RunRecord? {
-        guard id.range(of: "^[0-9a-f]{8}$", options: .regularExpression) != nil,
+    func record(_ id: String) -> RunRecord? {
+        guard Self.isRunID(id),
               let modified = modified(file(id, "run.json"))
         else { return nil }
         // run.json is written once, but whoever replaces it is believed: the

@@ -131,12 +131,12 @@ private func procargs2(argv: [String], exec: String = "/usr/bin/vitra", padding:
 }
 
 @Test func soloIsServedThePanelAndNotesWithoutAgents() {
-    let names = MCPTools.tools(for: .solo).compactMap { $0["name"]?.stringValue }
+    let names = MCPTools.solo.compactMap { $0["name"]?.stringValue }
     #expect(!names.contains { $0.hasPrefix("agent_") })
     for name in ["browser_open", "terminal_read", "terminal_run", "screen_capture", "preview_file", "memory_read", "memory_add"] {
         #expect(names.contains(name))
     }
-    #expect(MCPTools.tools(for: .maestro).contains { $0["name"]?.stringValue == "agent_spawn" })
+    #expect(MCPTools.all.contains { $0["name"]?.stringValue == "agent_spawn" })
 }
 
 @Test func anUnknownCallerGetsTheWorkerSet() {
