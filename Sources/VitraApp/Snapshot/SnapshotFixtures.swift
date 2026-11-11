@@ -68,7 +68,7 @@ struct SnapshotFixtures {
         _ id: String, _ model: String, _ cli: WorkerCLI, effort: String? = nil, label: String?, kind: TaskKind,
         access: WorkerAccess = .read, state: Run.State = .finished(exitCode: 0), ago: TimeInterval, took: TimeInterval = 0,
         cost: Double = 0, tokens: (Int, Int) = (0, 0), score: Int? = nil, note: String? = nil, isError: Bool = false,
-        answer: String? = nil
+        answer: String? = nil, branch: String? = nil, silent: TimeInterval? = nil
     ) -> Run {
         let started = now.addingTimeInterval(-ago)
         let isRunning = state == .running
@@ -88,8 +88,71 @@ struct SnapshotFixtures {
                 ? WorkerOutput(text: answer ?? "ok", isError: isError, costUSD: cost, inputTokens: tokens.0, outputTokens: tokens.1)
                 : nil,
             errorTail: nil,
-            rating: score.map { Rating(score: $0, note: note, rated: started.addingTimeInterval(took + 30)) }
+            branch: branch,
+            rating: score.map { Rating(score: $0, note: note, rated: started.addingTimeInterval(took + 30)) },
+            silentFor: isRunning ? silent : nil
         )
+    }
+
+    // MARK: - The Palco
+
+    /// A busy stage: workers of every provider running, some finished and rated,
+    /// one failed, one stopped, and two audits — one reading a delivery, one
+    /// with its verdict in.
+    func palcoRuns() -> [Run] {
+        let m = 60.0
+        return [
+            run("p01", "opencode/deepseek-v4.1-flash-free", .opencode, label: "Migrar a lista de arquivos para células reutilizáveis",
+                kind: .implement, access: .edit, state: .running, ago: 6.2 * m, branch: "vitra/p01"),
+            run("p02", "claude-sonnet-5-5", .claude, effort: "medium", label: "Corrigir o build do CGhosttyVT no worktree",
+                kind: .implement, access: .edit, state: .running, ago: 2.6 * m, branch: "vitra/p02"),
+            run("p03", "gemini-3-flash", .gemini, label: "Escrever testes do WorkerBoard",
+                kind: .test, access: .edit, state: .running, ago: 11.4 * m, branch: "vitra/p03", silent: 200),
+            run("p04", "claude-haiku-5-5", .claude, effort: "low", label: "Mapear o fluxo do ranking",
+                kind: .explore, ago: 9.5 * m, took: 41, cost: 0.0123, tokens: (18_400, 2_100), score: 5),
+            run("p05", "composer-2", .cursor, label: "Revisar o diff do GitPanel",
+                kind: .implement, access: .edit, ago: 8 * m, took: 150, cost: 0.04, tokens: (22_000, 3_100), branch: "vitra/p05"),
+            run("p06", "claude-opus-5-5", .claude, effort: "high", label: "auditoria: Revisar o diff do GitPanel",
+                kind: .review, state: .running, ago: 1.4 * m),
+            run("p07", "claude-sonnet-5-5", .claude, effort: "medium", label: "Atualizar o tema para papéis",
+                kind: .implement, access: .edit, state: .finished(exitCode: 1), ago: 13 * m, took: 190, cost: 0.031, tokens: (31_000, 900),
+                isError: true, answer: "error: tema sem papel `muted`"),
+            run("p08", "opencode/glm-5-free", .opencode, label: "Rascunho do guia de cores",
+                kind: .docs, state: .cancelled, ago: 16 * m, took: 70),
+            run("p09", "claude-sonnet-5-5", .claude, effort: "medium", label: "Ajustar o cabeçalho do maestro",
+                kind: .implement, access: .edit, ago: 17 * m, took: 210, cost: 0.06, tokens: (40_000, 4_000), score: 4, branch: "vitra/p09"),
+            run("p10", "claude-opus-5-5", .claude, effort: "high", label: "auditoria: Ajustar o cabeçalho do maestro",
+                kind: .review, ago: 12.5 * m, took: 95, cost: 0.08, tokens: (30_000, 2_000), score: 5),
+        ]
+    }
+
+    /// Nothing in the field: the one worker there was finished long ago.
+    func palcoQuiet() -> [Run] {
+        [run("q01", "claude-sonnet-5-5", .claude, label: "Revisar o ranking", kind: .review, ago: 41 * 60, took: 120, score: 4)]
+    }
+
+    /// Twelve workers at once, the most the stage shows.
+    func palcoCrowd() -> [Run] {
+        let m = 60.0
+        let providers: [(String, WorkerCLI)] = [
+            ("claude-sonnet-5-5", .claude), ("opencode/deepseek-v4.1-flash-free", .opencode), ("gemini-3-flash", .gemini), ("composer-2", .cursor),
+            ("claude-haiku-5-5", .claude), ("opencode/glm-5-free", .opencode),
+        ]
+        let labels = [
+            "Migrar a lista de arquivos", "Mapear o fluxo do ranking", "Escrever testes do WorkerBoard", "Revisar o diff do GitPanel",
+            "Corrigir o build do CGhosttyVT", "Rascunho do guia de cores", "Atualizar o tema para papéis", "Ajustar o cabeçalho do maestro",
+            "Cobrir o RunFeed com testes", "Explorar o fluxo de merge", "Documentar o ranking", "Revisar a barra de abas",
+        ]
+        return labels.enumerated().map { index, label in
+            let (model, cli) = providers[index % providers.count]
+            let running = index % 3 == 0
+            return run(
+                "c\(index)", model, cli, label: label, kind: index % 2 == 0 ? .implement : .explore, access: index % 2 == 0 ? .edit : .read,
+                state: running ? .running : (index % 5 == 4 ? .finished(exitCode: 1) : .finished(exitCode: 0)),
+                ago: (Double(index) * 1.1 + 2) * m, took: 120, cost: 0.02, tokens: (9_000, 1_000),
+                score: running || index % 5 == 4 ? nil : (index % 4 == 1 ? 5 : 4), isError: index % 5 == 4
+            )
+        }
     }
 
     // MARK: - Git

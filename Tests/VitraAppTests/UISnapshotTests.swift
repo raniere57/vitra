@@ -5,12 +5,21 @@ import Testing
 
 @MainActor
 @Test func snapshotWritesEveryPictureAtTwiceItsSizeAndNotBlank() throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-snapshot-test-\(UUID().uuidString)")
-    defer { try? FileManager.default.removeItem(at: directory) }
+    // With a `.build/snap-keep` file in the package, the pictures are kept in
+    // `.build/snap`, where an agent that cannot run the app can look at them.
+    let package = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let keeps = FileManager.default.fileExists(atPath: package.appendingPathComponent(".build/snap-keep").path)
+    let directory = keeps
+        ? package.appendingPathComponent(".build/snap")
+        : FileManager.default.temporaryDirectory.appendingPathComponent("vitra-snapshot-test-\(UUID().uuidString)")
+    defer { if !keeps { try? FileManager.default.removeItem(at: directory) } }
 
     let files = try UISnapshot.run(into: directory)
 
-    let expected = ["window-1440", "window-min", "workers", "ranking", "git", "files", "recent-images", "browser-tabs", "preview-header", "quit-hold"]
+    let expected = [
+        "window-1440", "window-min", "workers", "ranking", "git", "files", "recent-images", "browser-tabs", "preview-header", "quit-hold",
+        "stage", "stage-empty", "stage-reduced-motion",
+    ]
     #expect(Set(expected).isSubset(of: Set(UISnapshot.shots.map(\.name))))
     #expect(files.count == UISnapshot.shots.count)
 
