@@ -59,12 +59,44 @@ public enum AgentTools {
                     "type": "number",
                     "description": "Time limit for this worker, 1 to 180. Left out: 45. A worker still running past it is cancelled the next time agent_wait or agent_cancel reads it, and reported as failed (timed out after N min). The automatic auditor gets 8.",
                 ],
+                "difficulty": [
+                    "type": "string",
+                    "enum": .array(Difficulty.allCases.map { .string($0.rawValue) }),
+                    "description": "How hard the piece is: easy, normal or hard. Left out, Vitra judges from the prompt (hard when it names six or more files, is very long, or reshapes code across several files; easy for a short read of one file). A hard piece goes only to strong workers (claude sonnet or opus, haiku at high, Grok at high) and has no learning turns; an easy one stays off them. Say it when the default would misjudge the piece.",
+                ],
             ],
             required: ["prompt", "directory"]
         ),
         MCPTools.tool(
+            "agent_redo",
+            """
+            Send a delivery back to be fixed, with a clean context: spawns a new worker on the same piece, given the original prompt plus \
+            a section \"What the previous attempt got wrong, fix exactly this:\" with your notes. An editing delivery is redone in the same \
+            worktree and branch, so the new worker builds on it (a paused one gets its worktree back from the branch); the redo is the \
+            delivery to audit, and agent_merge of either id merges the branch once. Use it instead of writing a new prompt from scratch. \
+            Refuses while the original or its audit is still running. The same worker goes again unless you rated its delivery below 3, \
+            then Vitra picks another; name cli, model and effort to choose one yourself.
+            """,
+            properties: [
+                "id": MCPTools.string("Id of the delivery to redo, from agent_spawn."),
+                "notes": MCPTools.string("What the previous attempt got wrong and must be fixed, specifically."),
+                "cli": [
+                    "type": "string",
+                    "enum": .array(WorkerCLI.allCases.map { .string($0.rawValue) }),
+                    "description": "Name the worker for the redo, with model and effort. Left out, Vitra decides.",
+                ],
+                "model": MCPTools.string("Model name as that CLI takes it, with cli."),
+                "effort": [
+                    "type": "string",
+                    "enum": .array(ModelCatalog.efforts.map { .string($0) }),
+                    "description": "Effort, as for agent_spawn, with cli.",
+                ],
+            ],
+            required: ["id", "notes"]
+        ),
+        MCPTools.tool(
             "agent_wait",
-            "Wait for worker agents to finish and return what each one reported: its answer, whether it failed, how long it took and what it cost. Returns as soon as all of them have stopped, or at the timeout with the unfinished ones marked as still running — call again to keep waiting.",
+            "Wait for worker agents to finish and return what each one reported: its answer, whether it failed, how long it took and what it cost. Returns as soon as all of them have stopped, or at the timeout with the unfinished ones marked as still running — call again to keep waiting. A worker that did not run because its provider is out of quota, signed out or down is reported as DID NOT RUN, not FAILED; when Vitra picked it, the piece is retried once on another provider and the wait goes on with the new id.",
             properties: [
                 "ids": [
                     "type": "array",
@@ -98,13 +130,20 @@ public enum AgentTools {
             the checkout has uncommitted changes to tracked files or is already in the middle of a merge, and — unless \
             discard is true — when the worker left edits uncommitted in its worktree, as a failed commit does: those \
             would be deleted with it. A merge that conflicts is aborted and the files are named; the worktree and \
-            branch stay so the work can be sent back. Pass discard true to drop the work without merging it.
+            branch stay so the work can be sent back. Pass discard true to drop the work without merging it. Pass pause true \
+            (not with discard) to set a finished delivery aside: anything uncommitted is committed as \"wip: paused\", the \
+            worktree is removed and the branch is kept; continue it later with agent_redo, or merge it with agent_merge. \
+            A delivery that was redone shares its branch with the redo: merging either id merges it once.
             """,
             properties: [
                 "id": MCPTools.string("Id from agent_spawn."),
                 "discard": [
                     "type": "boolean",
                     "description": "Default false: merge the branch and clean up. true: drop the branch without merging it.",
+                ],
+                "pause": [
+                    "type": "boolean",
+                    "description": "Default false. true: commit what is uncommitted as wip: paused, remove the worktree, keep the branch and report its name. Not with discard.",
                 ],
             ],
             required: ["id"]
@@ -236,9 +275,15 @@ public struct AgentToolExecutor: ToolExecutor {
                 // off the cooperative pool, as the spawn that made the branch.
                 let id = try Self.string("id", in: arguments)
                 let discard = arguments["discard"]?.boolValue ?? false
-                return try await Self.offThePool { [self] in
-                    try merge(id: id, discard: discard)
+                let pause = arguments["pause"]?.boolValue ?? false
+                guard !(discard && pause) else {
+                    throw ToolError("pause and discard exclude each other: pause keeps the branch, discard drops it")
                 }
+                return try await Self.offThePool { [self] in
+                    try merge(id: id, discard: discard, pause: pause)
+                }
+            case "agent_redo":
+                return try await Self.offThePool { [self] in try redo(arguments) }
             case "agent_rate":
                 return try rate(arguments)
             case "agent_scores":
@@ -276,26 +321,17 @@ public struct AgentToolExecutor: ToolExecutor {
         }
         let kind = try kind(in: arguments)
         let commands = try commands(in: arguments)
+        let prompt = try string("prompt", in: arguments)
+        let difficulty = try difficulty(in: arguments) ?? Difficulty.estimate(prompt: prompt, kind: kind, access: access)
 
         // Named by the orchestrator: run as asked. Otherwise Vitra picks.
         var picked: WorkerPicker.Choice?
         let cli: WorkerCLI
         let model: String
         let effort: String?
-        if arguments["cli"]?.stringValue != nil {
-            let cliName = try string("cli", in: arguments)
-            guard let named = WorkerCLI(rawValue: cliName) else {
-                let names = WorkerCLI.allCases.map(\.rawValue)
-                let known = names.dropLast().joined(separator: ", ") + " or " + (names.last ?? "")
-                throw ToolError("cli must be \(known), not '\(cliName)'")
-            }
-            cli = named
-            model = try string("model", in: arguments)
-            effort = arguments["effort"]?.stringValue
+        if let named = try namedWorker(in: arguments) {
+            (cli, model, effort) = named
         } else {
-            guard arguments["model"]?.stringValue == nil, arguments["effort"]?.stringValue == nil else {
-                throw ToolError("model and effort go with a cli: name the worker with all three, or leave all three out and Vitra picks")
-            }
             let offers = ModelCatalog.offers(ModelCatalog.cachedListing(executables))
             guard let choice = WorkerPicker.pick(
                 kind: kind ?? .other,
@@ -303,7 +339,8 @@ public struct AgentToolExecutor: ToolExecutor {
                 needsCommands: !commands.isEmpty,
                 history: orchestrator.recent(limit: Self.historyLimit),
                 offers: offers,
-                installed: Set(executables.paths.keys)
+                installed: Set(executables.paths.keys),
+                difficulty: difficulty
             ) else {
                 throw ToolError(
                     "no installed worker can take this piece\(commands.isEmpty ? "" : " with commands"): "
@@ -319,7 +356,7 @@ public struct AgentToolExecutor: ToolExecutor {
         let spec = WorkerSpec(
             cli: cli,
             model: model,
-            prompt: try string("prompt", in: arguments),
+            prompt: prompt,
             directory: try string("directory", in: arguments),
             access: access,
             label: arguments["label"]?.stringValue,
@@ -330,11 +367,41 @@ public struct AgentToolExecutor: ToolExecutor {
             // Nil is the default, which is on: only an explicit false turns
             // the gate off, and an explicit true is kept as it was asked.
             audit: arguments["audit"]?.boolValue,
-            minutes: try minutes(in: arguments)
+            minutes: try minutes(in: arguments),
+            difficulty: difficulty
         )
-        let id = try orchestrator.spawn(spec)
+        // A worker Vitra picked may be failed over to another if its provider
+        // is out; one the maestro named is only reported.
+        let id = try orchestrator.spawn(spec, link: Orchestrator.SpawnLink(picked: picked != nil))
         let why = picked.map { "picked \(spec.worker): \($0.reason). " } ?? ""
         return "Started agent \(id): \(spec.worker), \(access.rawValue) access, in \(spec.directory). \(why)Call agent_wait with this id for its result."
+    }
+
+    /// The worker the arguments name, or nil when they leave all of cli, model
+    /// and effort out and Vitra is to pick.
+    private static func namedWorker(in arguments: JSONValue) throws -> (WorkerCLI, String, String?)? {
+        guard arguments["cli"]?.stringValue != nil else {
+            guard arguments["model"]?.stringValue == nil, arguments["effort"]?.stringValue == nil else {
+                throw ToolError("model and effort go with a cli: name the worker with all three, or leave all three out and Vitra picks")
+            }
+            return nil
+        }
+        let cliName = try string("cli", in: arguments)
+        guard let cli = WorkerCLI(rawValue: cliName) else {
+            let names = WorkerCLI.allCases.map(\.rawValue)
+            let known = names.dropLast().joined(separator: ", ") + " or " + (names.last ?? "")
+            throw ToolError("cli must be \(known), not '\(cliName)'")
+        }
+        return (cli, try string("model", in: arguments), arguments["effort"]?.stringValue)
+    }
+
+    /// The difficulty named in the arguments, or nil when none was.
+    private static func difficulty(in arguments: JSONValue) throws -> Difficulty? {
+        guard let name = arguments["difficulty"]?.stringValue else { return nil }
+        guard let difficulty = Difficulty(rawValue: name) else {
+            throw ToolError("difficulty must be easy, normal or hard, not '\(name)'")
+        }
+        return difficulty
     }
 
     private func rate(_ arguments: JSONValue) throws -> String {
@@ -363,17 +430,26 @@ public struct AgentToolExecutor: ToolExecutor {
     /// cooperative pool. Reading git sets GIT_OPTIONAL_LOCKS=0 (see
     /// `Git.run`), so a status here cannot take the index lock out from under
     /// the user's own git.
-    private func merge(id: String, discard: Bool) throws -> String {
+    private func merge(id: String, discard: Bool, pause: Bool = false) throws -> String {
         let run = try orchestrator.status(id)
         guard run.state != .running else {
             throw ToolError("agent \(id) is still running: wait for it to finish before merging")
         }
-        guard let repository = run.repository, let worktree = run.worktree, let branch = run.branch else {
+        guard let repository = run.repository, let branch = run.branch else {
             throw ToolError("agent \(id) has no branch to merge: it did not edit a git repository")
+        }
+        // A delivery and its redos share one branch, and one worktree: they
+        // are merged, paused or dropped together, once.
+        let members = branchMembers(of: run)
+        if let closed = members.lazy.compactMap({ closure(of: $0.id) }).first {
+            return "agent \(id): branch \(branch) was already \(closed); nothing to do."
+        }
+        if let busy = members.first(where: { $0.state == .running }) {
+            throw ToolError("agent \(busy.id) is still running on \(branch): wait for it to finish before merging")
         }
         // An auditor past its deadline is cancelled by this read, which can
         // take seconds: do it before the lock, not under it.
-        if let audit = auditID(id) { _ = try? orchestrator.status(audit) }
+        for member in members { if let audit = auditID(member.id) { _ = try? orchestrator.status(audit) } }
 
         // Everything from here to the end is one critical section per
         // repository: the checks and the merge are not atomic, and another
@@ -382,23 +458,57 @@ public struct AgentToolExecutor: ToolExecutor {
         // auditor being started.
         do {
             return try RepositoryLock.withLock(repository, timeout: lockTimeout) {
-                try mergeLocked(run, repository: repository, worktree: worktree, branch: branch, discard: discard)
+                try mergeLocked(run, members: members, repository: repository, branch: branch, discard: discard, pause: pause)
             }
         } catch let error as RepositoryLockError {
             throw ToolError(error.description)
         }
     }
 
+    /// Every run on `run`'s branch, itself included, newest first: the
+    /// delivery, the redos that went on in its branch, and what redid those.
+    private func branchMembers(of run: Run) -> [Run] {
+        guard let branch = run.branch, let repository = run.repository else { return [run] }
+        let others = orchestrator.recent(limit: Self.historyLimit)
+            .filter { $0.id != run.id && $0.branch == branch && $0.repository == repository }
+        return ([run] + others).sorted { $0.started > $1.started }
+    }
+
+    /// The member whose worktree is still on disk, if any.
+    private func liveMember(_ members: [Run]) -> Run? {
+        members.first { $0.worktree.map { FileManager.default.fileExists(atPath: $0) } == true }
+    }
+
+    /// What became of the branch, when a merge or a discard settled it:
+    /// "merged through agent x".
+    private func closure(of id: String) -> String? {
+        guard let directory = orchestrator.directory(of: id) else { return nil }
+        return Self.claimText(directory.appendingPathComponent("closed"))
+    }
+
+    /// Writes down on every run of the branch how it ended, so a second
+    /// agent_merge of any of them says so instead of failing on a branch that
+    /// is gone.
+    private func markClosed(_ members: [Run], _ text: String) {
+        for member in members {
+            guard let directory = orchestrator.directory(of: member.id) else { continue }
+            try? Data(text.utf8).write(to: directory.appendingPathComponent("closed"), options: .atomic)
+        }
+    }
+
     /// The part of `merge` that holds the repository's lock.
     private func mergeLocked(
-        _ run: Run, repository: String, worktree: String, branch: String, discard: Bool
+        _ run: Run, members: [Run], repository: String, branch: String, discard: Bool, pause: Bool
     ) throws -> String {
         let id = run.id
         // The auditor is reading this worktree; taking it away now would pull
         // the files out from under it.
-        if let refusal = auditRefusal(id) {
-            throw ToolError(refusal)
+        for member in members {
+            if let refusal = auditRefusal(member.id) { throw ToolError(refusal) }
         }
+        // The worktree that is still there, if the work was not paused.
+        let live = liveMember(members)
+        let worktree = live?.worktree
 
         // A merge somebody else started is theirs to finish or abort: taking
         // it over would bury their resolution, and aborting it would throw it
@@ -411,26 +521,33 @@ public struct AgentToolExecutor: ToolExecutor {
             )
         }
 
+        if pause {
+            return try pauseLocked(run, members: members, live: live, repository: repository, branch: branch)
+        }
+
         if !discard {
             // The worktree is removed with --force below, so anything still
             // uncommitted there would be deleted with it. A failed commit is
             // exactly that case, and a status catches edits made after one.
-            if let failure = run.commitError {
-                let reason = failure.isEmpty ? "git gave no reason" : failure
-                throw ToolError(
-                    "agent \(id)'s commit failed (\(reason)): the edits are still uncommitted in \(worktree) — "
-                        + "commit them there, or pass discard true to drop them"
-                )
-            }
-            let tree = Git.run(["status", "--porcelain"], in: worktree)
-            guard tree.succeeded else {
-                throw ToolError("could not read the worktree at \(worktree): " + Self.reason(tree))
-            }
-            guard tree.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw ToolError(
-                    "agent \(id) has edits still uncommitted in \(worktree): "
-                        + "commit them there before merging, or pass discard true to drop them"
-                )
+            // (A paused delivery has no worktree: its branch is all of it.)
+            if let live, let worktree {
+                if let failure = live.commitError {
+                    let reason = failure.isEmpty ? "git gave no reason" : failure
+                    throw ToolError(
+                        "agent \(live.id)'s commit failed (\(reason)): the edits are still uncommitted in \(worktree) — "
+                            + "commit them there, or pass discard true to drop them"
+                    )
+                }
+                let tree = Git.run(["status", "--porcelain"], in: worktree)
+                guard tree.succeeded else {
+                    throw ToolError("could not read the worktree at \(worktree): " + Self.reason(tree))
+                }
+                guard tree.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw ToolError(
+                        "agent \(live.id) has edits still uncommitted in \(worktree): "
+                            + "commit them there before merging, or pass discard true to drop them"
+                    )
+                }
             }
 
             // A checkout with uncommitted work would make the merge refuse
@@ -464,13 +581,14 @@ public struct AgentToolExecutor: ToolExecutor {
                 throw ToolError(
                     "merge of \(branch) conflicts\(files) — "
                         + (aborted ? "the merge was aborted and " : "nothing was merged and ")
-                        + "\(worktree) and \(branch) are still there; send the work back to agent \(id) to resolve"
+                        + "\(worktree.map { $0 + " and " } ?? "")\(branch) are still there; send the work back to agent \(id) to resolve"
                 )
             }
         }
 
-        let removed = Git.run(["worktree", "remove", "--force", worktree], in: repository)
+        let removed = worktree.map { Git.run(["worktree", "remove", "--force", $0], in: repository) }
         let deleted = Git.run(["branch", "-D", branch], in: repository)
+        markClosed(members, "\(discard ? "discarded" : "merged") through agent \(id)")
 
         var lines: [String]
         if discard {
@@ -485,17 +603,86 @@ public struct AgentToolExecutor: ToolExecutor {
             }
             lines = [result]
         }
-        if removed.succeeded {
-            lines.append("Removed worktree \(worktree).")
-        } else {
-            lines.append("Could not remove worktree \(worktree): " + Self.reason(removed))
+        if let removed, let worktree {
+            if removed.succeeded {
+                lines.append("Removed worktree \(worktree).")
+            } else {
+                lines.append("Could not remove worktree \(worktree): " + Self.reason(removed))
+            }
         }
         if deleted.succeeded {
             lines.append("Deleted branch \(branch).")
         } else {
             lines.append("Could not delete branch \(branch): " + Self.reason(deleted))
         }
+        let others = members.filter { $0.id != id }.map(\.id)
+        if !others.isEmpty {
+            lines.append("Also closed, on the same branch: " + others.joined(separator: ", ") + ".")
+        }
         return lines.joined(separator: "\n")
+    }
+
+    /// Sets a finished delivery aside: what is uncommitted in its worktree is
+    /// committed as `wip: paused`, the worktree is removed and the branch is
+    /// kept. Under the repository's lock, like a merge, which could otherwise
+    /// remove the tree from under it.
+    private func pauseLocked(
+        _ run: Run, members: [Run], live: Run?, repository: String, branch: String
+    ) throws -> String {
+        let id = run.id
+        guard case .finished = run.state else {
+            throw ToolError("agent \(id) did not finish: only a finished delivery can be paused")
+        }
+        guard let live, let worktree = live.worktree else {
+            return "Agent \(id) is already paused: branch \(branch) is kept and there is no worktree. "
+                + "Continue it with agent_redo, or merge it with agent_merge."
+        }
+
+        var lines: [String] = []
+        let committed = try commitPausedWork(in: worktree, run: live)
+        if committed { lines.append("Committed what was uncommitted as \"wip: paused\".") }
+
+        let removed = Git.run(["worktree", "remove", "--force", worktree], in: repository)
+        guard removed.succeeded else {
+            throw ToolError("could not remove the worktree at \(worktree): " + Self.reason(removed))
+        }
+        for member in members {
+            guard let directory = orchestrator.directory(of: member.id) else { continue }
+            FileManager.default.createFile(atPath: directory.appendingPathComponent("paused").path, contents: nil)
+        }
+        lines.insert("Paused agent \(id): branch \(branch) is kept and worktree \(worktree) is removed.", at: 0)
+        lines.append("Continue it with agent_redo (the worktree is recreated from the branch), or merge it later with agent_merge.")
+        return lines.joined(separator: "\n")
+    }
+
+    /// Commits whatever the worktree holds uncommitted, as the shell around a
+    /// worker does — without what the project's setup linked or copied in —
+    /// and answers whether there was anything to commit.
+    private func commitPausedWork(in worktree: String, run: Run) throws -> Bool {
+        let added = Git.run(["add", "-A"], in: worktree)
+        guard added.succeeded else { throw ToolError("could not stage the work in \(worktree): " + Self.reason(added)) }
+        let excludes = orchestrator.directory(of: run.id)
+            .flatMap { Self.claimText($0.appendingPathComponent("worktree-excludes")) }?
+            .split(whereSeparator: \.isNewline).map { ":(literal)\($0)" } ?? []
+        if !excludes.isEmpty {
+            let reset = Git.run(["reset", "-q", "--"] + excludes, in: worktree)
+            guard reset.succeeded else { throw ToolError("could not stage the work in \(worktree): " + Self.reason(reset)) }
+        }
+        guard !Git.run(["diff", "--cached", "--quiet"], in: worktree).succeeded else { return false }
+        let commit = Git.run([
+            "-c", "user.name=Vitra worker", "-c", "user.email=worker@vitra.local",
+            "commit", "-q", "-m", "wip: paused",
+        ], in: worktree)
+        guard commit.succeeded else {
+            throw ToolError(
+                "could not commit the work in \(worktree), so nothing was paused: " + Self.reason(commit)
+            )
+        }
+        // The failed commit this replaces is no longer a failure.
+        if let directory = orchestrator.directory(of: run.id) {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent("commit-error"))
+        }
+        return true
     }
 
     /// The refusal for a run an audit is still reading, if one is.
@@ -605,8 +792,26 @@ public struct AgentToolExecutor: ToolExecutor {
         }
         let requested = arguments["timeout_seconds"]?.intValue ?? Self.defaultTimeout
         let timeout = min(max(requested, 0), Self.longestTimeout)
+        let deadline = Date().addingTimeInterval(TimeInterval(timeout))
 
-        let runs = try await orchestrator.wait(ids: ids, timeout: TimeInterval(timeout))
+        // A run whose provider was out is taken over by another worker, and
+        // the wait goes on with that one, in the time that is left.
+        var current = ids
+        var failovers: [Int: String] = [:]
+        var runs: [Run]
+        while true {
+            runs = try await orchestrator.wait(ids: current, timeout: max(deadline.timeIntervalSinceNow, 0))
+            var moved = false
+            for (index, run) in runs.enumerated() where run.providerFailure != nil {
+                guard let outcome = try await Self.offThePool({ [self] in self.failover(run) }) else { continue }
+                failovers[index] = outcome.line
+                if let successor = outcome.id, successor != current[index] {
+                    current[index] = successor
+                    moved = true
+                }
+            }
+            if !moved { break }
+        }
         var gates: [String: Gate] = [:]
         for run in runs {
             // Reading the history and starting an auditor both touch the disk
@@ -616,12 +821,223 @@ public struct AgentToolExecutor: ToolExecutor {
                 gates[run.id] = gate
             }
         }
-        return runs.map { run in
+        return runs.enumerated().map { index, run in
             let gate = gates[run.id]
-            let report = AgentReport.full(run, audit: gate?.reading)
+            var report = AgentReport.full(run, audit: gate?.reading)
+            if let line = failovers[index] { report = line + "\n" + report }
             guard let line = gate?.line else { return report }
             return report + "\n" + line
         }.joined(separator: "\n\n")
+    }
+
+    // MARK: Failover
+
+    /// What became of a run whose provider was out: the run that took over,
+    /// when one did, and the line that says so.
+    private struct Failover {
+        let id: String?
+        let line: String
+    }
+
+    /// Hands a run Vitra picked, and whose provider did not let it run, to the
+    /// next pick from another CLI: the same prompt, kind, access, commands,
+    /// label and directory, in a worktree of its own when it edits. Once per
+    /// original run, whoever asks: the successor is written beside the run,
+    /// and later calls report it. A worker the maestro named, and a run that
+    /// is itself a retry, are only reported.
+    private func failover(_ run: Run) -> Failover? {
+        guard let failure = run.providerFailure, run.wasPicked, run.retryOf == nil,
+              let directory = orchestrator.directory(of: run.id)
+        else { return nil }
+        let record = directory.appendingPathComponent("retry")
+        let cause = "[\(run.id)] did not run (\(failure.name))"
+
+        // The claim is taken before the spawn, as for an audit: two waits on
+        // the same run must not start two retries.
+        if Self.isAbandoned(record) { try? FileManager.default.removeItem(at: record) }
+        switch Self.claim(record) {
+        case .exists:
+            let text = Self.claimText(record) ?? ""
+            guard !text.isEmpty, text != "pending", let successor = try? orchestrator.status(text) else {
+                return Failover(id: nil, line: cause + " — being retried on another worker")
+            }
+            return Failover(id: text, line: cause + " — retried as [\(text)] on \(successor.spec.worker)")
+        case .failed:
+            return nil
+        case .created:
+            break
+        }
+
+        let offers = ModelCatalog.offers(ModelCatalog.cachedListing(executables))
+        guard let choice = WorkerPicker.pick(
+            kind: run.spec.kind ?? .other,
+            access: run.spec.access,
+            needsCommands: !run.spec.commands.isEmpty,
+            history: orchestrator.recent(limit: Self.historyLimit),
+            offers: offers,
+            installed: Set(executables.paths.keys),
+            excluded: [run.spec.cli],
+            difficulty: run.spec.difficulty ?? .normal
+        ) else {
+            try? FileManager.default.removeItem(at: record)
+            return Failover(id: nil, line: cause + " — no worker from another provider can take it; spawn it again when one is free")
+        }
+        let spec = WorkerSpec(
+            cli: choice.offer.cli, model: choice.offer.model, prompt: run.spec.prompt, directory: run.spec.directory,
+            access: run.spec.access, label: run.spec.label, kind: run.spec.kind, effort: choice.offer.effort,
+            project: run.spec.project, commands: run.spec.commands, audit: run.spec.audit,
+            minutes: run.spec.minutes, difficulty: run.spec.difficulty
+        )
+        do {
+            let successor = try orchestrator.spawn(spec, link: Orchestrator.SpawnLink(picked: true, retryOf: run.id))
+            try? Data(successor.utf8).write(to: record, options: .atomic)
+            discardEmptyWorktree(of: run)
+            return Failover(id: successor, line: cause + " — retried as [\(successor)] on \(spec.worker)")
+        } catch {
+            try? FileManager.default.removeItem(at: record)
+            return Failover(id: nil, line: cause + " — could not retry it on \(spec.worker): \(error)")
+        }
+    }
+
+    /// Takes away the worktree and branch of a run that never ran, once its
+    /// successor has a tree of its own. Left alone when it holds anything.
+    private func discardEmptyWorktree(of run: Run) {
+        guard let repository = run.repository, let tree = run.worktree, let branch = run.branch,
+              let base = run.baseCommit
+        else { return }
+        try? RepositoryLock.withLock(repository, timeout: lockTimeout) {
+            let commits = Git.output(["rev-list", "--count", "\(base)..\(branch)"], in: repository)
+                .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            let edits = Git.output(["status", "--porcelain", "--untracked-files=no"], in: tree)
+            guard commits == 0, let edits, Self.trimmed(edits).isEmpty else { return }
+            _ = Git.run(["worktree", "remove", "--force", tree], in: repository)
+            _ = Git.run(["branch", "-D", branch], in: repository)
+        }
+    }
+
+    // MARK: Redo
+
+    /// Spawns a new worker on the same piece with what the last attempt got
+    /// wrong, in the delivery's own worktree and branch when it can build on
+    /// them, so it goes on from what was delivered instead of starting over.
+    private func redo(_ arguments: JSONValue) throws -> String {
+        let id = try Self.string("id", in: arguments)
+        let notes = try Self.string("notes", in: arguments).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !notes.isEmpty else { throw ToolError("notes are empty: say what the previous attempt got wrong") }
+        let original = try orchestrator.status(id)
+        guard original.state != .running else {
+            throw ToolError("agent \(id) is still running: wait for it to finish before redoing it")
+        }
+        let members = branchMembers(of: original)
+        if let busy = members.first(where: { $0.state == .running }) {
+            throw ToolError("agent \(busy.id) is still running on the same branch: wait for it to finish before redoing")
+        }
+        for member in members {
+            if let audit = auditID(member.id) { _ = try? orchestrator.status(audit) }
+            if let refusal = auditRefusal(member.id) { throw ToolError(refusal) }
+        }
+
+        let (cli, model, effort, why) = try redoWorker(for: original, arguments)
+        let spec = original.spec
+        let continuing = original.spec.access == .edit ? continuation(of: original, members: members) : nil
+        let redone = WorkerSpec(
+            cli: cli, model: model,
+            prompt: Self.redoPrompt(spec.prompt, notes: notes, branch: continuing?.branch),
+            directory: spec.directory, access: spec.access,
+            label: ((spec.label ?? "").isEmpty ? spec.worker : spec.label ?? "") + " (redo)",
+            kind: spec.kind, effort: effort, project: spec.project, commands: spec.commands,
+            audit: spec.audit, minutes: spec.minutes, difficulty: spec.difficulty
+        )
+        let link = Orchestrator.SpawnLink(redoOf: id, continuing: continuing)
+
+        // Going on in a tree that a merge could remove is held under the lock.
+        let started: String
+        do {
+            started = try continuing.map { continuing in
+                try RepositoryLock.withLock(continuing.repository, timeout: lockTimeout) {
+                    // The tree was looked for before the lock; a merge may have taken it since.
+                    guard liveMember(branchMembers(of: original)) != nil || continuing.tree == nil else {
+                        throw ToolError("agent \(id)'s worktree was removed while redoing it: ask again")
+                    }
+                    return try orchestrator.spawn(redone, link: link)
+                }
+            } ?? orchestrator.spawn(redone, link: link)
+        } catch let error as RepositoryLockError {
+            throw ToolError(error.description)
+        }
+
+        // The redo is the delivery to audit now: the old audit does not stand
+        // for it, and the old run must not start another of its own.
+        for member in members {
+            guard let directory = orchestrator.directory(of: member.id) else { continue }
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent("audit"))
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent("paused"))
+        }
+        if let directory = orchestrator.directory(of: id) {
+            try? Data(started.utf8).write(to: directory.appendingPathComponent("redo"), options: .atomic)
+        }
+
+        let place: String
+        switch continuing {
+        case nil: place = spec.access == .edit ? "in a fresh worktree" : "as a new read-only run"
+        case let continuing? where continuing.tree != nil: place = "in the same worktree and branch (\(continuing.branch))"
+        case let continuing?: place = "in a worktree recreated from branch \(continuing.branch)"
+        }
+        return "Started agent \(started): \(redone.worker), \(spec.access.rawValue) access, redo of \(id), \(place). "
+            + "\(why). Call agent_wait with this id for its result."
+    }
+
+    /// The worker for a redo: the one named; else the same worker, unless its
+    /// delivery was rated below 3, when the next pick that is not it.
+    private func redoWorker(
+        for original: Run, _ arguments: JSONValue
+    ) throws -> (cli: WorkerCLI, model: String, effort: String?, why: String) {
+        if let (cli, model, effort) = try Self.namedWorker(in: arguments) { return (cli, model, effort, "as named") }
+        let spec = original.spec
+        let rating = original.rating?.score
+        if rating.map({ $0 >= Self.redoWithSameWorker }) ?? true {
+            return (spec.cli, spec.model, spec.effort, "the same worker goes again\(rating.map { ", rated \($0)/5" } ?? "")")
+        }
+        let offers = ModelCatalog.offers(ModelCatalog.cachedListing(executables))
+        guard let choice = WorkerPicker.pick(
+            kind: spec.kind ?? .other,
+            access: spec.access,
+            needsCommands: !spec.commands.isEmpty,
+            history: orchestrator.recent(limit: Self.historyLimit),
+            offers: offers,
+            installed: Set(executables.paths.keys),
+            excludedWorkers: [ModelCatalog.Offer(cli: spec.cli, model: spec.model, effort: spec.effort)],
+            difficulty: spec.difficulty ?? .normal
+        ) else {
+            throw ToolError(
+                "its delivery was rated \(rating ?? 0)/5 and no other installed worker can take the piece: "
+                    + "name one with cli, model and effort (agent_models lists them)"
+            )
+        }
+        return (choice.offer.cli, choice.offer.model, choice.offer.effort,
+                "picked: \(choice.reason); \(spec.worker) delivered a \(rating ?? 0)/5")
+    }
+
+    /// The lowest rating of its delivery with which the same worker is trusted
+    /// with the redo.
+    static let redoWithSameWorker = 3
+
+    /// The branch a redo goes on from, when there is one: the delivery edited
+    /// a repository and its branch still exists, with its worktree or without.
+    private func continuation(of run: Run, members: [Run]) -> Orchestrator.Continuation? {
+        guard let repository = run.repository, let branch = run.branch, let base = run.baseCommit,
+              Git.run(["rev-parse", "--verify", "-q", "refs/heads/\(branch)"], in: repository).succeeded
+        else { return nil }
+        let live = liveMember(members)
+        return Orchestrator.Continuation(
+            repository: repository, branch: branch, base: base, tree: live?.worktree, owner: (live ?? run).id
+        )
+    }
+
+    /// The original prompt with what the last attempt got wrong.
+    static func redoPrompt(_ prompt: String, notes: String, branch: String?) -> String {
+        let site = branch.map { "\n\nThe previous attempt's changes are already in this directory, on branch \($0): build on them." } ?? ""
+        return prompt + "\n\nWhat the previous attempt got wrong, fix exactly this:\n" + notes + site
     }
 
     /// The quality gate on a finished editing delivery: starts a cheap
@@ -644,6 +1060,10 @@ public struct AgentToolExecutor: ToolExecutor {
               let directory = orchestrator.directory(of: run.id)
         else { return Gate() }
 
+        // A delivery that was redone is audited in its redo, not again here.
+        if let redone = Self.claimText(directory.appendingPathComponent("redo")), !redone.isEmpty {
+            return Gate(line: "gate: agent \(redone) redid this delivery — audit and merge that one.")
+        }
         let record = directory.appendingPathComponent("audit")
         // A claim abandoned half-way is not an audit: it is taken over below.
         if FileManager.default.fileExists(atPath: record.path), !Self.isAbandoned(record) {
@@ -844,12 +1264,15 @@ enum AgentReport {
         case .cancelled: state = "cancelled"
         case .lost: state = "LOST (the process is gone and left no result)"
         case let .finished(exitCode):
-            if run.timedOutAfter != nil {
+            if let failure = run.providerFailure {
+                // Its provider did not let it run: not the worker's failure.
+                state = "DID NOT RUN (\(failure.name)): \(failure.reason)"
+            } else if run.timedOutAfter != nil {
                 state = "FAILED (timed out)"
             } else if run.output?.isError == true {
                 state = exitCode == 0 ? "FAILED" : "FAILED (exit \(exitCode))"
             } else {
-                state = "finished"
+                state = run.isPaused ? "paused" : "finished"
             }
         }
 
@@ -868,6 +1291,9 @@ enum AgentReport {
             fields.append("silent for \(Int(silent.rounded()))s")
         }
         if let rating = run.rating { fields.append("rated \(rating.score)/5") }
+        if run.isPaused, state != "paused" { fields.append("paused") }
+        if let redone = run.redoOf { fields.append("redo of \(redone)") }
+        if let retried = run.retryOf { fields.append("retry of \(retried)") }
         // The label is free text from a model and the headline is one line: a
         // newline in it would let a label pass for the lines that follow.
         let label = (run.spec.label ?? "").split(whereSeparator: \.isNewline).joined(separator: " ")
@@ -967,6 +1393,11 @@ enum AgentReport {
             // The auditor is reading this worktree: the merge waits, and the
             // cleanup above all, or it would pull the files out from under it.
             lines.append("merge after the audit: \(audit) is reading this worktree")
+        } else if run.isPaused {
+            lines.append(
+                "paused: worktree removed, branch \(branch) kept — agent_redo \(run.id) to continue it, "
+                    + "or agent_merge \(run.id) to merge it"
+            )
         } else {
             lines.append("merge: agent_merge \(run.id)")
         }

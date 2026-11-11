@@ -217,6 +217,42 @@ echo '{"result":"done","is_error":false,"total_cost_usd":0.5,"usage":{"input_tok
     #expect(try orchestrator.status(id).rating == nil)
 }
 
+@Test func aRunThatDidNotRunBecauseOfItsProviderSaysSoAndKeepsSayingSoFromItsSummary() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    // What claude printed when the plan ran out: on stderr, nothing on stdout.
+    let orchestrator = try sandbox.orchestrator(claude: "cat >/dev/null\necho 'Free usage limit reached' >&2\nexit 1")
+
+    let id = try orchestrator.spawn(sandbox.spec())
+    let run = try #require(try await orchestrator.wait(ids: [id], timeout: 10).first)
+    #expect(run.output?.isError == true)
+    #expect(run.providerFailure == .quota("Free usage limit reached"))
+    #expect(run.wasPicked == false)
+
+    // Settled in summary.json, so a later look (here, another orchestrator
+    // over the same directory) does not parse stdout again to find out.
+    let again = Orchestrator(root: sandbox.root.appendingPathComponent("runs"), executables: Executables(paths: [:]))
+    #expect(try again.status(id).providerFailure == .quota("Free usage limit reached"))
+    #expect(again.recent(limit: 5).first?.providerFailure?.name == "quota")
+}
+
+@Test func onlyAFailedRunThatSaysSoInShortWordsIsTheProvidersFailure() async throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.cleanUp() }
+    // An answer that mentions a quota, delivered: nothing failed.
+    let delivered = try sandbox.orchestrator(claude: #"cat >/dev/null; echo '{"result":"added a quota check","is_error":false}'"#)
+    let id = try delivered.spawn(sandbox.spec())
+    #expect(try await delivered.wait(ids: [id], timeout: 10).first?.providerFailure == nil)
+
+    // A failed task that is about quotas, at length, is the worker's own.
+    let report = String(repeating: "the quota module still fails its tests. ", count: 40)
+    let failed = try sandbox.orchestrator(claude: "cat >/dev/null\necho '\(report)' >&2\nexit 1")
+    let own = try failed.spawn(sandbox.spec())
+    let run = try #require(try await failed.wait(ids: [own], timeout: 10).first)
+    #expect(run.output?.isError == true)
+    #expect(run.providerFailure == nil)
+}
+
 @Test func aWorkerThatExitsNonZeroIsFinishedAndAnError() async throws {
     let sandbox = try Sandbox()
     defer { sandbox.cleanUp() }

@@ -66,6 +66,9 @@ public struct ModelScore: Equatable, Sendable {
     /// The median time of the runs that delivered, or nil when none did.
     public let medianSeconds: TimeInterval?
     public let costUSD: Double
+    /// How many of the runs were easy, normal and hard pieces; a record with
+    /// no difficulty counts as normal.
+    public let difficulties: [Difficulty: Int]
 
     public init(
         kind: TaskKind,
@@ -77,8 +80,10 @@ public struct ModelScore: Equatable, Sendable {
         averageScore: Double?,
         failures: Int,
         medianSeconds: TimeInterval?,
-        costUSD: Double
+        costUSD: Double,
+        difficulties: [Difficulty: Int] = [:]
     ) {
+        self.difficulties = difficulties
         self.kind = kind
         self.cli = cli
         self.model = model
@@ -129,7 +134,8 @@ public enum Scoreboard {
     /// be good; last, those known to fall short, best of them first.
     ///
     /// Runs still going, or stopped by the user, are left out entirely: they
-    /// are no verdict on the model either way.
+    /// are no verdict on the model either way. Nor is a run that did not run
+    /// because its provider was out of quota, signed out or down.
     public static func scores(_ runs: [Run], kind: TaskKind? = nil) -> [ModelScore] {
         struct Key: Hashable {
             let kind: TaskKind
@@ -138,6 +144,7 @@ public enum Scoreboard {
             let effort: String?
         }
         let judged = runs.filter { run in
+            guard run.providerFailure == nil else { return false }
             switch run.state {
             case .finished, .lost: return kind == nil || (run.spec.kind ?? .other) == kind
             case .running, .cancelled: return false
@@ -165,7 +172,8 @@ public enum Scoreboard {
                 // A failure's two seconds say nothing about how long a
                 // delivery takes, so only deliveries are timed.
                 medianSeconds: median(delivered.map(\.duration)),
-                costUSD: runs.reduce(0) { $0 + ($1.output?.costUSD ?? 0) }
+                costUSD: runs.reduce(0) { $0 + ($1.output?.costUSD ?? 0) },
+                difficulties: runs.reduce(into: [:]) { $0[$1.spec.difficulty ?? .normal, default: 0] += 1 }
             )
         }
 
@@ -217,6 +225,13 @@ public enum Scoreboard {
             lines.append(contentsOf: ofKind.map { "  " + line($0) })
             lines.append(contentsOf: extra)
         }
+        let resting = WorkerPicker.resting(history, now: now)
+        if !resting.isEmpty {
+            lines.append("resting")
+            lines.append(contentsOf: resting.sorted { $0.key.name < $1.key.name }.map {
+                "  \($0.key.name) — resting until \(WorkerPicker.clock($0.value)) after \(WorkerPicker.restingAfter) failures in a row"
+            })
+        }
         return lines.joined(separator: "\n")
     }
 
@@ -238,7 +253,7 @@ public enum Scoreboard {
     public static func untriedLine(_ offers: [ModelCatalog.Offer], history: [Run], kind: TaskKind) -> String? {
         // A worker is its CLI, model and effort: haiku at low having run says
         // nothing of haiku at high.
-        let ofKind = history.filter { ($0.spec.kind ?? .other) == kind }
+        let ofKind = history.filter { ($0.spec.kind ?? .other) == kind && $0.providerFailure == nil }
         let untried = offers.filter { offer in !ofKind.contains { WorkerPicker.isRun($0, of: offer) } }
         guard !untried.isEmpty else { return nil }
         let named = untried.prefix(untriedNamed).map(\.name)
@@ -256,6 +271,12 @@ public enum Scoreboard {
         if let median = score.medianSeconds {
             fields.append("median \(Int(median.rounded()))s")
             fields.append(String(format: "$%.2f", score.costUSD))
+        }
+        // Said only when some piece was not a normal one: otherwise it is noise.
+        if score.difficulties.contains(where: { $0.key != .normal }) {
+            fields.append(Difficulty.allCases.compactMap { level in
+                score.difficulties[level].map { "\($0) \(level.rawValue)" }
+            }.joined(separator: ", "))
         }
         let effort = score.effort.map { " (\($0))" } ?? ""
         return "\(score.cli.rawValue) \(score.model)\(effort) — " + fields.joined(separator: " · ")

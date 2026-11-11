@@ -48,6 +48,19 @@ public struct Run: Equatable, Sendable {
     /// it was given. Such a run is `finished(exitCode: Orchestrator.timeoutExitCode)`
     /// and an error, so it counts as failed everywhere a failure does.
     public var timedOutAfter: Int? = nil
+    /// Set when the run did not run because of its provider (quota, signed
+    /// out, down). It is still a finished run with an error, but it counts for
+    /// nothing against the worker.
+    public var providerFailure: ProviderFailure? = nil
+    /// Whether Vitra chose the worker, the spawn having left the cli out.
+    public var wasPicked: Bool = false
+    /// The run this one retried after its provider failed: at most one
+    /// failover per original run.
+    public var retryOf: String? = nil
+    /// The run this one redoes, in the same worktree and branch when it could.
+    public var redoOf: String? = nil
+    /// Whether the worktree was taken away and the branch kept, for later.
+    public var isPaused: Bool = false
 
     /// Public so the UI snapshot tool can build runs without reading any on disk.
     public init(
@@ -67,7 +80,12 @@ public struct Run: Equatable, Sendable {
         rating: Rating? = nil,
         worktreeSkipped: [String] = [],
         silentFor: TimeInterval? = nil,
-        timedOutAfter: Int? = nil
+        timedOutAfter: Int? = nil,
+        providerFailure: ProviderFailure? = nil,
+        wasPicked: Bool = false,
+        retryOf: String? = nil,
+        redoOf: String? = nil,
+        isPaused: Bool = false
     ) {
         self.id = id
         self.spec = spec
@@ -86,6 +104,11 @@ public struct Run: Equatable, Sendable {
         self.worktreeSkipped = worktreeSkipped
         self.silentFor = silentFor
         self.timedOutAfter = timedOutAfter
+        self.providerFailure = providerFailure
+        self.wasPicked = wasPicked
+        self.retryOf = retryOf
+        self.redoOf = redoOf
+        self.isPaused = isPaused
     }
 
     /// How long the run took, or has taken so far.
@@ -115,4 +138,9 @@ struct RunRecord: Codable {
     /// When the run is cancelled as hung. Absent in a record written before
     /// deadlines existed: such a run has none.
     var deadline: Date? = nil
+    /// Whether Vitra picked the worker; absent when the maestro named it.
+    var picked: Bool? = nil
+    /// The run this one is the failover of, or the redo of.
+    var retryOf: String? = nil
+    var redoOf: String? = nil
 }

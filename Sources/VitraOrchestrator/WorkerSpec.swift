@@ -33,6 +33,36 @@ public enum WorkerCLI: String, Codable, Sendable, CaseIterable {
     public var promptFlag: String? { self == .gemini ? "-p=" : nil }
 }
 
+/// How hard a piece of work is, which decides how strong a worker it is given.
+public enum Difficulty: String, Codable, Sendable, CaseIterable {
+    case easy, normal, hard
+
+    /// How many distinct file paths a prompt names: `Sources/A/B.swift`,
+    /// `Run.swift`. URLs are taken out first, and an extension needs two
+    /// letters or more so "e.g." and "i.e." are not files.
+    static func pathCount(in prompt: String) -> Int {
+        let text = prompt.replacingOccurrences(of: #"https?://\S+"#, with: " ", options: .regularExpression)
+        let pattern = #"(?<![\w/.\-])(?:[\w.\-]+/)*[A-Za-z_][\w\-]+\.[A-Za-z][A-Za-z0-9]{1,5}(?![\w])"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return 0 }
+        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        return Set(matches.compactMap { Range($0.range, in: text).map { String(text[$0]) } }).count
+    }
+
+    /// What the prompt suggests when the spawn did not say: hard for a piece
+    /// that touches many files, is very long, or reshapes code across several
+    /// files; easy for a short read of at most one file; normal otherwise.
+    public static func estimate(prompt: String, kind: TaskKind?, access: WorkerAccess) -> Difficulty {
+        let paths = pathCount(in: prompt)
+        let reshapes = prompt.range(
+            of: #"\b(refactor|redesign|migrat|architectur)"#, options: [.regularExpression, .caseInsensitive]
+        ) != nil
+        if paths >= 6 || prompt.count > 4000 { return .hard }
+        if kind == .implement, access == .edit, paths >= 3, reshapes { return .hard }
+        if prompt.count < 600, paths <= 1, let kind, [.explore, .docs, .review].contains(kind) { return .easy }
+        return .normal
+    }
+}
+
 /// What a worker may do to the directory it runs in.
 public enum WorkerAccess: String, Codable, Sendable {
     /// Look, search and report. Nothing is written.
@@ -89,6 +119,9 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
     /// How long the run may last before it is cancelled as hung, 1...180.
     /// Nil is `Orchestrator.defaultMinutes`.
     public let minutes: Int?
+    /// How hard the piece is. Nil in a record written before difficulty
+    /// existed, which counts as normal.
+    public let difficulty: Difficulty?
 
     public init(
         cli: WorkerCLI,
@@ -102,7 +135,8 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
         project: String? = nil,
         commands: [String] = [],
         audit: Bool? = nil,
-        minutes: Int? = nil
+        minutes: Int? = nil,
+        difficulty: Difficulty? = nil
     ) {
         self.cli = cli
         self.model = model
@@ -116,12 +150,13 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
         self.commands = commands
         self.audit = audit
         self.minutes = minutes
+        self.difficulty = difficulty
     }
 
     // Runs recorded before a field existed must still load, and a field that
     // was never set must not be written as a pile of nulls and empty lists.
     private enum CodingKeys: String, CodingKey {
-        case cli, model, prompt, directory, access, label, kind, effort, project, commands, audit, minutes
+        case cli, model, prompt, directory, access, label, kind, effort, project, commands, audit, minutes, difficulty
     }
 
     public init(from decoder: Decoder) throws {
@@ -138,6 +173,7 @@ public struct WorkerSpec: Codable, Equatable, Sendable {
         commands = try values.decodeIfPresent([String].self, forKey: .commands) ?? []
         audit = try values.decodeIfPresent(Bool.self, forKey: .audit)
         minutes = try values.decodeIfPresent(Int.self, forKey: .minutes)
+        difficulty = try values.decodeIfPresent(Difficulty.self, forKey: .difficulty)
     }
 
     static let mostCommands = 8

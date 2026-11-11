@@ -17,6 +17,12 @@ import Foundation
 ///     <root>/<id>/rating.json the orchestrator's verdict on the delivery
 ///     <root>/<id>/audit       the id of the worker auditing this delivery
 ///     <root>/<id>/tree        an editing worker's own worktree, when it got one
+///     <root>/<id>/paused      present when the worktree was taken away and
+///                             the branch kept for later
+///     <root>/<id>/retry       the id of the run that took over after the
+///                             provider failed
+///     <root>/<id>/redo        the id of the run that redid this delivery
+///     <root>/<id>/closed      present once the branch was merged or discarded
 ///
 /// There is no daemon. The process that spawns a worker is `vitra mcp`, which
 /// lives only as long as the session that started it, so nothing in memory can
@@ -82,9 +88,48 @@ public struct Orchestrator: Sendable {
 
     // MARK: - Spawning
 
+    /// How a spawn relates to the runs before it.
+    public struct SpawnLink: Sendable {
+        /// Vitra chose the worker: the spawn left the cli out.
+        public var picked = false
+        /// The run this one is the failover of, after its provider failed.
+        public var retryOf: String?
+        /// The run this one redoes.
+        public var redoOf: String?
+        /// The branch of an earlier delivery to go on from, for a redo.
+        public var continuing: Continuation?
+
+        public init(picked: Bool = false, retryOf: String? = nil, redoOf: String? = nil, continuing: Continuation? = nil) {
+            self.picked = picked
+            self.retryOf = retryOf
+            self.redoOf = redoOf
+            self.continuing = continuing
+        }
+    }
+
+    /// An earlier delivery's branch, for a redo to build on.
+    public struct Continuation: Sendable {
+        public let repository: String
+        public let branch: String
+        public let base: String
+        /// The worktree that still holds the branch, which the redo uses in
+        /// place; nil when it was taken away, and one is made from the branch.
+        public let tree: String?
+        /// The run that owns that worktree, whose setup lists carry over.
+        public let owner: String
+
+        public init(repository: String, branch: String, base: String, tree: String?, owner: String) {
+            self.repository = repository
+            self.branch = branch
+            self.base = base
+            self.tree = tree
+            self.owner = owner
+        }
+    }
+
     /// Starts a worker and returns its id without waiting for it.
     @discardableResult
-    public func spawn(_ spec: WorkerSpec) throws(OrchestratorError) -> String {
+    public func spawn(_ spec: WorkerSpec, link: SpawnLink = SpawnLink()) throws(OrchestratorError) -> String {
         try spec.validate()
         guard let executable = executables.paths[spec.cli] else { throw .executableNotFound(spec.cli) }
 
@@ -111,7 +156,7 @@ public struct Orchestrator: Sendable {
         // that two of them in one checkout cannot overwrite each other.
         let worktree: Worktree?
         do {
-            worktree = try makeWorktree(id: id, for: spec, run: directory)
+            worktree = try makeWorktree(id: id, for: spec, run: directory, continuing: link.continuing)
         } catch {
             try? FileManager.default.removeItem(at: directory)
             throw error
@@ -207,7 +252,10 @@ public struct Orchestrator: Sendable {
                 worktree: worktree?.tree,
                 branch: worktree?.branch,
                 baseCommit: worktree?.base,
-                deadline: started.addingTimeInterval(TimeInterval(spec.minutes ?? Self.defaultMinutes) * 60)
+                deadline: started.addingTimeInterval(TimeInterval(spec.minutes ?? Self.defaultMinutes) * 60),
+                picked: link.picked ? true : nil,
+                retryOf: link.retryOf,
+                redoOf: link.redoOf
             )
             try JSONEncoder().encode(record).write(to: directory.appendingPathComponent("run.json"), options: .atomic)
         } catch {
@@ -233,6 +281,12 @@ public struct Orchestrator: Sendable {
         /// Where the worker runs: the tree, or the same subfolder of the
         /// repository it was sent to.
         let directory: URL
+        /// Whether this spawn made the branch, and so may delete it when the
+        /// spawn fails. A redo's branch is an earlier delivery's, and stays.
+        var madeBranch = true
+        /// Whether this spawn made the worktree. A redo that goes on in its
+        /// predecessor's tree did not, and must not take it away.
+        var madeTree = true
     }
 
     /// Gives an editing worker a branch and a worktree of its own.
@@ -245,9 +299,13 @@ public struct Orchestrator: Sendable {
     private func makeWorktree(
         id: String,
         for spec: WorkerSpec,
-        run: URL
+        run: URL,
+        continuing: Continuation? = nil
     ) throws(OrchestratorError) -> Worktree? {
         guard spec.access == .edit else { return nil }
+        if let continuing, let existing = continuing.tree {
+            return reuseWorktree(existing, of: continuing, for: spec, run: run)
+        }
         let topLevel = (Git.output(["rev-parse", "--show-toplevel"], in: spec.directory) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !topLevel.isEmpty else { return nil }
@@ -259,16 +317,23 @@ public struct Orchestrator: Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         // The base is read before the branch exists: the branch is made from
-        // it, and the report measures the worker's work against it.
+        // it, and the report measures the worker's work against it. A redo
+        // whose worktree was taken away goes on from its branch instead, and
+        // keeps the base the delivery was measured against.
         let head = Git.run(["rev-parse", "HEAD"], in: topLevel)
         guard head.succeeded else {
             throw .spawnFailed(head.output.trimmingCharacters(in: .whitespacesAndNewlines))
         }
-        let base = head.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = continuing?.base ?? head.output.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let tree = run.appendingPathComponent("tree")
-        let branch = "vitra/\(id)"
-        let added = Git.run(["worktree", "add", "-b", branch, tree.path, "HEAD"], in: topLevel)
+        let branch = continuing?.branch ?? "vitra/\(id)"
+        // A tree that was deleted from disk is still registered, and git
+        // would refuse its branch as checked out there.
+        if continuing != nil { _ = Git.run(["worktree", "prune"], in: topLevel) }
+        let added = continuing == nil
+            ? Git.run(["worktree", "add", "-b", branch, tree.path, "HEAD"], in: topLevel)
+            : Git.run(["worktree", "add", tree.path, branch], in: topLevel)
         guard added.succeeded else {
             throw .spawnFailed(added.output.trimmingCharacters(in: .whitespacesAndNewlines))
         }
@@ -299,7 +364,31 @@ public struct Orchestrator: Sendable {
         // the checkout has no counterpart: make it, rather than sending the
         // worker to a path that is not there.
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return Worktree(top: topLevel, tree: tree.path, branch: branch, base: base, directory: directory)
+        return Worktree(
+            top: topLevel, tree: tree.path, branch: branch, base: base, directory: directory,
+            madeBranch: continuing == nil
+        )
+    }
+
+    /// A redo that goes on in the worktree of the delivery it redoes: the same
+    /// tree and branch, with the setup lists of the run that made the tree, so
+    /// what was linked in stays out of this run's commits too.
+    private func reuseWorktree(_ tree: String, of continuing: Continuation, for spec: WorkerSpec, run: URL) -> Worktree {
+        let owner = root.appendingPathComponent(continuing.owner)
+        for name in ["worktree-excludes", "worktree-setup"] {
+            try? FileManager.default.copyItem(at: owner.appendingPathComponent(name), to: run.appendingPathComponent(name))
+        }
+        // The shell reads the excludes list whether or not there was one.
+        if !FileManager.default.fileExists(atPath: run.appendingPathComponent("worktree-excludes").path) {
+            try? Data().write(to: run.appendingPathComponent("worktree-excludes"))
+        }
+        let prefix = (Git.output(["rev-parse", "--show-prefix"], in: spec.directory) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let directory = prefix.isEmpty ? URL(fileURLWithPath: tree) : URL(fileURLWithPath: tree).appendingPathComponent(prefix)
+        return Worktree(
+            top: continuing.repository, tree: tree, branch: continuing.branch, base: continuing.base,
+            directory: directory, madeBranch: false, madeTree: false
+        )
     }
 
     /// The top of the main working tree: the first `worktree` entry git lists,
@@ -322,8 +411,8 @@ public struct Orchestrator: Sendable {
     /// the branch. `git worktree prune` forgets the directory but leaves the
     /// branch in the repository for ever, so both are removed here, by name.
     private func discard(_ worktree: Worktree) {
-        _ = Git.run(["worktree", "remove", "--force", worktree.tree], in: worktree.top)
-        _ = Git.run(["branch", "-D", worktree.branch], in: worktree.top)
+        if worktree.madeTree { _ = Git.run(["worktree", "remove", "--force", worktree.tree], in: worktree.top) }
+        if worktree.madeBranch { _ = Git.run(["branch", "-D", worktree.branch], in: worktree.top) }
     }
 
     /// The prompt the worker is given: the project's notes first, when there
@@ -655,6 +744,7 @@ public struct Orchestrator: Sendable {
         let commitError: String?
         let worktreeSkipped: [String]
         var timedOutAfter: Int?
+        var providerFailure: ProviderFailure?
 
         if case let .finished(exitCode) = state {
             if exitCode == Self.timeoutExitCode { timedOutAfter = timedOutMinutes(id) }
@@ -663,6 +753,7 @@ public struct Orchestrator: Sendable {
             errorTail = settled.errorTail
             commitError = settled.commitError
             worktreeSkipped = settled.worktreeSkipped
+            providerFailure = settled.providerFailure
             output = fullText && settled.isTextCut
                 ? parsedOutput(id, record, exitCode: exitCode, errorTail: settled.errorTail)
                 : settled.output
@@ -691,7 +782,12 @@ public struct Orchestrator: Sendable {
             rating: rating(id),
             worktreeSkipped: worktreeSkipped,
             silentFor: state == .running ? silence(id, since: record.started) : nil,
-            timedOutAfter: timedOutAfter
+            timedOutAfter: timedOutAfter,
+            providerFailure: providerFailure,
+            wasPicked: record.picked == true,
+            retryOf: record.retryOf,
+            redoOf: record.redoOf,
+            isPaused: FileManager.default.fileExists(atPath: file(id, "paused").path)
         )
     }
 

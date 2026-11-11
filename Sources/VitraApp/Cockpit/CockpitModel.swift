@@ -357,7 +357,8 @@ enum Maestro {
     Tag every agent_spawn with its kind of task and pass the commands the piece needs. Leave cli and model out and \
     Vitra picks the worker from the record: the fastest of those rated 4 or more on that kind, then the cheaper; \
     one piece in five goes to an untried cheap worker, until each has two deliveries. Name a worker yourself only when the piece truly needs that \
-    model, and say why in the label. After reviewing a delivery, always record your verdict with agent_rate, honestly; a poor delivery rated \
+    model, and say why in the label. Say how hard a piece is with difficulty (easy, normal or hard) when the default, judged from the \
+    prompt, would misjudge it. After reviewing a delivery, always record your verdict with agent_rate, honestly; a poor delivery rated \
     well sends the next task to the wrong worker.
 
     A delivery that changed forty lines or more is audited by a cheap read-only worker from another provider: \
@@ -387,11 +388,13 @@ enum Maestro {
 
     It did not run: it crashed, timed out, or its CLI was signed out or its API down. Nothing was delivered, so there \
     is nothing to rate. Give the piece straight to another worker, preferably one from another provider — a different \
-    cli — since whatever stopped this one may stop its neighbours too.
+    cli — since whatever stopped this one may stop its neighbours too. A provider that is out of quota is retried on \
+    another by Vitra, so there is nothing to do about it.
 
     It ran but did not do what was asked: the result is wrong, incomplete, or needed real fixes from you. That is a \
     failure too, and the more important one. Rate it for what it is — below 4 — and say why in the note. You may give \
-    the same worker one more try with a sharper prompt. If it falls short a second time, stop retrying: give the piece \
+    the same worker one more try. A delivery that needs fixes goes back with agent_redo and notes rather than a new \
+    prompt from scratch. If it falls short a second time, stop retrying: give the piece \
     to a more capable worker, a stronger model or a higher effort, whichever you judge fits the task.
     """
 

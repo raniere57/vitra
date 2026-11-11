@@ -124,14 +124,17 @@ private let answers = #"cat >/dev/null; echo '{"result":"the answer","is_error":
 
     let text = try await fixture.call("agent_spawn", ["prompt": "go", "directory": .string(fixture.root.path), "kind": "review"])
     #expect(text.contains("claude haiku (low), read access"))
-    #expect(text.contains("picked claude haiku (low): learning, 0 of 2 runs on review."))
+    // A short read of nothing in particular is an easy piece, and the pick says so.
+    #expect(text.contains("picked claude haiku (low): learning, 0 of 2 runs on review, easy piece."))
     let id = String(text.dropFirst("Started agent ".count).prefix(8))
     #expect(try fixture.orchestrator.status(id).spec.effort == "low")
+    #expect(try fixture.orchestrator.status(id).spec.difficulty == .easy)
     _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
 
-    // Commands are passed along to the worker it picks.
+    // Commands are passed along to the worker it picks; a normal piece says nothing of its difficulty.
     let withCommands = try await fixture.call("agent_spawn", [
         "prompt": "go", "directory": .string(fixture.root.path), "kind": "review", "commands": ["bun test"],
+        "difficulty": "normal",
     ])
     #expect(withCommands.contains("picked claude haiku (low): learning, 1 of 2 runs on review."))
 
@@ -853,7 +856,8 @@ echo '{"result":"done","is_error":false}'
     }
     #expect(try await router.run(tool: "browser_open", arguments: [:], pane: nil) == "panel:browser_open")
     #expect(AgentTools.names == [
-        "agent_spawn", "agent_wait", "agent_list", "agent_cancel", "agent_merge", "agent_models", "agent_rate", "agent_scores",
+        "agent_spawn", "agent_redo", "agent_wait", "agent_list", "agent_cancel", "agent_merge", "agent_models",
+        "agent_rate", "agent_scores",
     ])
 }
 
@@ -1174,4 +1178,355 @@ private func release(_ descriptor: Int32) {
 
     #expect(report.contains("\n  from-worker.txt | +1 -0\nmerge: agent_merge \(id)"))
     #expect(!report.contains(" more"))
+}
+
+// MARK: - Provider failures and failover
+
+/// What an opencode prints, on stderr, when its plan is used up.
+private let outOfQuota = listsAFreeModel + #"cat >/dev/null; echo 'Free usage limit reached' >&2; exit 1"#
+
+private func startedID(_ text: String) -> String {
+    String(text.dropFirst("Started agent ".count).prefix(8))
+}
+
+/// The id of the run that took over, from a "retried as [id]" report line.
+private func successorID(in line: String) -> String {
+    String(line.components(separatedBy: "retried as [")[1].prefix(8))
+}
+
+@Test func aRunThatDidNotRunIsReportedAsSuchNotAsFailedWhenTheMaestroNamedTheWorker() async throws {
+    let fixture = try Fixture(claude: answers, opencode: outOfQuota)
+    defer { fixture.cleanUp() }
+
+    let id = try await fixture.spawn(["cli": "opencode", "model": "opencode/glm-5.3-flash-free", "effort": .null])
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    #expect(report.hasPrefix("[\(id)] DID NOT RUN (quota): Free usage limit reached · opencode opencode/glm-5.3-flash-free · "))
+    #expect(!report.contains("FAILED"))
+    // Named by the maestro: reported, not failed over to anything.
+    #expect(!report.contains("retried"))
+    #expect(fixture.orchestrator.recent(limit: 10).count == 1)
+    #expect(try await fixture.call("agent_list").contains("[\(id)] DID NOT RUN (quota)"))
+
+    // And it counts for nothing: no run, no failure, on the scoreboard.
+    let scores = try await fixture.call("agent_scores")
+    #expect(!scores.contains("opencode opencode/glm-5.3-flash-free —"))
+}
+
+@Test func aPickedRunWhoseProviderIsOutIsRetriedOnceOnAnotherCLIWithinTheSameWait() async throws {
+    let fixture = try Fixture(claude: answers, opencode: outOfQuota)
+    defer { fixture.cleanUp() }
+
+    // The free opencode is the cheapest, so Vitra picks it, and it is out.
+    let text = try await fixture.call("agent_spawn", [
+        "prompt": "map the code", "directory": .string(fixture.root.path), "kind": "explore",
+        "label": "probe", "difficulty": "normal", "commands": [], "minutes": 7,
+    ])
+    #expect(text.contains("opencode opencode/glm-5.3-flash-free"))
+    let id = startedID(text)
+
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 20])
+    let lines = report.split(separator: "\n").map(String.init)
+    #expect(lines[0].hasPrefix("[\(id)] did not run (quota) — retried as ["))
+    #expect(lines[0].hasSuffix("] on claude haiku (low)"))
+    let successor = successorID(in: lines[0])
+    // The wait went on with the successor, and came back with its answer.
+    #expect(lines[1].hasPrefix("[\(successor)] finished · claude haiku (low) · "))
+    #expect(lines[1].hasSuffix(" · retry of \(id) · probe"))
+    #expect(lines.last == "the answer")
+
+    // The same piece: prompt, kind, label, directory, time limit.
+    let retry = try fixture.orchestrator.status(successor)
+    let dead = try fixture.orchestrator.status(id)
+    #expect(retry.retryOf == id)
+    #expect(dead.providerFailure == .quota("Free usage limit reached"))
+    #expect(retry.spec.prompt == dead.spec.prompt)
+    #expect(retry.spec.kind == .explore)
+    #expect(retry.spec.label == "probe")
+    #expect(retry.spec.directory == dead.spec.directory)
+    #expect(retry.spec.minutes == 7)
+    #expect(retry.spec.access == dead.spec.access)
+
+    // Once: waiting for the dead run again reports its successor, and starts nothing.
+    let again = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    #expect(again.hasPrefix("[\(id)] did not run (quota) — retried as [\(successor)] on claude haiku (low)\n[\(successor)] finished"))
+    #expect(fixture.orchestrator.recent(limit: 10).count == 2)
+}
+
+@Test func aFailoverThatFailsTheSameWayIsNotFailedOverAgain() async throws {
+    let both = #"cat >/dev/null; echo 'Claude AI usage limit reached|1731' >&2; exit 1"#
+    let fixture = try Fixture(claude: both, opencode: outOfQuota)
+    defer { fixture.cleanUp() }
+
+    let started = try await fixture.call("agent_spawn", ["prompt": "go", "directory": .string(fixture.root.path), "kind": "explore"])
+    let id = startedID(started)
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 20])
+    let lines = report.split(separator: "\n").map(String.init)
+    let successor = successorID(in: lines[0])
+    // The retry ran out too: reported as such, and that is the end of it.
+    #expect(lines[1].hasPrefix("[\(successor)] DID NOT RUN (quota): Claude AI usage limit reached|1731 · claude haiku (low)"))
+    #expect(fixture.orchestrator.recent(limit: 10).count == 2)
+
+    // With no worker of another provider left, the dead run says so.
+    let alone = try Fixture(claude: both)
+    defer { alone.cleanUp() }
+    let lonely = startedID(try await alone.call("agent_spawn", ["prompt": "go", "directory": .string(alone.root.path)]))
+    let said = try await alone.call("agent_wait", ["ids": [.string(lonely)], "timeout_seconds": 10])
+    #expect(said.hasPrefix("[\(lonely)] did not run (quota) — no worker from another provider can take it"))
+    #expect(alone.orchestrator.recent(limit: 10).count == 1)
+}
+
+@Test func aFailoverOfAnEditingRunGetsAFreshWorktreeAndDiscardsTheDeadOnes() async throws {
+    let fixture = try Fixture(claude: leavesAFile, opencode: outOfQuota)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let text = try await fixture.call("agent_spawn", [
+        "prompt": "change it", "directory": .string(repository.path), "access": "edit", "kind": "implement",
+        "audit": false, "difficulty": "normal",
+    ])
+    let id = startedID(text)
+    #expect(text.contains("opencode opencode/glm-5.3-flash-free, edit access"))
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 20])
+    let successor = successorID(in: try #require(report.split(separator: "\n").first.map(String.init)))
+
+    // The dead run's empty worktree and branch are gone; the successor has its own.
+    #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("runs/\(id)/tree").path))
+    #expect(try git(["branch", "--list", "vitra/\(id)"], in: repository).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("runs/\(successor)/tree").path))
+    #expect(try fixture.orchestrator.status(successor).branch == "vitra/\(successor)")
+    #expect(report.contains("changes on branch vitra/\(successor) "))
+    let merged = try await fixture.call("agent_merge", ["id": .string(successor)])
+    #expect(merged.contains("Merged vitra/\(successor)"))
+}
+
+// MARK: - Difficulty
+
+@Test func aHardPieceIsGivenToAStrongWorkerAndTheSpecKeepsTheDifficulty() async throws {
+    let fixture = try Fixture(claude: answers)
+    defer { fixture.cleanUp() }
+
+    let text = try await fixture.call("agent_spawn", [
+        "prompt": "go", "directory": .string(fixture.root.path), "kind": "review", "difficulty": "hard",
+    ])
+    #expect(text.contains("picked claude haiku (high): cheapest that may run; none is rated 4 or more on review, hard piece."))
+    #expect(try fixture.orchestrator.status(startedID(text)).spec.difficulty == .hard)
+
+    // Left out, it is judged from the prompt and stored all the same.
+    let many = (1...6).map { "Sources/Part/File\($0).swift" }.joined(separator: " ")
+    let judged = try await fixture.call("agent_spawn", ["prompt": .string("read " + many), "directory": .string(fixture.root.path), "kind": "explore"])
+    #expect(try fixture.orchestrator.status(startedID(judged)).spec.difficulty == .hard)
+
+    await #expect(throws: ToolError("difficulty must be easy, normal or hard, not 'brutal'")) {
+        try await fixture.call("agent_spawn", ["prompt": "go", "directory": .string(fixture.root.path), "difficulty": "brutal"])
+    }
+}
+
+// MARK: - Redo
+
+/// A worker that appends a line to a file, so a second go on the same tree
+/// shows both, and keeps the prompt it was given.
+private let appendsALine = #"""
+cat > got-prompt.txt
+echo run >> from-worker.txt
+echo '{"result":"done","is_error":false}'
+"""#
+private let opencodeAppends = listsAFreeModel + #"""
+cat > got-prompt.txt
+echo run >> from-worker.txt
+echo '{"type":"text","part":{"text":"redone"}}'
+"""#
+
+@Test func aRedoGoesOnInTheSameWorktreeAndBranchAndIsAuditedAgain() async throws {
+    let fixture = try Fixture(claude: appendsALine, opencode: audits)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn(["access": "edit", "audit": true, "directory": .string(repository.path), "label": "add logout"])
+    let first = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let firstAudit = try String(contentsOf: fixture.root.appendingPathComponent("runs/\(id)/audit"), encoding: .utf8)
+    #expect(first.contains("gate: audit \(firstAudit) by opencode"))
+    _ = try await fixture.orchestrator.wait(ids: [firstAudit], timeout: 10)
+
+    let started = try await fixture.call("agent_redo", ["id": .string(id), "notes": "the null case crashes"])
+    let redoID = startedID(started)
+    #expect(started.contains("redo of \(id), in the same worktree and branch (vitra/\(id))"))
+    #expect(started.contains("the same worker goes again"))
+
+    // The same tree and branch, the original prompt and what it got wrong.
+    let redo = try fixture.orchestrator.status(redoID)
+    let original = try fixture.orchestrator.status(id)
+    #expect(redo.redoOf == id)
+    #expect(redo.worktree == original.worktree)
+    #expect(redo.branch == "vitra/\(id)")
+    #expect(redo.baseCommit == original.baseCommit)
+    #expect(redo.spec.prompt == "go\n\nWhat the previous attempt got wrong, fix exactly this:\nthe null case crashes\n\n"
+        + "The previous attempt's changes are already in this directory, on branch vitra/\(id): build on them.")
+    #expect(redo.spec.label == "add logout (redo)")
+    // The old audit does not stand for the redo.
+    #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("runs/\(id)/audit").path))
+
+    // The redo's own wait audits the whole change again, once, and says it is a redo.
+    let report = try await fixture.call("agent_wait", ["ids": [.string(redoID)], "timeout_seconds": 10])
+    #expect(report.contains(" · redo of \(id) · add logout (redo)\n"))
+    let secondAudit = try String(contentsOf: fixture.root.appendingPathComponent("runs/\(redoID)/audit"), encoding: .utf8)
+    #expect(secondAudit != firstAudit)
+    #expect(report.contains("gate: audit \(secondAudit) by opencode"))
+    #expect(reviewRuns(in: fixture.orchestrator).count == 2)
+    _ = try await fixture.orchestrator.wait(ids: [secondAudit], timeout: 10)
+    // The original, waited for again, points at its redo and starts no audit.
+    let old = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+    #expect(old.hasSuffix("gate: agent \(redoID) redid this delivery — audit and merge that one."))
+    #expect(reviewRuns(in: fixture.orchestrator).count == 2)
+
+    // Merging either id merges the shared branch once and closes both.
+    let merged = try await fixture.call("agent_merge", ["id": .string(id)])
+    #expect(merged.contains("Merged vitra/\(id)"))
+    #expect(merged.contains("Also closed, on the same branch: \(redoID)."))
+    #expect(try String(contentsOf: repository.appendingPathComponent("from-worker.txt"), encoding: .utf8) == "run\nrun\n")
+    #expect(try git(["branch", "--list", "vitra/*"], in: repository).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    let second = try await fixture.call("agent_merge", ["id": .string(redoID)])
+    #expect(second == "agent \(redoID): branch vitra/\(id) was already merged through agent \(id); nothing to do.")
+}
+
+@Test func aRedoGoesToAnotherWorkerWhenTheDeliveryWasRatedBelowThree() async throws {
+    let fixture = try Fixture(claude: appendsALine, opencode: opencodeAppends)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn(["access": "edit", "audit": false, "directory": .string(repository.path)])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+
+    // Rated 3, usable after fixes: the same worker goes again.
+    _ = try await fixture.call("agent_rate", ["id": .string(id), "score": 3])
+    let same = try await fixture.call("agent_redo", ["id": .string(id), "notes": "fix it"])
+    #expect(same.contains("claude haiku (low), edit access, redo of \(id)"))
+    #expect(same.contains("the same worker goes again, rated 3/5"))
+    _ = try await fixture.orchestrator.wait(ids: [startedID(same)], timeout: 10)
+
+    // Rated 2: not that worker again; the next pick, here the free opencode.
+    _ = try await fixture.call("agent_rate", ["id": .string(id), "score": 2])
+    let other = try await fixture.call("agent_redo", ["id": .string(id), "notes": "fix it properly"])
+    let redo = try fixture.orchestrator.status(startedID(other))
+    #expect(redo.spec.cli == .opencode)
+    #expect(redo.spec.model == "opencode/glm-5.3-flash-free")
+    #expect(other.contains("picked: learning"))
+    #expect(other.contains("claude haiku (low) delivered a 2/5"))
+    // Still on the same branch: it builds on the delivery whoever does it.
+    #expect(redo.branch == "vitra/\(id)")
+
+    // A worker can be named, and the same notes need a delivery to go back to.
+    _ = try await fixture.orchestrator.wait(ids: [redo.id], timeout: 10)
+    let named = try await fixture.call("agent_redo", [
+        "id": .string(id), "notes": "again", "cli": "claude", "model": "sonnet", "effort": "high",
+    ])
+    #expect(named.contains("claude sonnet (high), edit access, redo of \(id)"))
+    await #expect(throws: ToolError("notes are empty: say what the previous attempt got wrong")) {
+        try await fixture.call("agent_redo", ["id": .string(id), "notes": "  "])
+    }
+}
+
+@Test func aRedoIsRefusedWhileTheOriginalOrItsAuditIsStillRunning() async throws {
+    let slow = #"cat >/dev/null; sleep 30"#
+    let running = try Fixture(claude: slow)
+    defer { running.cleanUp() }
+    let live = try await running.spawn()
+    await #expect(throws: ToolError("agent \(live) is still running: wait for it to finish before redoing it")) {
+        try await running.call("agent_redo", ["id": .string(live), "notes": "fix it"])
+    }
+    _ = try await running.call("agent_cancel", ["id": .string(live)])
+
+    let fixture = try Fixture(claude: leavesAFile, opencode: keepsReading)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+    let id = try await fixture.spawn(["access": "edit", "audit": true, "directory": .string(repository.path)])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let audit = try String(contentsOf: fixture.root.appendingPathComponent("runs/\(id)/audit"), encoding: .utf8)
+    await #expect(throws: ToolError("the audit \(audit) is still reading this worktree; agent_wait on it first")) {
+        try await fixture.call("agent_redo", ["id": .string(id), "notes": "fix it"])
+    }
+    _ = try await fixture.call("agent_cancel", ["id": .string(audit)])
+}
+
+@Test func aRedoOfAReadRunIsAFreshRunWithTheNotes() async throws {
+    let fixture = try Fixture(claude: appendsALine)
+    defer { fixture.cleanUp() }
+    let id = try await fixture.spawn()
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let started = try await fixture.call("agent_redo", ["id": .string(id), "notes": "look at the tests too"])
+    #expect(started.contains("read access, redo of \(id), as a new read-only run."))
+    let redo = try fixture.orchestrator.status(startedID(started))
+    #expect(redo.spec.prompt == "go\n\nWhat the previous attempt got wrong, fix exactly this:\nlook at the tests too")
+    #expect(redo.worktree == nil)
+}
+
+// MARK: - Pause
+
+@Test func aPausedDeliveryKeepsItsBranchAndLosesItsWorktreeAndMergesLater() async throws {
+    let fixture = try Fixture(claude: leavesAFile)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn(["access": "edit", "audit": false, "directory": .string(repository.path)])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    let tree = fixture.root.appendingPathComponent("runs/\(id)/tree")
+    // Something the worker left uncommitted, and something that is not allowed with discard.
+    try "half done\n".write(to: tree.appendingPathComponent("extra.txt"), atomically: true, encoding: .utf8)
+    await #expect(throws: ToolError("pause and discard exclude each other: pause keeps the branch, discard drops it")) {
+        try await fixture.call("agent_merge", ["id": .string(id), "pause": true, "discard": true])
+    }
+
+    let paused = try await fixture.call("agent_merge", ["id": .string(id), "pause": true])
+    #expect(paused.hasPrefix("Paused agent \(id): branch vitra/\(id) is kept and worktree \(tree.path) is removed."))
+    #expect(paused.contains("Committed what was uncommitted as \"wip: paused\"."))
+    #expect(!FileManager.default.fileExists(atPath: tree.path))
+    #expect(try git(["log", "-1", "--format=%s", "vitra/\(id)"], in: repository).trimmingCharacters(in: .whitespacesAndNewlines) == "wip: paused")
+    #expect(try git(["show", "vitra/\(id):extra.txt"], in: repository) == "half done\n")
+
+    // agent_list and agent_wait say so.
+    #expect(try await fixture.call("agent_list").hasPrefix("[\(id)] paused · "))
+    let report = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 0])
+    #expect(report.hasPrefix("[\(id)] paused · "))
+    #expect(report.contains("paused: worktree removed, branch vitra/\(id) kept — agent_redo \(id) to continue it, or agent_merge \(id) to merge it"))
+    // Pausing again says it already is.
+    #expect(try await fixture.call("agent_merge", ["id": .string(id), "pause": true]).hasPrefix("Agent \(id) is already paused"))
+
+    // Later it merges, straight from the branch.
+    let merged = try await fixture.call("agent_merge", ["id": .string(id)])
+    #expect(merged.contains("Merged vitra/\(id)"))
+    #expect(!merged.contains("Removed worktree"))
+    #expect(merged.contains("Deleted branch vitra/\(id)."))
+    #expect(try String(contentsOf: repository.appendingPathComponent("extra.txt"), encoding: .utf8) == "half done\n")
+    #expect(try String(contentsOf: repository.appendingPathComponent("from-worker.txt"), encoding: .utf8) == "changed\n")
+    #expect(try git(["branch", "--list", "vitra/\(id)"], in: repository).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+}
+
+@Test func aPausedDeliveryIsContinuedByARedoThatRecreatesTheWorktreeFromTheBranch() async throws {
+    let fixture = try Fixture(claude: appendsALine)
+    defer { fixture.cleanUp() }
+    let repository = fixture.root.appendingPathComponent("repo")
+    try makeRepository(at: repository)
+
+    let id = try await fixture.spawn(["access": "edit", "audit": false, "directory": .string(repository.path)])
+    _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
+    _ = try await fixture.call("agent_merge", ["id": .string(id), "pause": true])
+
+    let started = try await fixture.call("agent_redo", ["id": .string(id), "notes": "finish it"])
+    let redoID = startedID(started)
+    #expect(started.contains("in a worktree recreated from branch vitra/\(id)"))
+    let redo = try fixture.orchestrator.status(redoID)
+    #expect(redo.branch == "vitra/\(id)")
+    #expect(redo.worktree == fixture.root.appendingPathComponent("runs/\(redoID)/tree").path)
+    _ = try await fixture.orchestrator.wait(ids: [redoID], timeout: 10)
+    #expect(try String(contentsOf: fixture.root.appendingPathComponent("runs/\(redoID)/tree/from-worker.txt"), encoding: .utf8) == "run\nrun\n")
+    // The delivery is no longer paused, and the redo merges the branch once.
+    #expect(try await fixture.call("agent_list").contains("[\(id)] finished"))
+    let merged = try await fixture.call("agent_merge", ["id": .string(redoID)])
+    #expect(merged.contains("Merged vitra/\(id)"))
+    #expect(merged.contains("Removed worktree \(fixture.root.appendingPathComponent("runs/\(redoID)/tree").path)."))
+    #expect(try String(contentsOf: repository.appendingPathComponent("from-worker.txt"), encoding: .utf8) == "run\nrun\n")
 }
