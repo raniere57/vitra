@@ -2,6 +2,7 @@ import AppKit
 import Metal
 import VitraBridge
 import VitraCore
+import VitraOrchestrator
 
 /// The cockpit: Vitra as an orchestration tool, one tab per project.
 ///
@@ -57,6 +58,12 @@ final class CockpitAppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.showWindow(nil)
         feed.start()
+        // Old runs are compacted and archived at most once a day, off the
+        // main thread: it reads every run and may ask git about branches.
+        // Not for an automated run, which must leave the user's runs alone.
+        if environment["VITRA_SELF_SHOT"] == nil, environment["VITRA_COCKPIT_STORE"] == nil {
+            DispatchQueue.global(qos: .utility).async { Orchestrator(executables: Executables(paths: [:])).sweepIfDue() }
+        }
         startBridge(host: controller)
         SelfCapture.scheduleIfRequested()
     }

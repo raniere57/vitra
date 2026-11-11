@@ -86,6 +86,76 @@ final class RunCache: @unchecked Sendable {
     private var records: [String: (modified: Date, record: RunRecord?)] = [:]
     private var summaries: [String: RunSummary] = [:]
     private var ratings: [String: (modified: Date?, rating: Rating?)] = [:]
+    /// The run ids in the root, as of the root's modification time: a run
+    /// added or taken away moves it.
+    private var listing: (stamp: RunIndex.Stamp, ids: [String])?
+    /// The settled runs, shared with every process through `<root>/.index`.
+    let index: RunIndex
+    private let root: URL
+
+    init(root: URL) {
+        self.root = root
+        index = RunIndex(root: root)
+    }
+
+    /// One cache per runs root in a process, however many `Orchestrator`s
+    /// are made for it: the cockpit makes one per look in places, and each
+    /// would otherwise read the history cold.
+    static func shared(for root: URL) -> RunCache {
+        let key = root.standardizedFileURL.path
+        return sharedLock.withLock {
+            if let cache = shared[key] { return cache }
+            let cache = RunCache(root: root)
+            shared[key] = cache
+            return cache
+        }
+    }
+
+    /// Drops what this process knows of `root`, so the next look reads it
+    /// as a new process would: for tests and the benchmark.
+    static func forget(_ root: URL) {
+        _ = sharedLock.withLock { shared.removeValue(forKey: root.standardizedFileURL.path) }
+    }
+
+    private static let sharedLock = NSLock()
+    nonisolated(unsafe) private static var shared: [String: RunCache] = [:]
+
+    /// The runs newest first by start, sorted again only when the root's
+    /// listing changed. A run's start never changes, but a run directory is
+    /// made before its record is written: an id whose `started` gave nil is
+    /// asked again on every call until it answers.
+    func newestFirst(started: (String) -> Date?) -> [(id: String, started: Date)] {
+        guard let stamp = RunIndex.Stamp(of: root.path) else { return [] }
+        var known = lock.withLock { ordering?.stamp == stamp ? ordering : nil }
+        if known == nil {
+            var dated: [(id: String, started: Date)] = []
+            var missing: [String] = []
+            for id in runIDs() {
+                if let date = started(id) { dated.append((id, date)) } else { missing.append(id) }
+            }
+            known = (stamp, dated.sorted { $0.started > $1.started }, missing)
+        } else if let current = known, !current.missing.isEmpty {
+            let found = current.missing.compactMap { id in started(id).map { (id: id, started: $0) } }
+            if !found.isEmpty {
+                let missing = current.missing.filter { id in !found.contains { $0.id == id } }
+                known = (stamp, (current.dated + found).sorted { $0.started > $1.started }, missing)
+            }
+        }
+        guard let known else { return [] }
+        lock.withLock { ordering = known }
+        return known.dated
+    }
+
+    private var ordering: (stamp: RunIndex.Stamp, dated: [(id: String, started: Date)], missing: [String])?
+
+    /// The ids of the runs in the root, listed again only when it changed.
+    func runIDs() -> [String] {
+        guard let stamp = RunIndex.Stamp(of: root.path) else { return [] }
+        if let listing = lock.withLock({ listing }), listing.stamp == stamp { return listing.ids }
+        let ids = ((try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []).filter(Orchestrator.isRunID)
+        lock.withLock { listing = (stamp, ids) }
+        return ids
+    }
 
     func record(_ id: String, modified: Date) -> RunRecord?? {
         lock.withLock {

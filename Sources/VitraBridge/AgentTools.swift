@@ -160,6 +160,14 @@ public enum AgentTools {
             ],
             required: []
         ),
+        MCPTools.tool(
+            "agent_cleanup",
+            "Tidy the history of runs: compact runs older than 30 days (their stdout, stderr and prompt go; summary, record and rating stay, and agent_wait still prints the answer from the summary) and move runs older than 180 days that are outside the newest 2000 to ~/.vitra/runs-archive. Never touches a run that is running, paused, has a worktree or live branch, is being audited, or started in the last 30 days. Vitra does this by itself once a day; this reports what it would do, or does it now.",
+            properties: [
+                "dry_run": ["type": "boolean", "description": "Only report what would be compacted and archived and the space it frees. Defaults to true."],
+            ],
+            required: []
+        ),
     ]
 
     public static let names: [String] = all.compactMap { $0["name"]?.stringValue }
@@ -313,6 +321,11 @@ public struct AgentToolExecutor: ToolExecutor {
             case "agent_models":
                 return try await Self.offThePool { [executables] in
                     ModelCatalog.summary(ModelCatalog.listing(executables))
+                }
+            case "agent_cleanup":
+                let dryRun = arguments["dry_run"]?.boolValue ?? true
+                return try await Self.offThePool { [orchestrator] in
+                    orchestrator.sweep(dryRun: dryRun).text(archive: orchestrator.archiveRoot)
                 }
             default:
                 throw ToolError("unknown tool: \(tool)")
