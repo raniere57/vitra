@@ -97,6 +97,47 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(WorkerBoard.row(haiku, now: now, timeZone: zone).meta == "haiku (low) · 10:46 · 38s · só leitura")
 }
 
+@Test func aWorkerRowSaysWhoChoseItAndWhy() {
+    func meta(_ pick: PickReason?, picked: Bool = true, retryOf: String? = nil) -> String {
+        var worker = run()
+        worker.wasPicked = picked
+        worker.pick = pick
+        worker.retryOf = retryOf
+        return WorkerBoard.row(worker, now: now, timeZone: zone).meta
+    }
+    #expect(meta(PickReason(code: .lineup, text: "1st in your lineup for hard pieces", position: 1))
+        == "deepseek-v4.1-flash-free · Vitra · 1º da sua escalação · 10:46 · 38s · só leitura")
+    #expect(meta(PickReason(code: .lineup, text: "3rd", position: 3)).contains(" · Vitra · 3º da sua escalação · "))
+    #expect(meta(PickReason(code: .learning, text: "learning turn")).contains(" · Vitra · vez de teste · "))
+    #expect(meta(PickReason(code: .lineup, text: "2nd", position: 2, passed: "opus", cause: .quota))
+        .contains(" · Vitra · opus sem cota · "))
+    #expect(meta(PickReason(code: .lineup, text: "2nd", position: 2, passed: "opus", cause: .slow)).contains(" · Vitra · opus lento · "))
+    #expect(meta(PickReason(code: .record, text: "x")).contains(" · Vitra · fora da escalação, pelo histórico · "))
+    #expect(meta(PickReason(code: .learning, text: "x"), retryOf: "aaaaaaaa").contains(" · Vitra, após falha · vez de teste · "))
+    // Picked before reasons were kept, and named by hand.
+    #expect(meta(nil) == "deepseek-v4.1-flash-free · Vitra · 10:46 · 38s · só leitura")
+    #expect(meta(nil, picked: false) == "deepseek-v4.1-flash-free · 10:46 · 38s · só leitura")
+}
+
+@Test func aPickReasonSurvivesInTheRunRecord() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-pick-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fake = root.appendingPathComponent("fake-claude")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    try "#!/bin/sh\ncat >/dev/null\n".write(to: fake, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+    let executables = Executables(paths: [.claude: fake.path])
+    let reason = PickReason(code: .lineup, text: "2nd in your lineup: opus (low) is out of quota", position: 2, passed: "opus", cause: .quota)
+    let id = try Orchestrator(root: root.appendingPathComponent("runs"), executables: executables).spawn(
+        WorkerSpec(cli: .claude, model: "haiku", prompt: "go", directory: root.path, effort: "low"),
+        link: Orchestrator.SpawnLink(pick: reason)
+    )
+    // A fresh orchestrator, as after a restart, reads it back.
+    let read = try Orchestrator(root: root.appendingPathComponent("runs"), executables: executables).status(id)
+    #expect(read.pick == reason)
+    #expect(read.wasPicked)
+}
+
 @Test func aWorkersStartShowsTheClockWhenItStartedToday() {
     #expect(WorkerBoard.startedText(at(2026, 11, 10, 10, 42), now: at(2026, 11, 10, 15, 0), timeZone: zone) == "10:42")
 }
