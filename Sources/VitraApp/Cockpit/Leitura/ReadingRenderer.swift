@@ -107,8 +107,13 @@ enum ReadingRenderer {
             var row = wants[table] ?? Array(repeating: 4, count: columns)
             let text = string.substring(with: span.range)
             let longestWord = CGFloat(text.split(whereSeparator: \.isWhitespace).map(\.count).max() ?? 0)
-            // Figures ("4m 31s", "R$ 1,20") never break across lines.
-            let floor = alignment == .trailing ? CGFloat(text.count) + 1 : longestWord + 2
+            // Figures ("4m 31s", "R$ 1,20") and short cells ("Nota") never
+            // break across lines. The shares are of the table's whole width,
+            // cell padding included, and a narrow column is mostly padding:
+            // each want carries a few characters' worth of it, or a five-letter
+            // header would not fit in the column sized for it.
+            let isShort = text.count <= Self.unbrokenCell
+            let floor = (alignment == .trailing || isShort ? CGFloat(text.count) : longestWord) + Self.paddingInCharacters
             row[column] = max(row[column], floor, min(CGFloat(text.count), 44))
             wants[table] = row
         }
@@ -117,6 +122,11 @@ enum ReadingRenderer {
             return row.map { $0 / total * 100 }
         }
     }
+
+    /// A cell this short is kept on one line.
+    private static let unbrokenCell = 16
+    /// A cell's horizontal padding, in characters of the body face.
+    private static let paddingInCharacters: CGFloat = 4
 
     private static func makeTable(columns: Int) -> NSTextTable {
         let table = NSTextTable()
