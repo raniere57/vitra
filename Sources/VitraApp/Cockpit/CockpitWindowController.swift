@@ -180,8 +180,9 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     private func makeView(_ project: CockpitProject) -> ProjectView {
         // A file left by a maestro from an earlier launch is not this one's word.
+        let wasInterrupted = Attention.takeInterrupted(for: project.path)
         Attention.remove(for: project.path)
-        let view = ProjectView(project: project, kit: kit)
+        let view = ProjectView(project: project, kit: kit, resumesInterruptedWork: wasInterrupted)
         view.workers.onStopAll = { [weak self] ids in self?.feed.cancel(ids) }
         view.loadRanking = { [weak self] done in self?.feed.scores(done) }
         view.onModeChange = { [weak self] mode in
@@ -207,6 +208,9 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     /// Ends every project's shell, for when the app is going away.
     func shutDown() {
+        // Before the shells end: ending them ends the maestros, whose last
+        // hook takes their state away.
+        Attention.markInterrupted(projects: Array(views.keys))
         views.values.forEach { $0.shutDown() }
         views = [:]
     }
@@ -372,6 +376,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         feed.setVisible(false)
         usageWatch?.cancel()
         usageWatch = nil
+        Attention.markInterrupted(projects: Array(views.keys))
         views.values.forEach { $0.shutDown() }
         views = [:]
         stage.subviews.forEach { $0.removeFromSuperview() }

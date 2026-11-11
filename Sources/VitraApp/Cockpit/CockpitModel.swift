@@ -478,6 +478,7 @@ enum Maestro {
         claude: String,
         conversation: Conversation,
         mode: MaestroMode = .orchestrator,
+        prompt: String? = nil,
         in directory: URL
     ) throws -> String {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -495,8 +496,17 @@ enum Maestro {
             conversation: conversation,
             config: config.path,
             settings: settings.path,
-            brief: instructions.path
+            brief: instructions.path,
+            prompt: prompt
         )
+    }
+
+    /// What a maestro that was cut off mid-turn is told when it comes back.
+    static func resumePrompt(mode: MaestroMode) -> String {
+        let base = "O Vitra foi reiniciado enquanto você trabalhava. Continue de onde parou, sem refazer o que já estava pronto."
+        return mode == .solo
+            ? base
+            : base + " Se havia operários em andamento, confira cada um com agent_wait antes de delegar de novo."
     }
 
     /// How the maestro picks up its conversation.
@@ -614,17 +624,22 @@ enum Maestro {
         conversation: Conversation,
         config: String,
         settings: String,
-        brief: String
+        brief: String,
+        prompt: String? = nil
     ) -> String {
         let pickUp: [String] = switch conversation {
         case let .new(id): ["--session-id", ShellQuote.quote(id)]
         case let .resume(id): ["--resume", ShellQuote.quote(id)]
         }
+        // A first prompt only for a conversation carried on: it is what tells
+        // a maestro cut off mid-turn to go on, and a new one has nothing to go on with.
+        var first: [String] = []
+        if let prompt, case .resume = conversation { first = [ShellQuote.quote(prompt)] }
         return ([claude] + pickUp + [
             "--mcp-config", ShellQuote.quote(config),
             "--settings", ShellQuote.quote(settings),
             "--append-system-prompt-file", ShellQuote.quote(brief),
-        ]).joined(separator: " ") + "\n"
+        ] + first).joined(separator: " ") + "\n"
     }
 }
 

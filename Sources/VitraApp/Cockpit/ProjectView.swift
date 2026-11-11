@@ -147,6 +147,9 @@ final class ProjectView: NSView {
     private lazy var titleLabel = NSTextField.label(mode.title, font: CockpitStyle.title, color: CockpitStyle.text)
     /// Whether the maestro delegates or works alone; persisted by the window.
     private(set) var mode: MaestroMode
+    /// The maestro was cut off mid-turn when the app last went away: its
+    /// first launch here tells it to go on. Spent on that launch.
+    private var resumesInterruptedWork: Bool
     /// Called with the new mode once the user has switched to it.
     var onModeChange: ((MaestroMode) -> Void)?
     /// Set while the maestro is being stopped to start again in another mode,
@@ -177,7 +180,8 @@ final class ProjectView: NSView {
     /// `startsTerminal: false` builds the view without a shell, a timer or an
     /// event monitor; the UI snapshot tool uses it to lay the project out
     /// offscreen. The app always starts the terminal.
-    init(project: CockpitProject, kit: TerminalKit, startsTerminal: Bool = true) {
+    init(project: CockpitProject, kit: TerminalKit, startsTerminal: Bool = true, resumesInterruptedWork: Bool = false) {
+        self.resumesInterruptedWork = resumesInterruptedWork
         self.project = project
         self.mode = project.mode
         self.kit = kit
@@ -661,8 +665,10 @@ final class ProjectView: NSView {
                             project: project.path
                         ),
                         mode: mode,
+                        prompt: resumesInterruptedWork ? Maestro.resumePrompt(mode: mode) : nil,
                         in: Maestro.supportDirectory
                     )
+                    resumesInterruptedWork = false
                     session.send(text: line)
                 } catch {
                     // Printed, not written as a comment: zsh does not take `#`

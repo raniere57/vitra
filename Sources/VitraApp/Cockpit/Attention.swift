@@ -141,6 +141,37 @@ enum Attention {
         }
     }
 
+    // MARK: Interrupted work
+
+    /// How long a note that a maestro was cut off stays worth acting on: a
+    /// restart is back in seconds, and a note from yesterday is not news.
+    static let interruptionLasts: TimeInterval = 15 * 60
+
+    static func interruptedFile(for project: String, in directory: URL = Maestro.supportDirectory) -> URL {
+        directory.appendingPathComponent("interrupted-" + Maestro.sessionFile(for: project, in: directory).lastPathComponent)
+    }
+
+    /// Notes, as the app goes away, which of `projects` had a maestro in the
+    /// middle of a turn. Quitting kills them, and reinstalling Vitra quits it:
+    /// without the note the work would sit there until the user said "go on".
+    static func markInterrupted(projects: [String], now: Date = Date(), in directory: URL = Maestro.supportDirectory) {
+        for project in projects where load(for: project, in: directory)?.state == .working {
+            try? Data(ISO8601DateFormatter().string(from: now).utf8)
+                .write(to: interruptedFile(for: project, in: directory), options: .atomic)
+        }
+    }
+
+    /// Whether `project`'s maestro was cut off mid-turn a moment ago. Asked
+    /// once: the note is taken away with the answer.
+    static func takeInterrupted(for project: String, now: Date = Date(), in directory: URL = Maestro.supportDirectory) -> Bool {
+        let file = interruptedFile(for: project, in: directory)
+        defer { try? FileManager.default.removeItem(at: file) }
+        guard let text = try? String(contentsOf: file, encoding: .utf8),
+              let noted = ISO8601DateFormatter().date(from: text.trimmingCharacters(in: .whitespacesAndNewlines))
+        else { return false }
+        return now.timeIntervalSince(noted) < interruptionLasts
+    }
+
     /// How long after a permission was asked for a sign of work means it was
     /// given: the status line also runs as the prompt itself is drawn.
     static let permissionSettles: TimeInterval = 2

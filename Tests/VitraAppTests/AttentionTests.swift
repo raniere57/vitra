@@ -293,3 +293,39 @@ private let utc = TimeZone(identifier: "UTC")!
     Attention.resumed(project: project, now: asked.addingTimeInterval(60), in: directory)
     #expect(Attention.load(for: project, in: directory)?.state == .waiting)
 }
+
+@Test func aMaestroCutOffMidTurnIsNotedOnceAndOnlyForAWhile() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-int-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let busy = "/tmp/busy-\(UUID().uuidString)", idle = "/tmp/idle-\(UUID().uuidString)"
+    let t0 = Date(timeIntervalSince1970: 5_000)
+    for (project, state) in [(busy, AttentionState.working), (idle, .waiting)] {
+        let record = AttentionRecord(state: state, message: nil, since: t0, path: CockpitProject(path: project).path)
+        try #require(AttentionRecord.encode(record)).write(to: Attention.file(for: project, in: directory))
+    }
+
+    Attention.markInterrupted(projects: [busy, idle], now: t0, in: directory)
+
+    // Only the one at work, and only once.
+    #expect(!Attention.takeInterrupted(for: idle, now: t0.addingTimeInterval(20), in: directory))
+    #expect(Attention.takeInterrupted(for: busy, now: t0.addingTimeInterval(20), in: directory))
+    #expect(!Attention.takeInterrupted(for: busy, now: t0.addingTimeInterval(21), in: directory))
+
+    // A note left long ago is not acted on.
+    Attention.markInterrupted(projects: [busy], now: t0, in: directory)
+    #expect(!Attention.takeInterrupted(for: busy, now: t0.addingTimeInterval(3600), in: directory))
+}
+
+@Test func onlyAResumedConversationIsToldToGoOn() {
+    let resumed = Maestro.launchLine(
+        claude: "claude", conversation: .resume("abc"), config: "/c", settings: "/s", brief: "/b", prompt: "go on"
+    )
+    #expect(resumed.hasSuffix("'go on'\n") || resumed.hasSuffix("go\\ on\n") || resumed.contains("go on"))
+    let fresh = Maestro.launchLine(
+        claude: "claude", conversation: .new("abc"), config: "/c", settings: "/s", brief: "/b", prompt: "go on"
+    )
+    #expect(!fresh.contains("go on"))
+    #expect(Maestro.resumePrompt(mode: .orchestrator).contains("agent_wait"))
+    #expect(!Maestro.resumePrompt(mode: .solo).contains("agent_wait"))
+}
