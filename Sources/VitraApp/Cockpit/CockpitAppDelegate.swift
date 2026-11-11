@@ -81,6 +81,13 @@ final class CockpitAppDelegate: NSObject, NSApplicationDelegate {
         quitHold.requested(in: NSApp.keyWindow ?? NSApp.mainWindow)
     }
 
+    /// Quitting leaves the project terminals running in the pty-host; this is
+    /// the way to end them all, the host with them, and quit.
+    @objc func endTerminalsAndQuit(_ sender: Any?) {
+        controller?.endAllSessions()
+        TerminalHosting.endAll { NSApp.terminate(nil) }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -99,6 +106,7 @@ final class CockpitAppDelegate: NSObject, NSApplicationDelegate {
         app.addItem(withTitle: "Ocultar Vitra", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         app.addItem(.separator())
         app.addItem(withTitle: "Encerrar Vitra", action: #selector(quitRequested(_:)), keyEquivalent: "q")
+        app.addItem(withTitle: "Encerrar todos os terminais e sair", action: #selector(endTerminalsAndQuit(_:)), keyEquivalent: "")
 
         let file = NSMenu(title: "Arquivo")
         file.addItem(withTitle: "Abrir projeto…", action: #selector(CockpitWindowController.openProject(_:)), keyEquivalent: "o")

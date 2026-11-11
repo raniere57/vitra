@@ -43,7 +43,15 @@ final class ProjectView: NSView {
     /// The maestro's `vitra mcp` helper inherits it, and so does every worker
     /// the maestro spawns, which is how a tool call from any of them finds its
     /// way back to this project and not to whichever tab is in front.
-    let paneID = UUID().uuidString
+    ///
+    /// The project's path, not a fresh id: a maestro that outlived the app in
+    /// the pty-host still carries the old value, and must still be routed
+    /// here by the next app.
+    var paneID: String { project.path }
+
+    /// The project's two terminals as the pty-host holds them, when it does.
+    private var maestroHost: HostedPTY?
+    private var sharedHost: HostedPTY?
 
     /// How much of the window the right side takes while it shows a page or
     /// a file, which need room to be read.
@@ -304,11 +312,21 @@ final class ProjectView: NSView {
     /// itself — the maestro, most likely.
     var isBusy: Bool { terminal?.session.isRunningProgram ?? false }
 
-    /// Ends the project's shell and everything in it.
-    func shutDown() {
+    /// Whether the maestro's shell lives in the pty-host, and so goes on
+    /// when the app does not.
+    var outlivesApp: Bool { maestroHost?.isInHost ?? false }
+
+    /// Takes the project off the screen. `endingSessions` ends its shells and
+    /// everything in them — closing the project. Without it, shells kept in
+    /// the pty-host are only let go of, for the next app to pick up; shells
+    /// in the app end, as they must.
+    func shutDown(endingSessions: Bool) {
+        let release: (TerminalSession?) -> Void = { session in
+            endingSessions ? session?.terminate() : session?.detach()
+        }
         git.setActive(false)
         sharedTerminalView?.session.onExit = nil
-        sharedTerminalView?.session.terminate()
+        release(sharedTerminalView?.session)
         sharedTerminalView?.prepareForRemoval()
         housekeeping?.invalidate()
         if let activityMonitor { NSEvent.removeMonitor(activityMonitor) }
@@ -317,7 +335,7 @@ final class ProjectView: NSView {
         filesPanel.clearContent()
         isShutDown = true
         terminal?.session.onExit = nil
-        terminal?.session.terminate()
+        release(terminal?.session)
         terminal?.prepareForRemoval()
     }
 
@@ -426,7 +444,11 @@ final class ProjectView: NSView {
     func sharedTerminal(showing: Bool) throws -> TerminalSession {
         if sharedTerminalView == nil {
             let view: TerminalView
-            do { view = try makeTerminal() } catch {
+            do {
+                let made = try makeTerminal(.shared)
+                view = made.view
+                sharedHost = made.hosted
+            } catch {
                 throw ToolError("could not start the shared terminal: \(error.localizedDescription)")
             }
             // `exit` there closes the tab; the next visit starts a fresh shell.
@@ -452,6 +474,7 @@ final class ProjectView: NSView {
         sharedTerminalView?.prepareForRemoval()
         sharedTerminalView?.removeFromSuperview()
         sharedTerminalView = nil
+        sharedHost = nil
         if tabs.selected == .terminal, !isShutDown {
             select(.workers)
             focusTerminal()
@@ -623,9 +646,10 @@ final class ProjectView: NSView {
             return
         }
         do {
-            let view = try makeTerminal()
+            let (view, hosted) = try makeTerminal(.maestro)
             let session = view.session
             view.paneID = paneID
+            maestroHost = hosted
 
             // The shell ending — `exit`, or the maestro's shell dying — leaves
             // a fresh prompt, never an empty pane. The maestro is not started
@@ -645,66 +669,109 @@ final class ProjectView: NSView {
             terminalSlot.addFilling(view)
             terminal = view
 
-            session.start()
-            if launchingMaestro, let binary = Bundle.main.executablePath {
-                // Failing to write the maestro's files leaves a working shell
-                // in the project; the reason is printed where the user is looking.
-                do {
-                    let line = try Maestro.install(
-                        binary: binary,
-                        claude: Harness.claudeCode.launchLine,
-                        // The project's own conversation: carried on when
-                        // there is one, started under its id when not.
-                        // What the maestro was last in comes first: the user
-                        // may have moved to another conversation with /resume,
-                        // and that one is where they left off.
-                        conversation: Maestro.conversation(
-                            Maestro.rememberedSession(for: project.path)
-                                ?? project.session
-                                ?? UUID().uuidString.lowercased(),
-                            project: project.path
-                        ),
-                        mode: mode,
-                        prompt: resumesInterruptedWork ? Maestro.resumePrompt(mode: mode) : nil,
-                        in: Maestro.supportDirectory
-                    )
-                    resumesInterruptedWork = false
-                    session.send(text: line)
-                } catch {
-                    // Printed, not written as a comment: zsh does not take `#`
-                    // as one at a prompt, and would try to run the message.
-                    let message = "Vitra: não deu para preparar o maestro (\(error.localizedDescription))"
-                    session.send(text: "printf '%s\\n' " + ShellQuote.quote(message) + "\n")
+            if let hosted {
+                // Only a shell that is new gets the maestro typed into it. One
+                // the host kept is still running the maestro the last app
+                // started, mid-turn perhaps: it was never interrupted.
+                hosted.onReady = { [weak self, weak view] outcome in
+                    MainActor.assumeIsolated {
+                        guard let self, let view, self.terminal === view else { return }
+                        if outcome == .attached {
+                            self.resumesInterruptedWork = false
+                        } else if launchingMaestro {
+                            self.launchMaestro(in: view.session)
+                        }
+                    }
                 }
             }
+            session.start()
+            if hosted == nil, launchingMaestro { launchMaestro(in: session) }
             if window != nil { focusTerminal() }
         } catch {
             showFailure("Não deu para abrir o terminal: \(error.localizedDescription)")
         }
     }
 
+    /// Types the line that starts the maestro into a fresh shell.
+    private func launchMaestro(in session: TerminalSession) {
+        // A file left by a maestro from an earlier launch is not this one's word.
+        Attention.remove(for: project.path)
+        guard let binary = Bundle.main.executablePath else { return }
+        // Failing to write the maestro's files leaves a working shell
+        // in the project; the reason is printed where the user is looking.
+        do {
+            let line = try Maestro.install(
+                binary: binary,
+                claude: Harness.claudeCode.launchLine,
+                // The project's own conversation: carried on when
+                // there is one, started under its id when not.
+                // What the maestro was last in comes first: the user
+                // may have moved to another conversation with /resume,
+                // and that one is where they left off.
+                conversation: Maestro.conversation(
+                    Maestro.rememberedSession(for: project.path)
+                        ?? project.session
+                        ?? UUID().uuidString.lowercased(),
+                    project: project.path
+                ),
+                mode: mode,
+                prompt: resumesInterruptedWork ? Maestro.resumePrompt(mode: mode) : nil,
+                in: Maestro.supportDirectory
+            )
+            resumesInterruptedWork = false
+            session.send(text: line)
+        } catch {
+            // Printed, not written as a comment: zsh does not take `#`
+            // as one at a prompt, and would try to run the message.
+            let message = "Vitra: não deu para preparar o maestro (\(error.localizedDescription))"
+            session.send(text: "printf '%s\\n' " + ShellQuote.quote(message) + "\n")
+        }
+    }
+
     /// A login shell in the project, in a terminal of its own. Both of the
     /// project's terminals are made here: the maestro's and the shared one.
-    private func makeTerminal() throws -> TerminalView {
+    /// In the pty-host when that is on — `hosted` is then its handle there —
+    /// so the shell outlives the app.
+    private func makeTerminal(_ role: TerminalHosting.Role) throws -> (view: TerminalView, hosted: HostedPTY?) {
         let size = TerminalSize(columns: 80, rows: 24)
         let shell = kit.config.shell ?? ShellEnvironment.loginShell()
-        let session = try TerminalSession(
-            core: try GhosttyTerminalCore(size: size),
-            executable: shell,
-            arguments: ["-l"],
-            environment: ShellEnvironment.childEnvironment(
-                shell: shell,
-                shellIntegration: kit.config.shellIntegration,
-                blockSpacing: kit.config.blockSpacing,
-                colorPrompt: kit.config.colorPrompt,
-                colorDefaults: kit.config.colorDefaults,
-                // The pane routes tool calls back here; the project is
-                // what the session hook files its conversation under.
-                extra: ["VITRA_PANE": paneID, "VITRA_PROJECT": project.path]
-            ),
-            size: size,
-            workingDirectory: project.path
+        let environment = ShellEnvironment.childEnvironment(
+            shell: shell,
+            shellIntegration: kit.config.shellIntegration,
+            blockSpacing: kit.config.blockSpacing,
+            colorPrompt: kit.config.colorPrompt,
+            colorDefaults: kit.config.colorDefaults,
+            // The pane routes tool calls back here; the project is
+            // what the session hook files its conversation under.
+            extra: ["VITRA_PANE": paneID, "VITRA_PROJECT": project.path]
         )
+        let core = try GhosttyTerminalCore(size: size)
+        let session: TerminalSession
+        var hosted: HostedPTY?
+        if TerminalHosting.isEnabled {
+            let backend = HostedPTY(
+                spec: HostedPTY.Spec(
+                    id: TerminalHosting.sessionID(project: project.path, role: role),
+                    executable: shell,
+                    arguments: ["-l"],
+                    environment: environment,
+                    workingDirectory: project.path,
+                    size: size
+                ),
+                binary: Bundle.main.executablePath
+            )
+            session = TerminalSession(core: core, backend: backend, size: size)
+            hosted = backend
+        } else {
+            session = try TerminalSession(
+                core: core,
+                executable: shell,
+                arguments: ["-l"],
+                environment: environment,
+                size: size,
+                workingDirectory: project.path
+            )
+        }
         let view = try TerminalView(
             session: session,
             device: kit.device,
@@ -716,7 +783,7 @@ final class ProjectView: NSView {
         view.focusTint = CockpitStyle.accent
         view.pathBase = URL(fileURLWithPath: project.path, isDirectory: true)
         view.onOpenLink = { [weak self] url, external in self?.openTerminalLink(url, external: external) }
-        return view
+        return (view, hosted)
     }
 
     /// A click in either of this project's terminals: a file into Arquivos,
