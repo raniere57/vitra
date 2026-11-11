@@ -253,6 +253,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         runningTimer = nil
         blinkTimer?.cancel()
         blinkTimer = nil
+        cancelPathHover()
         stopDisplayLink()
     }
 
@@ -606,6 +607,8 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// A link the user clicked: the flag is true when they held Command, which
     /// means their browser rather than the panel.
     var onOpenLink: ((URL, Bool) -> Void)?
+    /// Folder a relative path falls back to when the shell has not reported cwd.
+    var pathBase: URL?
 
     /// What this pane is called in the shell's environment (`VITRA_PANE`), so
     /// a tool call from an agent running in it finds its way back here.
@@ -680,28 +683,55 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
 
     /// The link under a mouse event, if the pointer is on one.
     private func link(for event: NSEvent) -> URL? {
-        let position = cell(for: event)
+        link(at: cell(for: event), allowingPathStat: true)
+    }
+
+    /// Web links are shape-only. Paths hit the disk, so hover waits ~80 ms.
+    private func link(at position: (column: UInt16, row: UInt16), allowingPathStat: Bool) -> URL? {
         let row = Int(position.row)
         guard row < Int(snapshot.rows) else { return nil }
+        let characters = rowCharacters(row)
+        if let url = TerminalLink.match(in: characters, at: Int(position.column), base: nil)?.url {
+            if !url.isFileURL { return url }
+            if allowingPathStat, FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        guard allowingPathStat else { return nil }
+        return pathLink(at: position)
+    }
 
-        // One character per column, blanks included, so what comes back is in
-        // the same coordinates the click arrived in.
+    private func pathLink(at position: (column: UInt16, row: UInt16)) -> URL? {
+        guard let base = session.currentDirectory ?? pathBase else { return nil }
+        let (rows, localRow) = wrappedRows(around: Int(position.row))
+        return TerminalPathLink.match(
+            rows: rows,
+            row: localRow,
+            column: Int(position.column),
+            base: base
+        )?.url
+    }
+
+    private func rowCharacters(_ row: Int) -> [Character] {
         var characters: [Character] = []
         characters.reserveCapacity(Int(snapshot.columns))
         for column in 0 ..< Int(snapshot.columns) {
             let cell = snapshot[column, row]
             characters.append(snapshot.text(of: cell)?.first ?? " ")
         }
-        let base = session.currentDirectory
-        guard let url = TerminalLink.match(in: characters, at: Int(position.column), base: base)?.url
-        else { return nil }
-        // A token shaped like a path is a link only when the file is there:
-        // the pointer turns into a hand for one stat, not for every word that
-        // happens to carry a dot.
-        if url.isFileURL {
-            return PreviewTarget.resolve(path: url.path) == nil ? nil : url
+        return characters
+    }
+
+    /// The clicked row plus the ones it soft-wraps with: a full last column
+    /// continues onto the next row with no newline.
+    private func wrappedRows(around row: Int) -> (rows: [[Character]], index: Int) {
+        func wraps(_ index: Int) -> Bool {
+            TerminalPathLink.isWrapped(rowCharacters(index))
         }
-        return url
+        var start = row
+        while start > 0, wraps(start - 1) { start -= 1 }
+        var end = row
+        while end < Int(snapshot.rows) - 1, wraps(end) { end += 1 }
+        let rows = (start ... end).map { rowCharacters($0) }
+        return (rows, row - start)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -913,7 +943,38 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
             button.cursor.set()
             return
         }
-        if link(for: event) != nil { NSCursor.pointingHand.set() } else { NSCursor.iBeam.set() }
+        updateLinkCursor(for: event)
+    }
+
+    /// Hand over a web link as soon as the cell changes. A path waits until
+    /// the pointer rests, so a sweep across the grid does not stat every word.
+    private func updateLinkCursor(for event: NSEvent) {
+        let position = cell(for: event)
+        if lastHoverCell == position {
+            return
+        }
+        lastHoverCell = position
+        cancelPathHover()
+        if link(at: position, allowingPathStat: false) != nil {
+            NSCursor.pointingHand.set()
+            return
+        }
+        NSCursor.iBeam.set()
+        let timer = Timer(timeInterval: 0.08, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.pathHoverTimer = nil
+                guard self.lastHoverCell == position, self.pathLink(at: position) != nil else { return }
+                NSCursor.pointingHand.set()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pathHoverTimer = timer
+    }
+
+    private func cancelPathHover() {
+        pathHoverTimer?.invalidate()
+        pathHoverTimer = nil
     }
 
     private var cornerButtons: [PaneCornerButton] {
@@ -952,6 +1013,8 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     }
 
     override func mouseExited(with event: NSEvent) {
+        cancelPathHover()
+        lastHoverCell = nil
         NSCursor.arrow.set()
         closeButton.isHidden = true
         zoomButton.isHidden = true
@@ -1054,6 +1117,8 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// How far inside the edge a held drag starts pulling the viewport.
     private static let autoScrollMargin: CGFloat = 12
     private var linkTracking: NSTrackingArea?
+    private var pathHoverTimer: Timer?
+    private var lastHoverCell: (column: UInt16, row: UInt16)?
 
     // MARK: - Clipboard
 

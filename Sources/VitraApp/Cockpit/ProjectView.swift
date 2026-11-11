@@ -648,7 +648,33 @@ final class ProjectView: NSView {
         try? view.apply(kit.config)
         view.offersClose = false
         view.focusTint = CockpitStyle.accent
+        view.pathBase = URL(fileURLWithPath: project.path, isDirectory: true)
+        view.onOpenLink = { [weak self] url, external in self?.openTerminalLink(url, external: external) }
         return view
+    }
+
+    /// A click in either of this project's terminals: a file into Arquivos,
+    /// a folder into the file list, a page into Navegador. Command skips the
+    /// panel and opens whatever it is in the system default.
+    private func openTerminalLink(_ url: URL, external: Bool) {
+        if external {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        if url.isFileURL {
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
+                filesPanel.showFiles(in: url)
+                filesArea.showPanel()
+                select(.files)
+                return
+            }
+            if let target = PreviewTarget.resolve(path: url.path) {
+                preview(target)
+            }
+            return
+        }
+        usersBrowser().load(url) { _ in }
     }
 
     /// Gives the project a fresh shell, unless shells keep dying here.
