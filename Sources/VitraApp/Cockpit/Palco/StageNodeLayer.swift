@@ -106,6 +106,9 @@ final class StageNodeLayer: CALayer {
     private static var labelFont: NSFont { CockpitStyle.ui(10, .medium) }
     private static var stateFont: NSFont { CockpitStyle.mono(9.5, .medium) }
     private static var glyphFont: NSFont { CockpitStyle.ui(11, .semibold) }
+    private static var auditStateFont: NSFont { CockpitStyle.mono(8, .medium) }
+    /// Narrow enough to stay clear of the delivery's disc beside it.
+    static let auditStateWidth: CGFloat = 36
 
     let radius: CGFloat
     let isAudit: Bool
@@ -173,7 +176,14 @@ final class StageNodeLayer: CALayer {
         glyph.frame = CGRect(x: 0, y: box.midY - CATextLayer.lineHeight(Self.glyphFont) / 2 + 0.5, width: box.width, height: CATextLayer.lineHeight(Self.glyphFont))
         for layer in [halo, disc, track, ring, glyph] { addSublayer(layer) }
 
-        guard !isAudit else { return }
+        guard !isAudit else {
+            // An audit carries one compact state line, no label or dots.
+            state.font = Self.auditStateFont
+            state.fontSize = Self.auditStateFont.pointSize
+            addSublayer(state)
+            placeText(above: false)
+            return
+        }
         addSublayer(label)
         addSublayer(state)
         for _ in 0..<5 {
@@ -190,8 +200,21 @@ final class StageNodeLayer: CALayer {
     /// Puts the label, the state and the rating dots below the disc, or above
     /// it. A worker in the upper half of the stage carries them above, so that
     /// its link, which arrives from the core, does not run through its words.
+    ///
+    /// An audit hangs level with its delivery, so its one line goes on the
+    /// side of the disc opposite the delivery's words: the caller passes the
+    /// delivery's side, and the audit takes the other.
     func placeText(above: Bool) {
-        guard !isAudit, above != isTextAbove || label.frame == .zero else { return }
+        if isAudit {
+            let box = bounds
+            let height = CATextLayer.lineHeight(Self.auditStateFont)
+            let y = above ? -height - 2 : box.maxY + 2
+            CALayer.instantly {
+                state.frame = CGRect(x: box.midX - Self.auditStateWidth / 2, y: y, width: Self.auditStateWidth, height: height)
+            }
+            return
+        }
+        guard above != isTextAbove || label.frame == .zero else { return }
         isTextAbove = above
         let box = bounds
         let labelHeight = CATextLayer.lineHeight(Self.labelFont)
@@ -240,7 +263,14 @@ final class StageNodeLayer: CALayer {
             }
             if previous?.glyph != node.glyph { glyph.string = node.glyph }
             if previous?.label != node.label { label.string = node.label }
-            if previous?.stateText != node.stateText { state.string = node.stateText }
+            if previous?.stateText != node.stateText {
+                state.string = node.stateText
+                // An audit's verdict is coloured by what it asks for.
+                if isAudit, node.outcome == .done {
+                    let verdict = node.stateText == "não" ? CockpitStyle.dangerText : (node.stateText == "corrigir" ? CockpitStyle.accent : StagePalette.stateText(node))
+                    state.foregroundColor = verdict.cgColor
+                }
+            }
             if previous?.deadlineFraction != node.deadlineFraction { ring.strokeEnd = max(CGFloat(node.deadlineFraction), 0.012) }
             if previous?.score != node.score { showScore(node.score) }
             opacity = Float(node.emphasis * (node.isSilent ? 0.55 : 1))

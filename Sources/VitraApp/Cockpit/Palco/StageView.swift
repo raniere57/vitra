@@ -371,7 +371,9 @@ final class StageView: NSView {
     /// updates, a second apart at most.
     private func refreshMotion() {
         let animating = isLive && !reduceMotion
-        core.setLive(animating && state.nodes.contains { $0.outcome == .running })
+        let hasRunning = state.nodes.contains { $0.outcome == .running }
+        core.setLive(animating && hasRunning)
+        core.setIdleBreathing(isVisible && !reduceMotion && !hasRunning)
         for node in state.nodes {
             guard let entry = entries[node.id] else { continue }
             let running = node.outcome == .running
@@ -442,10 +444,14 @@ final class StageView: NSView {
         entry.particles = []
     }
 
-    /// The core's two slow breaths, for a tab that has just come up with nothing running.
-    func introduce() {
-        guard !reduceMotion, !isLive, state.nodes.allSatisfy({ $0.outcome != .running }) else { return }
-        core.breathe(times: 2)
+    /// Whether the tab and its window can be seen. With nothing running, the
+    /// core breathes slowly for as long as this holds.
+    private(set) var isVisible = false
+
+    func setVisible(_ visible: Bool) {
+        guard visible != isVisible else { return }
+        isVisible = visible
+        refreshMotion()
     }
 
     // MARK: Pointer

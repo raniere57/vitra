@@ -364,6 +364,43 @@ private func lane(_ id: String, auditOf: String? = nil, startedAgo: TimeInterval
     #expect(tracker.merged.isEmpty)
 }
 
+@Test func anAcceptedEditWhoseBranchIsGoneIsAMergeEvenIfNeverSeenAndOnlyOnce() {
+    var tracker = MergeTracker()
+    // Merged before the tab opened: never seen, rated 4+.
+    #expect(tracker.update(branches: ["r1": "vitra/r1"], existing: ["main"], accepted: ["r1"]) == ["r1"])
+    #expect(tracker.update(branches: ["r1": "vitra/r1"], existing: ["main"], accepted: ["r1"]).isEmpty)
+    // Still there: not yet merged, however well rated.
+    #expect(tracker.update(branches: ["r2": "vitra/r2"], existing: ["vitra/r2"], accepted: ["r2"]).isEmpty)
+    #expect(tracker.update(branches: ["r2": "vitra/r2"], existing: [], accepted: ["r2"]) == ["r2"])
+    #expect(tracker.merged == ["r1", "r2"])
+}
+
+@Test func auditVerdictIsReadFromTheAnswersFirstLine() {
+    #expect(StageModel.auditVerdict("Verdict: ship\nall good") == "ok")
+    #expect(StageModel.auditVerdict("SHIP AFTER FIXES — two nits") == "corrigir")
+    #expect(StageModel.auditVerdict("Do not ship: breaks the build") == "não")
+    #expect(StageModel.auditVerdict("Looked at three files\nship") == nil)
+    #expect(StageModel.auditVerdict(nil) == nil)
+}
+
+@Test(arguments: [CGSize(width: 420, height: 520), CGSize(width: 720, height: 420)])
+func twelveNodesWordsKeepClearOfEveryOtherNodeAndWords(size: CGSize) {
+    let geometry = StageGeometry(size: size)
+    var book = SlotBook()
+    let ids = (0..<12).map { "n\($0)" }
+    book.update(ids: ids)
+    let discs = ids.map { (id: $0, point: geometry.position(ofSlot: book.slots[$0]!), radius: StageGeometry.nodeRadius) }
+    let sides = geometry.textSides(labelled: ids, discs: discs)
+    let rects = Dictionary(uniqueKeysWithValues: discs.map { ($0.id, StageGeometry.textRect(at: $0.point, side: sides[$0.id]!)) })
+    for disc in discs {
+        let rect = rects[disc.id]!
+        for other in discs where other.id != disc.id {
+            #expect(StageGeometry.distance(from: rect, to: other.point) - other.radius >= StageGeometry.textClearance, "\(disc.id) words on \(other.id) disc")
+            #expect(StageGeometry.gap(rect, rects[other.id]!) >= StageGeometry.textClearance, "\(disc.id) words on \(other.id) words")
+        }
+    }
+}
+
 @Test func onlyTheLastTenMergesAreKept() {
     var tracker = MergeTracker()
     let branches = Dictionary(uniqueKeysWithValues: (0..<14).map { (String(format: "r%02d", $0), "b\($0)") })
@@ -461,6 +498,51 @@ private func stage(running: Bool = true, reduceMotion: Bool = false) -> StageVie
 
     view.setLive(false)
     #expect(repeatingCount(view.layer) == 0)
+}
+
+@MainActor
+@Test func timelineSheenSpansTheGrownBarAndIsAbsentWithReducedMotion() {
+    let view = TimelineView(frame: NSRect(x: 0, y: 0, width: 420, height: 280))
+    view.layoutSubtreeIfNeeded()
+    // An older run holds the window at its full half hour.
+    let runs = [run("old", state: .running, startedAgo: 1_790), run("a", state: .running, startedAgo: 60)]
+    view.update(StageModel.nodes(from: runs, now: now), now: now, glide: false)
+    view.setLive(true)
+    // The sweeps' total reach, over every running bar.
+    let sweep = { () -> CGFloat in
+        (view.layer?.sublayers ?? []).flatMap { $0.sublayers ?? [] }
+            .compactMap { ($0.animation(forKey: "slide") as? CABasicAnimation)?.toValue as? CGFloat }
+            .reduce(0, +)
+    }
+    let first = sweep()
+    // Twenty minutes on, the newer run's bar is far longer, and so is its sweep.
+    let later = now.addingTimeInterval(1_200)
+    view.update(StageModel.nodes(from: runs, now: later), now: later, glide: false)
+    #expect(sweep() > first + 40)
+
+    let reduced = TimelineView(frame: NSRect(x: 0, y: 0, width: 420, height: 280))
+    reduced.reduceMotion = true
+    reduced.layoutSubtreeIfNeeded()
+    reduced.update(StageModel.nodes(from: runs, now: now), now: now, glide: false)
+    reduced.setLive(true)
+    let sheens = reduced.layer?.sublayers?.compactMap { $0.sublayers?.first as? CAGradientLayer } ?? []
+    let shown = sheens.filter { !$0.isHidden }.count
+    #expect(!sheens.isEmpty)
+    #expect(shown == 0)
+}
+
+@MainActor
+@Test func emptyCoreBreathesOnlyWhileVisibleAndNotWithReducedMotion() {
+    let view = stage(running: false)
+    #expect(animationCount(view.layer, key: "idle") == 0)
+    view.setVisible(true)
+    #expect(animationCount(view.layer, key: "idle") == 1)
+    view.setVisible(false)
+    #expect(repeatingCount(view.layer) == 0)
+
+    let still = stage(running: false, reduceMotion: true)
+    still.setVisible(true)
+    #expect(repeatingCount(still.layer) == 0)
 }
 
 @MainActor
