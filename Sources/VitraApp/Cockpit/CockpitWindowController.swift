@@ -145,7 +145,8 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         let project = projects.remove(at: index)
-        views.removeValue(forKey: project.path)?.shutDown()
+        // The one place a project's shells really end; quitting only lets go.
+        views.removeValue(forKey: project.path)?.shutDown(endingSessions: true)
         save()
         select(min(selected > index ? selected - 1 : selected, projects.count - 1))
     }
@@ -179,9 +180,10 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func makeView(_ project: CockpitProject) -> ProjectView {
-        // A file left by a maestro from an earlier launch is not this one's word.
+        // Spent only if the maestro has to be started again; a maestro the
+        // pty-host kept was never interrupted. The attention file is cleared
+        // at that start too: a kept maestro's file is still its word.
         let wasInterrupted = Attention.takeInterrupted(for: project.path)
-        Attention.remove(for: project.path)
         let view = ProjectView(project: project, kit: kit, resumesInterruptedWork: wasInterrupted)
         view.workers.onStopAll = { [weak self] ids in self?.feed.cancel(ids) }
         view.loadRanking = { [weak self] done in self?.feed.scores(done) }
@@ -207,12 +209,20 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Tools
 
-    /// Ends every project's shell, for when the app is going away.
+    /// Lets go of every project's shell, for when the app is going away.
+    /// Shells in the pty-host go on; shells in the app end with it.
     func shutDown() {
         // Before the shells end: ending them ends the maestros, whose last
-        // hook takes their state away.
-        Attention.markInterrupted(projects: Array(views.keys))
-        views.values.forEach { $0.shutDown() }
+        // hook takes their state away. Only those that do end were cut off.
+        Attention.markInterrupted(projects: views.filter { !$0.value.outlivesApp }.map(\.key))
+        views.values.forEach { $0.shutDown(endingSessions: false) }
+        views = [:]
+    }
+
+    /// Ends every project's shell, wherever it lives, deliberately: nothing
+    /// is noted as interrupted.
+    func endAllSessions() {
+        views.values.forEach { $0.shutDown(endingSessions: true) }
         views = [:]
     }
 
@@ -378,9 +388,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         feed.setVisible(false)
         usageWatch?.cancel()
         usageWatch = nil
-        Attention.markInterrupted(projects: Array(views.keys))
-        views.values.forEach { $0.shutDown() }
-        views = [:]
+        shutDown()
         stage.subviews.forEach { $0.removeFromSuperview() }
     }
 

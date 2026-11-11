@@ -1,5 +1,6 @@
 import AppKit
 import VitraBridge
+import VitraCore
 
 // `vitra mcp` is this same binary with no GUI: the agent's MCP client spawns it
 // with its own stdin and stdout, and it forwards tool calls to the running
@@ -43,6 +44,15 @@ if CommandLine.arguments.dropFirst().first == "maestro-status" {
         binary: Bundle.main.executablePath ?? CommandLine.arguments[0]
     )
     exit(0)
+}
+
+// `Vitra pty-host` keeps the cockpit's project terminals alive across the app
+// quitting and being reinstalled. The app starts it on demand, detached; it
+// leaves by itself after ten idle minutes. AppKit is never touched on this path.
+// VITRA_PTY_HOST_DIR moves its socket and lock elsewhere, for a test.
+if CommandLine.arguments.dropFirst().first == "pty-host" {
+    PTYHost.serveForever(paths: ProcessInfo.processInfo.environment["VITRA_PTY_HOST_DIR"]
+        .map { PTYHostPaths(directory: URL(fileURLWithPath: $0, isDirectory: true)) } ?? .standard)
 }
 
 // `Vitra snapshot <dir>` draws the cockpit's views offscreen, with made-up
