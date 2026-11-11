@@ -108,7 +108,7 @@ final class StageNodeLayer: CALayer {
     private static var glyphFont: NSFont { CockpitStyle.ui(11, .semibold) }
     private static var auditStateFont: NSFont { CockpitStyle.mono(8, .medium) }
     /// Narrow enough to stay clear of the delivery's disc beside it.
-    static let auditStateWidth: CGFloat = 36
+    static let auditStateWidth: CGFloat = 46
 
     let radius: CGFloat
     let isAudit: Bool
@@ -122,7 +122,7 @@ final class StageNodeLayer: CALayer {
     private let label = CATextLayer.line(StageNodeLayer.labelFont, CockpitStyle.text)
     private let state = CATextLayer.line(StageNodeLayer.stateFont, CockpitStyle.muted)
     private var dots: [CALayer] = []
-    private var isTextAbove = false
+    private var textSide: StageGeometry.TextSide = .below
 
     init(radius: CGFloat, isAudit: Bool) {
         self.radius = radius
@@ -181,7 +181,7 @@ final class StageNodeLayer: CALayer {
             state.font = Self.auditStateFont
             state.fontSize = Self.auditStateFont.pointSize
             addSublayer(state)
-            placeText(above: false)
+            placeText(.below)
             return
         }
         addSublayer(label)
@@ -194,35 +194,54 @@ final class StageNodeLayer: CALayer {
             dots.append(dot)
             addSublayer(dot)
         }
-        placeText(above: false)
+        placeText(.below)
     }
 
     /// Puts the label, the state and the rating dots below the disc, or above
     /// it. A worker in the upper half of the stage carries them above, so that
     /// its link, which arrives from the core, does not run through its words.
     ///
-    /// An audit hangs level with its delivery, so its one line goes on the
-    /// side of the disc opposite the delivery's words: the caller passes the
-    /// delivery's side, and the audit takes the other.
-    func placeText(above: Bool) {
+    /// Where crowding calls for it the stage puts them beside the disc instead
+    /// (`StageGeometry.textSides`). An audit has only its state line, above
+    /// or below, on the side the stage gives it.
+    func placeText(_ side: StageGeometry.TextSide) {
         if isAudit {
             let box = bounds
             let height = CATextLayer.lineHeight(Self.auditStateFont)
-            let y = above ? -height - 2 : box.maxY + 2
+            let y = side == .above ? box.maxY + 2 : -height - 2
             CALayer.instantly {
                 state.frame = CGRect(x: box.midX - Self.auditStateWidth / 2, y: y, width: Self.auditStateWidth, height: height)
             }
             return
         }
-        guard above != isTextAbove || label.frame == .zero else { return }
-        isTextAbove = above
+        guard side != textSide || label.frame == .zero else { return }
+        textSide = side
         let box = bounds
         let labelHeight = CATextLayer.lineHeight(Self.labelFont)
         let stateHeight = CATextLayer.lineHeight(Self.stateFont)
         let left = box.midX - Self.labelWidth / 2
         let gap: CGFloat = 3
         CALayer.instantly {
-            if above {
+            if side == .left || side == .right {
+                // Beside the disc, centred on it and aligned toward it.
+                let toRight = side == .right
+                let x = toRight ? box.maxX + gap : box.minX - gap - Self.labelWidth
+                let alignment: CATextLayerAlignmentMode = toRight ? .left : .right
+                label.alignmentMode = alignment
+                state.alignmentMode = alignment
+                let top = box.midY + StageGeometry.textSize.height / 2
+                label.frame = CGRect(x: x, y: top - labelHeight, width: Self.labelWidth, height: labelHeight)
+                state.frame = CGRect(x: x, y: label.frame.minY - stateHeight + 1, width: Self.labelWidth, height: stateHeight)
+                let dotY = state.frame.minY - Self.dotSize / 2 - 2
+                let firstX = toRight ? x + Self.dotSize / 2 : x + Self.labelWidth - Self.dotSize / 2 - 4 * (Self.dotSize + 3)
+                for (index, dot) in dots.enumerated() {
+                    dot.position = CGPoint(x: firstX + CGFloat(index) * (Self.dotSize + 3), y: dotY)
+                }
+                return
+            }
+            label.alignmentMode = .center
+            state.alignmentMode = .center
+            if side == .above {
                 // Reading down to the disc: label, state, dots.
                 let dotY = box.maxY + gap + Self.dotSize / 2
                 for (index, dot) in dots.enumerated() { dot.position = dotPosition(index, y: dotY) }

@@ -132,7 +132,25 @@ final class StageView: NSView {
         for node in nodes {
             if let parent = node.auditOf, let point = result[parent] { result[node.id] = geometry.auditPosition(besideDelivery: point) }
         }
+        // Where each node's words go, clear of every other node and words.
+        let discs = nodes.compactMap { node in
+            result[node.id].map { (id: node.id, point: $0, radius: node.isAudit ? StageGeometry.auditRadius : StageGeometry.nodeRadius) }
+        }
+        textSides = geometry.textSides(labelled: nodes.filter { !$0.isAudit }.map(\.id), discs: discs)
         return result
+    }
+
+    private var textSides: [String: StageGeometry.TextSide] = [:]
+
+    /// The side a node's words take. An audit's one line goes opposite its
+    /// delivery's words, which hang level beside it.
+    private func textSide(of node: StageNode, at point: CGPoint) -> StageGeometry.TextSide {
+        let fallback: StageGeometry.TextSide = point.y < geometry.center.y - 8 ? .above : .below
+        guard node.isAudit else { return textSides[node.id] ?? fallback }
+        switch node.auditOf.flatMap({ textSides[$0] }) ?? fallback {
+        case .above: return .below
+        case .below, .left, .right: return .above
+        }
     }
 
     private func makeEntry(_ node: StageNode, animated: Bool) -> Entry {
@@ -170,7 +188,7 @@ final class StageView: NSView {
         let from = node.auditOf.flatMap { targets[$0] } ?? geometry.center
         let slot = slots.slots[node.id] ?? 0
         let curve = LinkCurve(from: up(from), to: up(entry.target), bend: node.auditOf != nil ? 1 : (slot % 4 < 2 ? 1 : -1))
-        entry.layer.placeText(above: entry.target.y < geometry.center.y - 8)
+        entry.layer.placeText(textSide(of: node, at: entry.target))
         CALayer.instantly {
             entry.layer.position = up(entry.target)
             entry.link.path = curve.path

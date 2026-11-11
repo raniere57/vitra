@@ -111,6 +111,8 @@ struct StageGeometry: Equatable {
     static let textGap: CGFloat = 3
     /// The least room between a node's words and any other node or words.
     static let textClearance: CGFloat = 6
+    /// How far the core's dotted ring reaches past its disc.
+    static let coreRingReach: CGFloat = 12
 
     /// Where the words of a node at `point` sit on `side`, top-left coordinates.
     static func textRect(at point: CGPoint, side: TextSide, radius: CGFloat = nodeRadius) -> CGRect {
@@ -135,6 +137,8 @@ struct StageGeometry: Equatable {
         let stage = CGRect(origin: .zero, size: CGSize(width: size.width, height: trunkY - 8))
         var chosen: [String: CGRect] = [:]
         var sides: [String: TextSide] = [:]
+        // The core and its dotted ring are in the way too.
+        let discs = discs + [(id: "", point: center, radius: Self.coreRadius + Self.coreRingReach)]
         for id in labelled {
             guard let me = discs.first(where: { $0.id == id }) else { continue }
             let vertical: [TextSide] = me.point.y < center.y - 8 ? [.above, .below] : [.below, .above]
