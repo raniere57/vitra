@@ -41,6 +41,8 @@ final class SideTabs: NSView {
 
     private var buttons: [SideTab: TabButton] = [:]
     private var titles: [SideTab: String] = [:]
+    /// Holds the unselected tabs to one width; remade when the selection moves.
+    private var evenWidths: [NSLayoutConstraint] = []
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -48,14 +50,17 @@ final class SideTabs: NSView {
         stack.spacing = CockpitStyle.Space.xs
         // The first tab's text, not its plate, sits on the content inset, so
         // it lines up with what is below it.
-        stack.edgeInsets = NSEdgeInsets(top: 0, left: CockpitStyle.inset - TabButton.textOffset, bottom: 0, right: CockpitStyle.Space.md)
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: CockpitStyle.inset - TabButton.textOffset, bottom: 0, right: CockpitStyle.inset - TabButton.textOffset)
+        // The tabs share the whole row: the selected one takes what its name
+        // needs and the rest split what is left evenly, so each is a wide
+        // target instead of an icon packed against its neighbours.
+        stack.distribution = .fill
         for tab in SideTab.allCases {
             let button = TabButton(title: tab.title, target: self, action: #selector(pressed(_:)))
             button.tag = SideTab.allCases.firstIndex(of: tab) ?? 0
             buttons[tab] = button
             stack.addArrangedSubview(button)
         }
-        stack.addArrangedSubview(NSView())
         addFilling(stack)
         paint()
     }
@@ -100,7 +105,16 @@ final class SideTabs: NSView {
             button.setAccessibilityLabel(title)
             button.layer?.backgroundColor = (isSelected ? CockpitStyle.tab : .clear).cgColor
             button.setAccessibilityValue(isSelected ? "selecionada" : nil)
+            // The selected tab keeps to its content; the others stretch.
+            button.setContentHuggingPriority(isSelected ? .required : .defaultLow, for: .horizontal)
+            button.setContentCompressionResistancePriority(isSelected ? .required : .defaultHigh, for: .horizontal)
         }
+        NSLayoutConstraint.deactivate(evenWidths)
+        let others = SideTab.allCases.filter { $0 != selected }.compactMap { buttons[$0] }
+        evenWidths = others.dropFirst().compactMap { button in
+            others.first.map { button.widthAnchor.constraint(equalTo: $0.widthAnchor) }
+        }
+        NSLayoutConstraint.activate(evenWidths)
     }
 }
 
@@ -113,7 +127,7 @@ private final class TabButton: NSButton {
     static let textOffset: CGFloat = 4
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: super.intrinsicContentSize.width + 2 * Self.padding, height: 24)
+        NSSize(width: super.intrinsicContentSize.width + 2 * Self.padding, height: 26)
     }
 
     override func viewDidMoveToSuperview() {
