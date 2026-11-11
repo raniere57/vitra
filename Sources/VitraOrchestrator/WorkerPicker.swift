@@ -14,6 +14,12 @@ import Foundation
 /// 3. While nobody is rated 4 or more on the kind, learning comes first.
 /// 4. Otherwise the cheapest worker that may run.
 ///
+/// A hard piece goes only to strong workers when any may run, and has no
+/// learning turns; an easy one stays off them when a lighter worker may run.
+/// A worker whose last three runs all failed rests for half an hour, and a CLI
+/// whose provider said it is out of quota, signed out or down is left alone
+/// until that has had time to pass.
+///
 /// Pure: the choice is a function of its inputs, so it can be tested without
 /// spawning anything.
 public enum WorkerPicker {
@@ -28,9 +34,15 @@ public enum WorkerPicker {
     /// Every this-many-th piece of a kind goes to the least used worker.
     static let explorationEvery = 5
     /// A run that failed this fast never really ran: a quota, a sign-in.
+    /// Kept for a failure whose words were not recognised.
     static let quickFailure: TimeInterval = 60
-    /// How long such a failure keeps its CLI out.
+    /// How long such an unrecognised failure keeps its CLI out.
     static let quotaMemory: TimeInterval = 30 * 60
+    /// Failures in a row that make a worker rest.
+    static let restingAfter = 3
+    /// The failures must fall within this, and the rest lasts this long from
+    /// the last of them.
+    static let restingWindow: TimeInterval = 30 * 60
     /// What kinds of task gemini may be given: it fails whenever it reaches
     /// for a shell, so it reads and does not run anything.
     static let geminiKinds: Set<TaskKind> = [.explore, .review, .docs]
@@ -42,6 +54,9 @@ public enum WorkerPicker {
     ///   - installed: the CLIs that are on this machine.
     ///   - excluded: CLIs that must not be picked, such as the implementer's
     ///     own when the piece is its audit.
+    ///   - excludedWorkers: single workers that must not be picked, such as the
+    ///     one whose delivery is being redone.
+    ///   - difficulty: how hard the piece is.
     public static func pick(
         kind: TaskKind,
         access: WorkerAccess,
@@ -50,23 +65,73 @@ public enum WorkerPicker {
         offers: [ModelCatalog.Offer],
         installed: Set<WorkerCLI>,
         excluded: Set<WorkerCLI> = [],
+        excludedWorkers: Set<ModelCatalog.Offer> = [],
+        difficulty: Difficulty = .normal,
         now: Date = Date()
     ) -> Choice? {
-        // Not a verdict on anyone: a run the user stopped is not a try.
-        let ofKind = history.filter { ($0.spec.kind ?? .other) == kind && $0.state != .cancelled }
+        func attempt(skipping skipped: Set<ModelCatalog.Offer>) -> Choice? {
+            choose(
+                kind: kind, access: access, needsCommands: needsCommands, history: history, offers: offers,
+                installed: installed, excluded: excluded, skipping: skipped, difficulty: difficulty, now: now
+            )
+        }
+        let resters = resting(history, now: now)
+        let choice = attempt(skipping: excludedWorkers.union(resters.keys))
+        guard !resters.isEmpty,
+              let without = attempt(skipping: excludedWorkers),
+              without.offer != choice?.offer,
+              let until = resters[without.offer]
+        else { return choice }
+        // The rest changed the choice: say who is resting and until when.
+        guard let choice else { return nil }
+        return Choice(
+            offer: choice.offer,
+            reason: choice.reason + "; \(without.offer.name) is resting until \(clock(until)) after \(restingAfter) failures in a row"
+        )
+    }
+
+    private static func choose(
+        kind: TaskKind,
+        access: WorkerAccess,
+        needsCommands: Bool,
+        history: [Run],
+        offers: [ModelCatalog.Offer],
+        installed: Set<WorkerCLI>,
+        excluded: Set<WorkerCLI>,
+        skipping: Set<ModelCatalog.Offer>,
+        difficulty: Difficulty,
+        now: Date
+    ) -> Choice? {
+        // Not a verdict on anyone: a run the user stopped is not a try, and a
+        // run whose provider was out of quota or down is not a run at all.
+        let ofKind = history.filter {
+            ($0.spec.kind ?? .other) == kind && $0.state != .cancelled && $0.providerFailure == nil
+        }
         let stalled = stalledCLIs(history, now: now)
 
-        let candidates = offers.enumerated().filter { _, offer in
-            guard installed.contains(offer.cli), !excluded.contains(offer.cli), !stalled.contains(offer.cli) else {
-                return false
-            }
+        let eligible = offers.enumerated().filter { _, offer in
+            guard installed.contains(offer.cli), !excluded.contains(offer.cli), !stalled.contains(offer.cli),
+                  !skipping.contains(offer)
+            else { return false }
             switch offer.cli {
             case .claude, .opencode: return true
             case .cursor: return !needsCommands
             case .gemini: return !needsCommands && access == .read && geminiKinds.contains(kind)
             }
-        }.map { order, offer in
-            Candidate(offer: offer, order: order, runs: ofKind.filter { isRun($0, of: offer) })
+        }
+        // A hard piece goes to a strong worker when one may run, an easy one
+        // to a light worker when one may.
+        let strong = eligible.filter { _, offer in isStrong(offer) }
+        let light = eligible.filter { _, offer in !isStrong(offer) }
+        let pool: [(offset: Int, element: ModelCatalog.Offer)]
+        switch difficulty {
+        case .hard: pool = strong.isEmpty ? eligible : strong
+        case .easy: pool = light.isEmpty ? eligible : light
+        case .normal: pool = eligible
+        }
+
+        let candidates = pool.map { order, offer in
+            Candidate(offer: offer, order: order, runs: ofKind.filter { isRun($0, of: offer) }, difficulty: difficulty)
         }
             // Known bad on this kind, at this effort: never picked on its own.
             .filter { $0.average.map { $0 >= Double(Rating.satisfactory) } ?? true }
@@ -77,8 +142,13 @@ public enum WorkerPicker {
         func cliRuns(_ candidate: Candidate) -> Int {
             ofKind.filter { $0.spec.cli == candidate.offer.cli }.count
         }
+        // What the pick says about the piece, when it was not a normal one.
+        func said(_ reason: String) -> String {
+            difficulty == .normal ? reason : reason + ", \(difficulty.rawValue) piece"
+        }
 
-        let learning = candidates.filter {
+        // A hard piece is not the place to try an unknown worker.
+        let learning = difficulty == .hard ? nil : candidates.filter {
             $0.delivered < deliveriesToLearn && lowerEffortTried($0.offer, offers: offers, ofKind: ofKind)
         }.min(by: {
             ($0.costRank, cliRuns($0), $0.order) < ($1.costRank, cliRuns($1), $1.order)
@@ -86,7 +156,7 @@ public enum WorkerPicker {
         func learn(_ first: Candidate) -> Choice {
             Choice(
                 offer: first.offer,
-                reason: "learning, \(first.delivered) of \(deliveriesToLearn) runs on \(kind.rawValue)"
+                reason: said("learning, \(first.delivered) of \(deliveriesToLearn) runs on \(kind.rawValue)")
             )
         }
 
@@ -95,22 +165,24 @@ public enum WorkerPicker {
         // first would put every slow or broken one ahead of the good ones.
         let good = candidates.filter { ($0.average ?? 0) >= Double(Rating.satisfactory) }
         if !good.isEmpty {
-            if ofKind.count % explorationEvery == explorationEvery - 1 {
+            if difficulty != .hard, ofKind.count % explorationEvery == explorationEvery - 1 {
                 if let learning { return learn(learning) }
                 if let least = candidates.min(by: {
                     ($0.runs.count, $0.costRank, $0.order) < ($1.runs.count, $1.costRank, $1.order)
                 }) {
                     return Choice(
                         offer: least.offer,
-                        reason: "every fifth piece goes to the least used worker: "
-                            + "\(least.runs.count) \(least.runs.count == 1 ? "run" : "runs") on \(kind.rawValue)"
+                        reason: said(
+                            "every fifth piece goes to the least used worker: "
+                                + "\(least.runs.count) \(least.runs.count == 1 ? "run" : "runs") on \(kind.rawValue)"
+                        )
                     )
                 }
             }
             if let best = good.min(by: {
                 ($0.medianSeconds, $0.medianCost, $0.order) < ($1.medianSeconds, $1.medianCost, $1.order)
             }) {
-                return Choice(offer: best.offer, reason: best.fastestReason(kind))
+                return Choice(offer: best.offer, reason: said(best.fastestReason(kind)))
             }
         }
 
@@ -118,7 +190,10 @@ public enum WorkerPicker {
         if let learning { return learn(learning) }
 
         return candidates.min { ($0.costRank, $0.order) < ($1.costRank, $1.order) }.map {
-            Choice(offer: $0.offer, reason: "cheapest that may run; none is rated \(Rating.satisfactory) or more on \(kind.rawValue)")
+            Choice(
+                offer: $0.offer,
+                reason: said("cheapest that may run; none is rated \(Rating.satisfactory) or more on \(kind.rawValue)")
+            )
         }
     }
 
@@ -130,22 +205,32 @@ public enum WorkerPicker {
         let order: Int
         /// This worker's runs on the kind.
         let runs: [Run]
+        /// How hard the piece being placed is.
+        let difficulty: Difficulty
 
-        var delivered: Int { deliveredRuns.count }
-        private var deliveredRuns: [Run] {
+        var delivered: Int { Self.delivered(runs).count }
+
+        private static func delivered(_ runs: [Run]) -> [Run] {
             runs.filter { run in
                 if case .finished = run.state { return !Scoreboard.hasFailed(run) }
                 return false
             }
         }
 
+        /// What ranking looks at: the runs of the same difficulty when the
+        /// worker has two of them, otherwise everything it did on the kind.
+        private var ranked: [Run] {
+            let same = runs.filter { ($0.spec.difficulty ?? .normal) == difficulty }
+            return same.count >= 2 ? same : runs
+        }
+
         var average: Double? {
-            let ratings = runs.compactMap { $0.rating?.score }
+            let ratings = ranked.compactMap { $0.rating?.score }
             return ratings.isEmpty ? nil : Double(ratings.reduce(0, +)) / Double(ratings.count)
         }
 
-        var medianSeconds: TimeInterval { Scoreboard.median(deliveredRuns.map(\.duration)) ?? .infinity }
-        var medianCost: Double { Scoreboard.median(deliveredRuns.map { $0.output?.costUSD ?? 0 }) ?? .infinity }
+        var medianSeconds: TimeInterval { Scoreboard.median(Self.delivered(ranked).map(\.duration)) ?? .infinity }
+        var medianCost: Double { Scoreboard.median(Self.delivered(ranked).map { $0.output?.costUSD ?? 0 }) ?? .infinity }
 
         /// Free CLIs cost nothing; claude costs by its tier, in the order the
         /// catalogue lists them: haiku low < medium < high < sonnet high < opus low.
@@ -166,6 +251,23 @@ public enum WorkerPicker {
     /// Whether `run` is `offer`: the same CLI, model and effort.
     static func isRun(_ run: Run, of offer: ModelCatalog.Offer) -> Bool {
         run.spec.cli == offer.cli && run.spec.model == offer.model && run.spec.effort == offer.effort
+    }
+
+    // MARK: Strength
+
+    /// Whether `offer` is a worker for a hard piece: claude sonnet and opus at
+    /// any effort, claude haiku only at high, and the Groks at high or xhigh.
+    /// opencode's free models are never strong, and nor is gemini.
+    static func isStrong(_ offer: ModelCatalog.Offer) -> Bool {
+        switch offer.cli {
+        case .claude:
+            return offer.model != "haiku" || offer.effort == "high"
+        case .cursor:
+            let effort = split(cli: .cursor, model: offer.model, effort: offer.effort).effort
+            return offer.model.contains("grok") && (effort == "high" || effort == "xhigh")
+        case .opencode, .gemini:
+            return false
+        }
     }
 
     // MARK: Effort ladder
@@ -204,14 +306,27 @@ public enum WorkerPicker {
 
     // MARK: Quota
 
-    /// The CLIs whose latest run, of any kind, failed without really running
-    /// — out within a minute with nothing useful, as with "Free usage limit
-    /// reached" — less than half an hour ago.
+    /// The CLIs to leave alone for now.
+    ///
+    /// When a provider has said what is wrong — out of quota, signed out,
+    /// down — that is believed: quota for an hour, a sign-in until a later run
+    /// of the CLI succeeds, an outage for ten minutes, unless a later run
+    /// succeeded before then. A failure with no such words is still taken for
+    /// a quota when it came to nothing within a minute and is under half an
+    /// hour old.
     static func stalledCLIs(_ history: [Run], now: Date) -> Set<WorkerCLI> {
         var stalled: Set<WorkerCLI> = []
         for (cli, runs) in Dictionary(grouping: history, by: \.spec.cli) {
-            guard let latest = runs.max(by: { $0.started < $1.started }),
-                  case let .finished(exitCode) = latest.state,
+            guard let latest = runs.max(by: { $0.started < $1.started }) else { continue }
+            if let said = runs.filter({ $0.providerFailure != nil }).max(by: { $0.started < $1.started }),
+               let failure = said.providerFailure {
+                let recovered = runs.contains { $0.started > said.started && isDelivery($0) }
+                let since = now.timeIntervalSince(said.ended ?? said.started)
+                if !recovered, failure.stall.map({ since < $0 }) ?? true { stalled.insert(cli) }
+                // The words settle it, whichever way: no guessing from speed.
+                if latest.providerFailure != nil { continue }
+            }
+            guard case let .finished(exitCode) = latest.state,
                   exitCode != 0 || Scoreboard.hasFailed(latest),
                   latest.duration < quickFailure,
                   now.timeIntervalSince(latest.started) < quotaMemory
@@ -219,5 +334,50 @@ public enum WorkerPicker {
             stalled.insert(cli)
         }
         return stalled
+    }
+
+    private static func isDelivery(_ run: Run) -> Bool {
+        if case .finished = run.state { return !Scoreboard.hasFailed(run) }
+        return false
+    }
+
+    // MARK: Circuit breaker
+
+    /// The workers resting, and until when: those whose last three runs, of
+    /// any kind, all failed within half an hour of each other, rest for half an
+    /// hour from the last. A run that delivered, even one rated poorly, closes
+    /// it, as does the time passing. A run stopped by the user, one still
+    /// going and one whose provider failed are not verdicts either way.
+    static func resting(_ history: [Run], now: Date) -> [ModelCatalog.Offer: Date] {
+        let judged = history.filter { run in
+            guard run.providerFailure == nil else { return false }
+            switch run.state {
+            case .finished, .lost: return true
+            case .running, .cancelled: return false
+            }
+        }
+        func end(_ run: Run) -> Date { run.ended ?? run.started }
+
+        var resting: [ModelCatalog.Offer: Date] = [:]
+        let byWorker = Dictionary(grouping: judged) {
+            ModelCatalog.Offer(cli: $0.spec.cli, model: $0.spec.model, effort: $0.spec.effort)
+        }
+        for (worker, runs) in byWorker {
+            let latest = Array(runs.sorted { end($0) > end($1) }.prefix(restingAfter))
+            guard latest.count == restingAfter, latest.allSatisfy(Scoreboard.hasFailed),
+                  let last = latest.map(end).max(), let first = latest.map(end).min(),
+                  last.timeIntervalSince(first) <= restingWindow
+            else { continue }
+            let until = last.addingTimeInterval(restingWindow)
+            if until > now { resting[worker] = until }
+        }
+        return resting
+    }
+
+    /// A time of day, as `HH:MM`, for saying when a rest ends.
+    static func clock(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
     }
 }
