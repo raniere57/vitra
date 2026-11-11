@@ -96,7 +96,7 @@ public enum AgentTools {
         ),
         MCPTools.tool(
             "agent_wait",
-            "Wait for worker agents to finish and return what each one reported: its answer, whether it failed, how long it took and what it cost. Returns as soon as all of them have stopped, or at the timeout with the unfinished ones marked as still running — call again to keep waiting.",
+            "Wait for worker agents to finish and return what each one reported: its answer, whether it failed, how long it took and what it cost. Returns as soon as all of them have stopped, or at the timeout with the unfinished ones marked as still running — call again to keep waiting. A worker that did not run because its provider is out of quota, signed out or down is reported as DID NOT RUN, not FAILED; when Vitra picked it, the piece is retried once on another provider and the wait goes on with the new id.",
             properties: [
                 "ids": [
                     "type": "array",
