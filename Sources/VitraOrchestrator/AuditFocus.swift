@@ -154,7 +154,7 @@ public enum AuditFocus: String, Codable, Sendable, CaseIterable {
         ]),
         (.concurrency, [
             "lock", "locks", "queue", "queues", "thread", "threads", "actor", "actors", "scheduler", "semaphore",
-            "mutex", "concurrency", "async",
+            "mutex", "concurrency",
         ]),
         (.interface, [
             "view", "views", "ui", "component", "components", "layout", "style", "styles", "screen", "screens",
@@ -210,7 +210,7 @@ public enum AuditFocus: String, Codable, Sendable, CaseIterable {
         (.security, LineRule(pattern: regex(#"\.\./"#))),
         // Network endpoints.
         (.security, LineRule(pattern: regex(
-            #"(https?://|\bURLSession\b|\bURLRequest\b|\bfetch\(|\baxios\b|requests\.(get|post|put|delete)|http\.(Get|Post|ListenAndServe|HandleFunc)|\breqwest\b|\bapp\.(get|post|put|patch|delete)\(|@app\.route|@(Get|Post|Put|Delete)Mapping|\bNWListener\b|\bcors\b|\.listen\()"#
+            #"(\bURLSession\b|\bURLRequest\b|\bfetch\(|\baxios\b|requests\.(get|post|put|delete)|http\.(Get|Post|ListenAndServe|HandleFunc)|\breqwest\b|\bapp\.(get|post|put|patch|delete)\(|@app\.route|@(Get|Post|Put|Delete)Mapping|\bNWListener\b|\bcors\b|\.listen\()"#
         ))),
         // Deserialisation that can build arbitrary objects.
         (.security, LineRule(pattern: regex(
@@ -228,12 +228,12 @@ public enum AuditFocus: String, Codable, Sendable, CaseIterable {
         ))),
         // Persistence formats and their versions, and cache keys.
         (.data, LineRule(pattern: regex(
-            #"(CodingKeys|init\(from decoder|encode\(to encoder|(?i:schema_?version|format_?version)|currentVersion|\bUserDefaults\b|localStorage|IndexedDB|json\.dump|pickle\.dump|write\(to:.*atomic|cache[_-]?[kK]ey|\bredis\b|\bNSCache\b|lru_cache)"#,
+            #"((?i:schema_?version|format_?version)|currentVersion|IndexedDB|pickle\.dump|cache[_-]?[kK]ey|\bredis\b|\bNSCache\b|lru_cache)"#,
             caseless: false
         ))),
 
         (.concurrency, LineRule(pattern: regex(
-            #"(\bDispatch(Queue|Group|Semaphore|Source)\b|\bOperationQueue\b|\bThread\b|pthread_|\bNSLock\b|NSRecursiveLock|os_unfair_lock|OSAllocatedUnfairLock|\bMutex\b|\bactor\s+\w|@MainActor|\bnonisolated\b|\bSendable\b|@unchecked|\bawait\b|\basync\b|\bTask\s*\{|Task\.detached|TaskGroup|Continuation|\bTimer\b|asyncAfter|\bflock\(|\blockf\(|O_EXLOCK|\bsignal\(|SIG(TERM|INT|CHLD|HUP|PIPE)|sigaction|\bgo func\b|sync\.(Mutex|RWMutex|WaitGroup|Once)|\bchan\s+\w|\bthreading\b|\bmultiprocessing\b|\basyncio\b|Promise\.all|setTimeout|setInterval|std::thread|tokio::|Arc<|Mutex<|RwLock<|\bAtomic\w*|\btrap\s)"#,
+            #"(\bDispatch(Queue|Group|Semaphore|Source)\b|\bOperationQueue\b|\bThread\b|pthread_|\bNSLock\b|NSRecursiveLock|os_unfair_lock|OSAllocatedUnfairLock|\bMutex\b|\bactor\s+\w|@unchecked|Task\.detached|TaskGroup|Continuation|\bflock\(|\blockf\(|O_EXLOCK|\bsignal\(|SIG(TERM|INT|CHLD|HUP|PIPE)|sigaction|\bgo func\b|sync\.(Mutex|RWMutex|WaitGroup|Once)|\bchan\s+\w|\bthreading\b|\bmultiprocessing\b|\basyncio\b|std::thread|tokio::|Arc<|Mutex<|RwLock<|\bAtomic\w*|\btrap\s)"#,
             caseless: false
         ))),
 

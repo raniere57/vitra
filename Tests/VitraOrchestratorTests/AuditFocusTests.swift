@@ -31,12 +31,12 @@ private let cases: [FocusCase] = [
     FocusCase(name: "mcp path", diff: diff("Sources/VitraBridge/MCPServer.swift", ["let a = 1"]), expected: .security),
     FocusCase(name: "sql migration", diff: diff("migrations/0003_drop.sql", ["DROP TABLE users;"]), expected: .data),
     FocusCase(name: "rust schema version", diff: diff("src/store.rs", ["const SCHEMA_VERSION: u32 = 3;"]), expected: .data),
-    FocusCase(name: "swift coding keys", diff: diff("Sources/Run.swift", ["private enum CodingKeys: String, CodingKey {"]), expected: .data),
+    FocusCase(name: "swift format version", diff: diff("Sources/Run.swift", ["static let formatVersion = 3"]), expected: .data),
     FocusCase(name: "js cache key", diff: diff("lib/cache.js", ["const cacheKey = `${user}`"]), expected: .data),
     FocusCase(name: "swift lock", diff: diff("Sources/Cache.swift", ["private let lock = NSLock()"]), expected: .concurrency),
     FocusCase(name: "python threading", diff: diff("worker.py", ["import threading"]), expected: .concurrency),
     FocusCase(name: "go goroutine", diff: diff("main.go", ["go func() {"]), expected: .concurrency),
-    FocusCase(name: "swift await", diff: diff("Sources/Load.swift", ["let x = await load()"]), expected: .concurrency),
+    FocusCase(name: "swift detached task", diff: diff("Sources/Load.swift", ["Task.detached { await load() }"]), expected: .concurrency),
     FocusCase(name: "swift view path", diff: diff("Sources/App/SettingsView.swift", ["let a = 1"]), expected: .interface),
     FocusCase(name: "tsx file", diff: diff("web/src/Button.tsx", [#"<button aria-label="Close">"#]), expected: .interface),
     FocusCase(name: "css file", diff: diff("styles/main.css", ["a { color: red }"]), expected: .interface),
@@ -199,4 +199,18 @@ func aCheapFocusKeepsTheCheapPick(_ focus: AuditFocus) throws {
         focuses: [.concurrency, .general]
     )
     #expect(chosen?.cli == .opencode)
+}
+
+/// Everyday Swift is not a reason for the strong auditor: `await`, a
+/// `Codable` type and a URL in a string are in most changes.
+@Test func ordinaryAsyncAndCodableCodeIsNotAHardFocus() {
+    let found = focuses(diff("Sources/Load.swift", [
+        "let x = await load()",
+        "private enum CodingKeys: String, CodingKey { case id }",
+        #"let docs = "https://example.com/docs""#,
+        "@MainActor func show() async {}",
+    ]))
+    #expect(!found.contains(.concurrency))
+    #expect(!found.contains(.data))
+    #expect(!found.contains(.security))
 }
