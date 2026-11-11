@@ -167,6 +167,8 @@ final class ProjectView: NSView {
     /// Whether there is a usage figure; the plate is shown only if it also fits.
     private var usageIsKnown = false
     private var headerWidth: CGFloat = 0
+    /// Whether the project is on a branch; the plate shows only if it also fits.
+    private var hasBranch = false
     /// Narrower than this the session name is cut to an ellipsis; narrower
     /// than what it takes to keep this and the path's minimum, it is hidden.
     private static let sessionMinWidth: CGFloat = 96
@@ -238,7 +240,8 @@ final class ProjectView: NSView {
     /// (the tab bar's chip says it too once it is worth saying), and only then
     /// the path. Model, effort, "waiting for you" and branch never clip.
     private func fitHeader() {
-        let core = [titleLabel, modeControl, modelPill, attentionPill, branchPill].filter { !$0.isHidden }
+        let always = [titleLabel, modeControl, modelPill, attentionPill].filter { !$0.isHidden }
+        let core = hasBranch ? always + [branchPill] : always
         // The mode switch never clips either, but it can say less: at the
         // narrowest window its first segment is abbreviated before anything
         // that matters is pushed out.
@@ -254,6 +257,17 @@ final class ProjectView: NSView {
         usagePill.isHidden = !showsUsage
         let plates = showsUsage ? core + [usagePill] : core
         sessionPill.isHidden = sessionName == nil || !hasRoom(plates, true)
+        // At the narrowest window, with the maestro asking for something, even
+        // that is too much: the path goes, then the branch. The header must
+        // never be wider than its pane, or it pushes the side panel off screen.
+        let withoutPlace = headerNeeds(core, withSession: false) - Self.placeMinWidth - CockpitStyle.Space.md
+        place.isHidden = headerWidth > 0 && headerWidth < headerNeeds(core, withSession: false)
+        let branchWidth = branchPill.fittingSize.width + CockpitStyle.Space.md
+        branchPill.isHidden = !hasBranch || (place.isHidden && headerWidth < withoutPlace)
+        if branchPill.isHidden, hasBranch, headerWidth >= withoutPlace - branchWidth + Self.placeMinWidth + CockpitStyle.Space.md {
+            // With the branch gone there may be room for the path again.
+            place.isHidden = false
+        }
     }
 
     /// The width the header needs for `plates`, the spacer, the path at its
@@ -792,7 +806,7 @@ final class ProjectView: NSView {
             .first
         place.stringValue = path
         self.branch.stringValue = branch ?? ""
-        branchPill.isHidden = branch == nil
+        hasBranch = branch != nil
         palco.setBranch(branch)
         fitHeader()
     }
@@ -828,6 +842,10 @@ final class ProjectView: NSView {
         let header = MaestroHeader(views: [title, modeControl, modelPill, attentionPill, usagePill, sessionPill, NSView(), place, branchPill])
         header.spacing = CockpitStyle.Space.md
         header.setCustomSpacing(CockpitStyle.Space.lg, after: title)
+        // The header never widens its pane: it would push the side panel off
+        // the window. It clips for the instant before `fitHeader`, told the
+        // real width, hides what does not fit.
+        header.setClippingResistancePriority(.defaultLow, for: .horizontal)
         header.edgeInsets = NSEdgeInsets(top: 0, left: CockpitStyle.inset, bottom: 0, right: CockpitStyle.inset)
         header.onResize = { [weak self] width in
             self?.headerWidth = width

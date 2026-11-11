@@ -63,6 +63,19 @@ final class CockpitTabBar: NSView {
         chipRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
         chips.map(ChipView.init).forEach(chipRow.addArrangedSubview)
         chipRow.isHidden = chips.isEmpty
+        needsLayout = true
+    }
+
+    /// The chips are the first thing the bar gives up: the tabs and the day's
+    /// cost never clip for them. Decided from what each piece needs, not from
+    /// how the layout came out, so it cannot flap.
+    override func layout() {
+        super.layout()
+        let needed = CockpitStyle.trafficLightInset + tabs.fittingSize.width + CockpitStyle.inset
+            + chipRow.fittingSize.width + CockpitStyle.Space.lg
+            + today.fittingSize.width + CockpitStyle.Space.md + cost.fittingSize.width + CockpitStyle.inset
+        let hides = shownChips.isEmpty || needed > bounds.width
+        if chipRow.isHidden != hides { chipRow.isHidden = hides }
     }
 
     @objc private func addProject(_ sender: Any?) { onAdd?() }
