@@ -76,7 +76,8 @@ private func filled(_ text: String) -> [Character] {
         .appendingPathComponent("vitra-loc-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
-    let file = root.appendingPathComponent("App.swift")
+    try FileManager.default.createDirectory(at: root.appendingPathComponent("src"), withIntermediateDirectories: true)
+    let file = root.appendingPathComponent("src/App.swift")
     try Data().write(to: file)
 
     let line = row("src/App.swift:12:3:", width: 40)

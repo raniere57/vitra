@@ -950,7 +950,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// the pointer rests, so a sweep across the grid does not stat every word.
     private func updateLinkCursor(for event: NSEvent) {
         let position = cell(for: event)
-        if lastHoverCell == position {
+        if let last = lastHoverCell, last == position {
             return
         }
         lastHoverCell = position
@@ -964,7 +964,9 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.pathHoverTimer = nil
-                guard self.lastHoverCell == position, self.pathLink(at: position) != nil else { return }
+                guard let last = self.lastHoverCell, last == position,
+                      self.pathLink(at: position) != nil
+                else { return }
                 NSCursor.pointingHand.set()
             }
         }
