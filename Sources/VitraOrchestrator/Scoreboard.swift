@@ -233,7 +233,10 @@ public enum Scoreboard {
                 "  \($0.key.name) — resting until \(WorkerPicker.clock($0.value)) after \(WorkerPicker.restingAfter) failures in a row"
             })
         }
-        lines.append(contentsOf: lineupLines(lineup, history: history, kinds: kind.map { [$0] } ?? TaskKind.allCases))
+        // With no catalogue there is nothing to pick from, and no lineup to show.
+        if !offers.isEmpty {
+            lines.append(contentsOf: lineupLines(lineup, history: history, kinds: kind.map { [$0] } ?? TaskKind.allCases))
+        }
         return lines.joined(separator: "\n")
     }
 
