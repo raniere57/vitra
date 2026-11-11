@@ -37,6 +37,12 @@ enum UISnapshot {
             panel.show(context.fixtures.workerRuns(), now: context.fixtures.now)
             return panel
         }),
+        Shot(name: "stage", size: NSSize(width: 420, height: 720), build: { palco($0, $0.fixtures.palcoRuns()) }),
+        Shot(name: "stage-empty", size: NSSize(width: 420, height: 720), build: { palco($0, $0.fixtures.palcoQuiet(), merged: false) }),
+        Shot(name: "stage-reduced-motion", size: NSSize(width: 420, height: 720), build: { palco($0, $0.fixtures.palcoRuns(), reduceMotion: true) }),
+        Shot(name: "stage-full", size: NSSize(width: 420, height: 720), build: { palco($0, $0.fixtures.palcoCrowd()) }),
+        Shot(name: "stage-hover", size: NSSize(width: 420, height: 720), build: { palco($0, $0.fixtures.palcoRuns(), hover: "p02") }),
+        Shot(name: "stage-wide", size: NSSize(width: 720, height: 640), build: { palco($0, $0.fixtures.palcoRuns()) }),
         Shot(name: "ranking", size: NSSize(width: 420, height: 720), build: { context in
             let view = RankingView()
             view.show(WorkerBoard.ranking(context.fixtures.rankingScores()))
@@ -162,6 +168,21 @@ enum UISnapshot {
             project.bottomAnchor.constraint(equalTo: window.bottomAnchor),
         ])
         return window
+    }
+
+    /// The Palco, drawn as a still: the particles frozen mid-link, since a
+    /// picture shows no motion. `reduceMotion` shows it as it is with that setting on.
+    private static func palco(
+        _ context: Context, _ runs: [Run], merged: Bool = true, reduceMotion: Bool = false, hover: String? = nil
+    ) -> NSView {
+        let view = PalcoView(isStill: true, reduceMotion: reduceMotion)
+        view.show(model: context.fixtures.maestro)
+        view.show(usageText: context.fixtures.usage?.text)
+        view.setBranch("main")
+        if merged { view.seedMerged(["m1", "m2", "m3", "m4"]) }
+        view.show(runs, now: context.fixtures.now)
+        view.hover(hover)
+        return view
     }
 
     /// A recent-files list, once the search has run and the system has had a

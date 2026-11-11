@@ -2,10 +2,11 @@ import AppKit
 
 /// What the right side of a project can show.
 enum SideTab: String, CaseIterable {
-    case workers, ranking, browser, files, git, terminal
+    case palco, workers, ranking, browser, files, git, terminal
 
     var title: String {
         switch self {
+        case .palco: return "Palco"
         case .workers: return "Workers"
         case .ranking: return "Ranking"
         case .browser: return "Navegador"

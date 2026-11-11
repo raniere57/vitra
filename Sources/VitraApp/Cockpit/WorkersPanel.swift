@@ -83,6 +83,19 @@ final class WorkersPanel: NSView {
         }
     }
 
+    /// Opens one worker's row, closing the one that was open, and scrolls to it.
+    /// For the Palco, which sends you here when a worker is clicked.
+    func reveal(_ id: String) {
+        guard let view = rowViews[id] else { return }
+        let previous = openRow
+        openRow = id
+        for changed in [previous, id].compactMap({ $0 }) {
+            rowViews[changed]?.setOpen(openRow == changed)
+        }
+        layoutSubtreeIfNeeded()
+        view.scrollToVisible(view.bounds)
+    }
+
     @objc private func stopAllWorkers(_ sender: Any?) {
         onStopAll?(runningIDs)
     }

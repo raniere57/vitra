@@ -32,6 +32,16 @@ public enum Theme {
     /// The danger colour as text: the dot's red is too dark to read at 12 pt.
     public static let dangerText = color(0xEE8F87)
 
+    // MARK: Provider tints
+
+    /// One muted tint per worker CLI, for the Palco's nodes and timeline bars.
+    /// Kept apart from the amber accent, the success green and the danger red,
+    /// and dark enough to sit on the graphite ground without glaring.
+    public static let providerClaude = color(0xC98A63)
+    public static let providerOpencode = color(0x5FA8C9)
+    public static let providerCursor = color(0xC58AAE)
+    public static let providerGemini = color(0x9C8CDB)
+
     // MARK: Spacing
 
     /// The spacing scale: 2 / 4 / 6 / 8 / 12 / 16 / 24.

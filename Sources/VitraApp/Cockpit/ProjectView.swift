@@ -29,6 +29,15 @@ private final class MaestroHeader: NSStackView {
 final class ProjectView: NSView {
     let project: CockpitProject
     let workers = WorkersPanel()
+    /// The live stage and timeline of the workers: the Palco tab.
+    private(set) lazy var palco: PalcoView = {
+        let view = PalcoView(repository: project.path)
+        view.onOpenWorker = { [weak self] id in
+            self?.select(.workers)
+            self?.workers.reveal(id)
+        }
+        return view
+    }()
 
     /// What this project is called in its shell's environment (`VITRA_PANE`).
     /// The maestro's `vitra mcp` helper inherits it, and so does every worker
@@ -176,6 +185,7 @@ final class ProjectView: NSView {
         case .calm, nil: CockpitStyle.muted
         }
         usage.toolTip = "Uso semanal da assinatura Claude, como o maestro informou por último"
+        palco.show(usageText: label?.text)
         fitHeader()
     }
 
@@ -188,6 +198,7 @@ final class ProjectView: NSView {
         session.stringValue = current?.session ?? ""
         session.toolTip = current?.session
         sessionName = current?.session
+        palco.show(model: current)
         fitHeader()
     }
 
@@ -250,6 +261,7 @@ final class ProjectView: NSView {
     /// Shows the workers and, on the tab, how many are running.
     func show(_ runs: [Run], now: Date) {
         workers.show(runs, now: now)
+        palco.show(runs, now: now)
         // A worker that is done has no more use for its tab, and each tab
         // open is memory held.
         runTitles = Dictionary(runs.map { ($0.id, $0.spec.label ?? $0.spec.worker) }) { first, _ in first }
@@ -268,6 +280,8 @@ final class ProjectView: NSView {
 
         let content: NSView
         switch tab {
+        case .palco:
+            content = palco
         case .workers:
             content = workers
         case .ranking:
@@ -653,6 +667,7 @@ final class ProjectView: NSView {
         place.stringValue = path
         self.branch.stringValue = branch ?? ""
         branchPill.isHidden = branch == nil
+        palco.setBranch(branch)
         fitHeader()
     }
 

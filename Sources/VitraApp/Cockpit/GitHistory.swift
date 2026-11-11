@@ -147,7 +147,7 @@ enum GitHistory {
 
     private static func text(_ data: Data) -> String { String(decoding: data, as: UTF8.self) }
 
-    private static func run(_ executable: String, _ arguments: [String], in directory: String) -> Data? {
+    static func run(_ executable: String, _ arguments: [String], in directory: String) -> Data? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
