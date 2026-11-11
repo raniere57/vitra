@@ -146,7 +146,8 @@ final class PalcoView: NSView {
         let shown = Set(nodes.map(\.id))
         return Set(runs.filter { run in
             guard shown.contains(run.id), case .finished = run.state else { return false }
-            return run.spec.access == .edit && (run.rating?.score ?? 0) >= 4
+            // No branch on record means there was never anything to merge.
+            return run.spec.access == .edit && run.branch != nil && (run.rating?.score ?? 0) >= 4
         }.map(\.id))
     }
 

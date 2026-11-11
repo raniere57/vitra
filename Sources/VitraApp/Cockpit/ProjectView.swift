@@ -239,6 +239,13 @@ final class ProjectView: NSView {
     /// the path. Model, effort, "waiting for you" and branch never clip.
     private func fitHeader() {
         let core = [titleLabel, modeControl, modelPill, attentionPill, branchPill].filter { !$0.isHidden }
+        // The mode switch never clips either, but it can say less: at the
+        // narrowest window its first segment is abbreviated before anything
+        // that matters is pushed out.
+        modeControl.setLabel("Orquestrador", forSegment: 0)
+        if headerWidth > 0, headerWidth < headerNeeds(core, withSession: false) {
+            modeControl.setLabel("Orq.", forSegment: 0)
+        }
         // Before the first layout there is no width to decide from.
         let hasRoom = { (plates: [NSView], withSession: Bool) -> Bool in
             self.headerWidth == 0 || self.headerWidth >= self.headerNeeds(plates, withSession: withSession)
