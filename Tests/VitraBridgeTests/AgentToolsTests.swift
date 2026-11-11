@@ -54,6 +54,14 @@ private struct Fixture {
 
     func cleanUp() { try? FileManager.default.removeItem(at: root) }
 
+    /// Puts the free opencode first in the user's lineup, for every difficulty.
+    func preferOpenCode() throws {
+        let free = ModelCatalog.Offer(cli: .opencode, model: "opencode/glm-5.3-flash-free", effort: nil)
+        let standard = Lineup.standard
+        try Lineup(hard: [free] + standard.hard, normal: [free] + standard.normal, easy: [free] + standard.easy)
+            .save(to: root.appendingPathComponent("lineup.json"))
+    }
+
     func call(_ tool: String, _ arguments: JSONValue = [:]) async throws -> String {
         try await executor.run(tool: tool, arguments: arguments, pane: nil)
     }
@@ -1226,9 +1234,7 @@ private func successorID(in line: String) -> String {
     defer { fixture.cleanUp() }
 
     // The free opencode is first in the user's lineup, so Vitra picks it, and it is out.
-    try Lineup.standard.with(.normal, [
-        .init(cli: .opencode, model: "opencode/glm-5.3-flash-free", effort: nil), .init(cli: .claude, model: "haiku", effort: "low"),
-    ]).save(to: fixture.root.appendingPathComponent("lineup.json"))
+    try fixture.preferOpenCode()
     let text = try await fixture.call("agent_spawn", [
         "prompt": "map the code", "directory": .string(fixture.root.path), "kind": "explore",
         "label": "probe", "difficulty": "normal", "commands": [], "minutes": 7,
@@ -1268,6 +1274,7 @@ private func successorID(in line: String) -> String {
     let both = #"cat >/dev/null; echo 'Claude AI usage limit reached|1731' >&2; exit 1"#
     let fixture = try Fixture(claude: both, opencode: outOfQuota)
     defer { fixture.cleanUp() }
+    try fixture.preferOpenCode()
 
     let started = try await fixture.call("agent_spawn", ["prompt": "go", "directory": .string(fixture.root.path), "kind": "explore"])
     let id = startedID(started)
@@ -1292,6 +1299,7 @@ private func successorID(in line: String) -> String {
     defer { fixture.cleanUp() }
     let repository = fixture.root.appendingPathComponent("repo")
     try makeRepository(at: repository)
+    try fixture.preferOpenCode()
 
     let text = try await fixture.call("agent_spawn", [
         "prompt": "change it", "directory": .string(repository.path), "access": "edit", "kind": "implement",
