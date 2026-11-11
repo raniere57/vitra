@@ -221,7 +221,6 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         let wasInterrupted = Attention.takeInterrupted(for: project.path)
         let view = ProjectView(project: project, kit: kit, resumesInterruptedWork: wasInterrupted)
         view.workers.onStopAll = { [weak self] ids in self?.feed.cancel(ids) }
-        view.loadRanking = { [weak self] done in self?.feed.scores(done) }
         view.loadResumo = { [weak self] done in self?.feed.resumo(for: project, done) }
         view.onModeChange = { [weak self] mode in
             guard let self, let index = self.projects.firstIndex(where: { $0.path == project.path }) else { return }

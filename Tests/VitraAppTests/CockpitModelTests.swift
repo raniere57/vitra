@@ -210,17 +210,6 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(row.meta == "deepseek-v4.1-flash-free · 10:46 · 4s · wrong file")
 }
 
-@Test func theRankingSaysForEachModelItsScoreItsTimeAndHowOftenItFails() {
-    let scores = [
-        ModelScore(kind: .explore, cli: .gemini, model: "gemini-3.8-flash", effort: nil, runs: 6, rated: 4, averageScore: 4.5, failures: 0, medianSeconds: 8, costUSD: 0.12),
-        ModelScore(kind: .implement, cli: .opencode, model: "opencode/deepseek-v4.1-flash-free", effort: "high", runs: 1, rated: 0, averageScore: nil, failures: 1, medianSeconds: nil, costUSD: 0),
-    ]
-    #expect(WorkerBoard.ranking(scores) == [
-        RankingRow(kind: "explorar", model: "gemini-3.8-flash", score: "4.5", time: "8s", deliveries: "6/6", cost: "$0.12", ratings: "4 avaliações"),
-        RankingRow(kind: "implementar", model: "deepseek-v4.1-flash-free (high)", score: "—", time: "—", deliveries: "0/1", cost: "$0.00", ratings: "sem avaliação"),
-    ])
-}
-
 @Test func aFailedWorkerShowsWhyOnItsMetaLine() {
     let output = WorkerOutput(text: "Failed to authenticate: OAuth session expired and could not be refreshed\nmore", isError: true)
     let failed = run(cli: .claude, model: "haiku", state: .finished(exitCode: 1), seconds: 2, output: output)
@@ -503,31 +492,6 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
 }
 
 // MARK: - The ranking and the side tabs
-
-@Test @MainActor func theRankingLaysOutASectionPerKindAndSaysSoWhenThereIsNothingYet() throws {
-    _ = NSApplication.shared
-    let rows = [
-        RankingRow(kind: "explorar", model: "deepseek-v4.1-flash-free", score: "5.0", time: "4s", deliveries: "1/1", cost: "$0.00", ratings: "1 avaliação"),
-        RankingRow(kind: "explorar", model: "gemini-3.5-flash", score: "4.0", time: "13s", deliveries: "1/1", cost: "$0.00", ratings: "1 avaliação"),
-        RankingRow(kind: "implementar", model: "haiku", score: "—", time: "—", deliveries: "0/2", cost: "$0.00", ratings: "sem avaliação"),
-    ]
-    func texts(_ view: NSView) -> [String] {
-        ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap(texts)
-    }
-    let view = RankingView()
-    view.show(rows)
-    // A table per kind: its title, one row of column heads, then each worker
-    // as its place in that kind, its name and four figures.
-    let heads = ["#", "MODELO", "NOTA", "TEMPO", "ENTREGAS", "CUSTO"]
-    func line(_ place: String, _ row: RankingRow) -> [String] {
-        [place, row.model, row.score, row.time, row.deliveries, row.cost]
-    }
-    #expect(texts(view) == ["EXPLORAR"] + heads + line("1", rows[0]) + line("2", rows[1]) + ["IMPLEMENTAR"] + heads + line("1", rows[2]))
-    // Shown again, it is replaced, not added to.
-    view.show([])
-    #expect(texts(view).first == "Ainda não há entregas para comparar")
-    #expect(texts(view).count == 2)
-}
 
 @Test @MainActor func theTabsOfTheSideAreNamedAndOnlyAPageOrAFileTakesHalfTheWindow() {
     #expect(SideTab.allCases.map(\.title) == ["Palco", "Workers", "Ranking", "Resumo", "Navegador", "Arquivos", "Git", "Terminal"])

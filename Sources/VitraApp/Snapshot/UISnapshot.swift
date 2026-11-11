@@ -50,15 +50,12 @@ enum UISnapshot {
         Shot(name: "stage-full", size: NSSize(width: 420, height: 720), build: { palco($0, $0.fixtures.palcoCrowd()) }),
         Shot(name: "stage-hover", size: NSSize(width: 420, height: 720), build: { palco($0, $0.fixtures.palcoRuns(), hover: "p02") }),
         Shot(name: "stage-wide", size: NSSize(width: 720, height: 640), build: { palco($0, $0.fixtures.palcoRuns()) }),
-        Shot(name: "ranking", size: NSSize(width: 420, height: 720), build: { context in
-            let data = context.fixtures.lineupData()
-            let lineup = LineupSectionView(
-                file: context.fixtures.project.appendingPathComponent("lineup.json"),
-                loader: { done in MainActor.assumeIsolated { done(data) } }
-            )
-            let view = RankingView(lineup: lineup)
-            view.show(WorkerBoard.ranking(context.fixtures.rankingScores()))
-            return view
+        Shot(name: "ranking", size: rankingSize, build: { ranking($0, RankingOptions()) }),
+        Shot(name: "ranking-usos", size: rankingSize, build: {
+            ranking($0, RankingOptions(grouping: .none, order: .uses, showsUnused: true))
+        }),
+        Shot(name: "ranking-fornecedor", size: rankingSize, build: {
+            ranking($0, RankingOptions(grouping: .provider, order: .time))
         }),
         Shot(name: "resumo", size: NSSize(width: 420, height: 1100), build: { context in
             let view = ResumoView(providers: context.fixtures.providerSource())
@@ -175,6 +172,21 @@ enum UISnapshot {
     /// `showsHint` puts the one-time shortcut strip over the side panel;
     /// `terminal` stands in the maestro's place; `configure` gets the project
     /// once it is built.
+    /// Tall enough for the Escalação and the tables under it.
+    static let rankingSize = NSSize(width: 420, height: 1500)
+
+    /// The Ranking tab as `options` slice it, drawn at once from the fixtures.
+    static func ranking(_ context: Context, _ options: RankingOptions) -> NSView {
+        let data = context.fixtures.rankingData()
+        let view = RankingView(
+            lineup: LineupSectionView(file: context.fixtures.project.appendingPathComponent("lineup.json")),
+            loader: { done in MainActor.assumeIsolated { done(data) } },
+            defaults: nil, options: options, computesInline: true
+        )
+        view.reload()
+        return view
+    }
+
     static func cockpit(
         _ context: Context, showsHint: Bool = false, terminal: NSView? = nil, configure: (ProjectView) -> Void = { _ in }
     ) throws -> NSView {

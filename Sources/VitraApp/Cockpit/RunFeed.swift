@@ -9,7 +9,7 @@ import VitraOrchestrator
 /// workers finishing and to move their clocks, and stops with the last of them.
 final class RunFeed: @unchecked Sendable {
     private static let listed = 60
-    /// How far back the ranking looks.
+    /// How far back the Resumo looks.
     private static let scored = 2000
     /// When to look again after a run directory appears.
     private static let recordDelays: [TimeInterval] = [0.3, 1.5]
@@ -66,17 +66,6 @@ final class RunFeed: @unchecked Sendable {
             watch = nil
             timer?.cancel()
             timer = nil
-        }
-    }
-
-    /// Works out how each model has done, from the whole history on disk.
-    ///
-    /// On request rather than on every tick: it reads every run there is, and
-    /// nothing needs it until someone opens the ranking.
-    func scores(_ completion: @escaping @MainActor @Sendable ([ModelScore]) -> Void) {
-        queue.async { [self] in
-            let scores = Scoreboard.scores(orchestrator.recent(limit: Self.scored))
-            DispatchQueue.main.async { MainActor.assumeIsolated { completion(scores) } }
         }
     }
 

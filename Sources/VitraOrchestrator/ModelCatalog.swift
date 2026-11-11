@@ -159,6 +159,12 @@ public enum ModelCatalog {
         return fresh
     }
 
+    /// The kept listing when there is one, without ever asking the CLIs: for
+    /// a screen that must not wait seconds on them.
+    public static func listingIfCached(_ executables: Executables, now: Date = Date()) -> Listing? {
+        listingCache.listing(for: executables.paths, now: now)
+    }
+
     /// What one CLI lists, asked afresh: nil when it is not installed, empty
     /// when it answered with an error or nothing (signed out, most often).
     /// Claude lists nothing; its workers are fixed. Blocks like `listing`.

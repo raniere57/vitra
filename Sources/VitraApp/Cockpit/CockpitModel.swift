@@ -129,21 +129,6 @@ struct WorkerRow: Equatable {
     let detail: String?
 }
 
-/// One model's record at one kind of task, as a line of the ranking.
-struct RankingRow: Equatable {
-    let kind: String
-    let model: String
-    /// The average rating, or a dash when it has none.
-    let score: String
-    /// The median time of a delivery, or a dash when it never delivered.
-    let time: String
-    /// Deliveries that stood out of those tried, as "5/6".
-    let deliveries: String
-    let cost: String
-    /// How many ratings the score rests on.
-    let ratings: String
-}
-
 /// Turns runs into what the workers panel shows.
 enum WorkerBoard {
     private static let longestTitle = 60
@@ -291,21 +276,6 @@ enum WorkerBoard {
         runs.filter { $0.started >= since }.reduce(into: (cost: 0.0, tokens: 0)) { totals, run in
             totals.cost += run.output?.costUSD ?? 0
             totals.tokens += (run.output?.inputTokens ?? 0) + (run.output?.outputTokens ?? 0)
-        }
-    }
-
-    /// The scoreboard as the ranking window shows it.
-    static func ranking(_ scores: [ModelScore]) -> [RankingRow] {
-        scores.map { score in
-            RankingRow(
-                kind: kindName(score.kind),
-                model: shortName(score.model, effort: score.effort),
-                score: score.averageScore.map { String(format: "%.1f", $0) } ?? "—",
-                time: score.medianSeconds.map(duration) ?? "—",
-                deliveries: "\(score.runs - score.failures)/\(score.runs)",
-                cost: money(score.costUSD),
-                ratings: score.rated == 0 ? "sem avaliação" : "\(score.rated) \(score.rated == 1 ? "avaliação" : "avaliações")"
-            )
         }
     }
 

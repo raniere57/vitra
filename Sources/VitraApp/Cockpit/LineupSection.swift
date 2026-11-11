@@ -7,19 +7,15 @@ import VitraOrchestrator
 /// the "+" menu. Every change is written to the lineup file at once, and the
 /// next spawn picks from it.
 final class LineupSectionView: NSView {
-    typealias Loader = (@escaping @MainActor @Sendable (LineupData) -> Void) -> Void
-
     private let file: URL
-    private let loader: Loader
     private let column = NSStackView()
     private var data: LineupData?
     private var collapsed: Set<Difficulty> = []
     private var selected: (tier: Difficulty, index: Int)?
     private let status = NSTextField.label("", font: CockpitStyle.caption, color: CockpitStyle.dangerText)
 
-    init(file: URL = Lineup.defaultURL, loader: @escaping Loader = LineupSectionView.loadFromDisk) {
+    init(file: URL = Lineup.defaultURL) {
         self.file = file
-        self.loader = loader
         super.init(frame: .zero)
         column.orientation = .vertical
         column.alignment = .leading
@@ -32,27 +28,25 @@ final class LineupSectionView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
-    /// Reads the lineup, the record and the catalogue off the main thread,
-    /// then draws.
-    func reload() {
-        loader { [weak self] data in
-            self?.data = data
-            self?.rebuild()
-        }
+    /// Draws the lineup, the record and the catalogue the ranking read off
+    /// the main thread: one read of the history serves both.
+    func show(_ data: LineupData) {
+        guard data.lineup != self.data?.lineup || data.history != self.data?.history || data.offers != self.data?.offers
+        else { return }
+        self.data = data
+        rebuild()
     }
 
-    /// The real sources: `~/.vitra/lineup.json`, the runs, and the cached
-    /// catalogue, which can take seconds to list the first time.
-    nonisolated static func loadFromDisk(_ done: @escaping @MainActor @Sendable (LineupData) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let executables = Executables.discover()
-            let data = LineupData(
-                lineup: Lineup.load(),
-                history: Orchestrator(executables: executables).recent(limit: 2000),
-                offers: ModelCatalog.offers(ModelCatalog.cachedListing(executables))
-            )
-            DispatchQueue.main.async { MainActor.assumeIsolated { done(data) } }
-        }
+    /// Whether `worker` is in the tier already; nil before the lineup is read.
+    func contains(_ worker: ModelCatalog.Offer, in difficulty: Difficulty) -> Bool? {
+        data.map { $0.lineup.tier(difficulty).contains(worker) }
+    }
+
+    /// Puts `worker` at the end of the tier, once: the ranking's "Adicionar
+    /// à escalação…".
+    func append(_ worker: ModelCatalog.Offer, to difficulty: Difficulty) {
+        guard let tier = data?.lineup.tier(difficulty), !tier.contains(worker) else { return }
+        save(difficulty, tier + [worker])
     }
 
     // MARK: Drawing
@@ -111,8 +105,10 @@ final class LineupSectionView: NSView {
         return stack
     }
 
-    /// What the ranking's ENTREGAS and CUSTO take, so NOTA and TEMPO line up
-    /// with the table below; the × sits at its right end.
+    /// The room right of TEMPO, where the × sits at its right end. As wide
+    /// as ENTREGAS and CUSTO were before the ranking grew a USOS column: the
+    /// Escalação keeps the room its names had, at the cost of its NOTA and
+    /// TEMPO no longer lining up with the tables under it.
     static let trailingWidth = RankingView.Column.deliveries + RankingView.Column.gap + RankingView.Column.cost
 
     private func tierHeader(_ difficulty: Difficulty, tier: [ModelCatalog.Offer], offers: [ModelCatalog.Offer]) -> NSView {
@@ -441,7 +437,7 @@ private final class LinkButton: NSButton {
 }
 
 /// A menu item that runs a closure.
-private final class MenuAction: NSMenuItem {
+final class MenuAction: NSMenuItem {
     private let run: () -> Void
 
     init(title: String, run: @escaping () -> Void) {

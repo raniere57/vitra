@@ -381,7 +381,7 @@ public enum WorkerPicker {
 
     /// The model without its effort, and the effort: apart for claude and
     /// opencode, inside the id for cursor and gemini (grok-4.7-low-fast).
-    static func split(cli: WorkerCLI, model: String, effort: String?) -> (base: String, effort: String?) {
+    public static func split(cli: WorkerCLI, model: String, effort: String?) -> (base: String, effort: String?) {
         switch cli {
         case .claude, .opencode:
             return (model, effort)

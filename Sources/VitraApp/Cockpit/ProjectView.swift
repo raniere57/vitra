@@ -57,9 +57,6 @@ final class ProjectView: NSView {
     /// a file, which need room to be read.
     private static let wideShare: CGFloat = 0.5
 
-    /// Fetches how each worker has done so far, for the Ranking tab.
-    var loadRanking: ((@escaping @MainActor @Sendable ([ModelScore]) -> Void) -> Void)?
-
     private let side = NSView()
     private let tabs = SideTabs()
     private let tabsRule = NSView.rule(CockpitStyle.softLine)
@@ -402,6 +399,7 @@ final class ProjectView: NSView {
     func show(_ runs: [Run], now: Date) {
         workers.show(runs, now: now)
         palco.show(runs, now: now)
+        if tabs.selected == .ranking { ranking.runsChanged(runs) }
         // A worker that is done has no more use for its tab, and each tab
         // open is memory held.
         runTitles = Dictionary(runs.map { ($0.id, $0.spec.label ?? $0.spec.worker) }) { first, _ in first }
@@ -426,9 +424,7 @@ final class ProjectView: NSView {
             content = workers
         case .ranking:
             content = ranking
-            // ponytail: read when the tab is opened, not live; reopen the tab
-            // to refresh. Follow the run feed if that ever matters.
-            loadRanking? { [weak self] scores in self?.ranking.show(WorkerBoard.ranking(scores)) }
+            ranking.reload()
         case .resumo:
             content = resumo
             resumoSignature = nil

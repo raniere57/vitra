@@ -68,6 +68,14 @@ enum LineupBoard {
         return nil
     }
 
+    /// The lineup's workers the record passes over in some tier, for the
+    /// ranking's "rebaixado" tag.
+    static func demoted(_ lineup: Lineup, history: [Run]) -> Set<ModelCatalog.Offer> {
+        Set(tiers.flatMap { level in
+            rows(lineup.tier(level), difficulty: level, history: history).filter { $0.demotion != nil }.map(\.worker)
+        })
+    }
+
     /// The catalogue's workers that are not in `tier`, to add from.
     static func addable(_ offers: [ModelCatalog.Offer], to tier: [ModelCatalog.Offer]) -> [ModelCatalog.Offer] {
         offers.filter { !tier.contains($0) }

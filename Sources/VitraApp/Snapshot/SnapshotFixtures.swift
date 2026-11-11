@@ -37,31 +37,49 @@ struct SnapshotFixtures {
         ]
     }
 
-    /// Eight workers across four kinds of task, with enough runs each for
-    /// `Scoreboard` to rank them.
-    func rankingScores() -> [ModelScore] {
-        let table: [(WorkerCLI, String, String?, TaskKind, [Int?], Int, Double, Double)] = [
-            (.opencode, "opencode/deepseek-v4.1-flash-free", nil, .explore, [4, 5, 4, 4, 5, 4], 0, 38, 0),
-            (.claude, "claude-haiku-5-5", "low", .explore, [5, 5, 4, 5, 5], 0, 44, 0.012),
-            (.claude, "claude-sonnet-5-5", "medium", .implement, [5, 4, 5, 5, 4], 0, 210, 0.19),
-            (.opencode, "opencode/deepseek-v4.1-flash-free", nil, .implement, [3, 4, 2, 4, nil, nil], 1, 260, 0),
-            (.cursor, "composer-2", nil, .implement, [nil, nil, nil], 0, 180, 0.08),
-            (.claude, "claude-sonnet-5-5", "high", .review, [5, 4, 5, 5], 0, 95, 0.07),
-            (.opencode, "opencode/glm-5-free", nil, .review, [3, 4, 3], 0, 120, 0),
-            (.claude, "claude-haiku-5-5", "medium", .test, [4, 4, 5, 4], 0, 150, 0.03),
+    /// The Ranking tab's sources: a dozen workers across kinds, difficulties
+    /// and providers — haiku at three efforts, the Groks at two — over the
+    /// Escalação's record, one run its provider refused, and a catalogue that
+    /// offers a few workers never used.
+    func rankingData() -> RankingData {
+        let lineupData = lineupData()
+        let table: [(WorkerCLI, String, String?, TaskKind, Difficulty, [Int?], Int, Double, Double)] = [
+            (.opencode, "opencode/deepseek-v4.1-flash-free", nil, .explore, .easy, [4, 5, 4, 4, 5, 4], 0, 38, 0),
+            (.claude, "haiku", "low", .explore, .normal, [5, 5, 4, 5, 5], 0, 44, 0.012),
+            (.claude, "haiku", "high", .explore, .normal, [4, 5], 0, 70, 0.031),
+            (.claude, "sonnet", "high", .implement, .hard, [5, 4, 5, 5, 4], 0, 210, 0.19),
+            (.opencode, "opencode/deepseek-v4.1-flash-free", nil, .implement, .normal, [3, 4, 2, 4, nil, nil], 1, 260, 0),
+            (.cursor, "grok-4.7-high-fast", nil, .implement, .hard, [nil, nil, nil], 0, 180, 0.08),
+            (.cursor, "grok-4.7-low-fast", nil, .review, .normal, [4, 4, 5], 0, 62, 0.021),
+            (.claude, "sonnet", "high", .review, .hard, [5, 4, 5, 5], 0, 95, 0.07),
+            (.opencode, "opencode/glm-5.3-flash-free", nil, .review, .easy, [3, 4, 3], 0, 120, 0),
+            (.claude, "haiku", "medium", .test, .normal, [4, 4, 5, 4], 0, 150, 0.03),
+            (.gemini, "gemini-3.8-flash-low", nil, .docs, .easy, [4, 5], 0, 30, 0),
         ]
         var runs: [Run] = []
-        for (cli, model, effort, kind, scores, failures, seconds, cost) in table {
+        for (cli, model, effort, kind, difficulty, scores, failures, seconds, cost) in table {
             for (index, score) in scores.enumerated() {
                 let failed = index < failures
                 runs.append(run(
-                    "\(runs.count)", model, cli, effort: effort, label: nil, kind: kind,
+                    "r\(runs.count)", model, cli, effort: effort, label: nil, kind: kind,
                     state: .finished(exitCode: failed ? 1 : 0), ago: Double(index + 1) * 3_600, took: seconds + Double(index) * 3,
-                    cost: cost, tokens: (12_000, 1_500), score: failed ? nil : score, isError: failed
+                    cost: cost, tokens: (12_000, 1_500), score: failed ? nil : score, isError: failed, difficulty: difficulty
                 ))
             }
         }
-        return Scoreboard.scores(runs)
+        // Refused by its provider: no use of gemini pro, which stays "nunca usado".
+        runs.append(run("rq", "gemini-3.8-pro-high", .gemini, label: nil, kind: .implement, state: .finished(exitCode: 1),
+                        ago: 600, took: 3, isError: true, providerFailure: .quota("sem cota")))
+        let history = runs + lineupData.history
+        let listing = ModelCatalog.Listing(
+            claude: true, openCode: ["opencode/glm-5.3-flash-free", "opencode/deepseek-v4.1-flash-free"],
+            gemini: ["gemini-3.8-flash-low\tGemini Flash", "gemini-3.8-flash-high\tGemini Flash", "gemini-3.8-pro-high\tGemini Pro"],
+            cursor: ["cursor-grok-4.6-low-fast", "grok-4.7-low-fast", "grok-4.7-high-fast", "grok-4.7-xhigh-fast"]
+        )
+        return RankingData(
+            lineup: lineupData.lineup, history: history, offers: ModelCatalog.offers(listing),
+            demoted: LineupBoard.demoted(lineupData.lineup, history: history)
+        )
     }
 
     /// The default lineup with a record on it: opus rated poorly on hard
