@@ -121,7 +121,7 @@ final class SideTabs: NSView {
 /// A tab: text on a pill that is filled when the tab is the one shown.
 private final class TabButton: NSButton {
     /// Room between the pill's edge and its text, on each side.
-    static let padding: CGFloat = 6
+    static let padding: CGFloat = 10
     /// Where the text really starts, measured from the plate's edge: less than
     /// `padding`, since the button brings a little room of its own.
     static let textOffset: CGFloat = 4
@@ -133,6 +133,9 @@ private final class TabButton: NSButton {
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
         isBordered = false
+        // Picture and name as one centred group: left alone, a button pins the
+        // picture to its leading edge and the plate looks lopsided.
+        imageHugsTitle = true
         wantsLayer = true
         layer?.cornerRadius = CockpitStyle.Radius.control
         setAccessibilityRole(.radioButton)
