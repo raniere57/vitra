@@ -106,6 +106,23 @@ struct LeituraReplyTests {
         #expect(view.reply == nil)
     }
 
+    @Test func aClickOnEnviarAgoraReachesItsLinkAndNotTheBlockUnderIt() {
+        let row = UserRowView(frame: NSRect(x: 0, y: 0, width: 700, height: 140))
+        let context = LeituraContext()
+        var sent = 0
+        context.sendQueuedNow = { sent += 1 }
+        row.configure(.item(.user(UserMessage(id: "q", time: nil, text: "manda já", isQueued: true))), context: context)
+        row.layoutSubtreeIfNeeded()
+        row.layout()
+        let link = row.subviews.compactMap { $0 as? NSButton }.first { $0.attributedTitle.string == "enviar agora" }
+        #expect(link?.isHidden == false)
+        guard let link else { return }
+        let middle = NSPoint(x: link.frame.midX, y: link.frame.midY)
+        #expect(row.hitTest(row.convert(middle, to: row.superview)) === link)
+        link.performClick(nil)
+        #expect(sent == 1)
+    }
+
     @Test func theQuoteGoesBeforeTheWordsAndNeverAlone() {
         let composer = LeituraComposer(frame: NSRect(x: 0, y: 0, width: 600, height: 120))
         composer.addQuote("  o trecho\ncitado ")

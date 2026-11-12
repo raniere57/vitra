@@ -103,12 +103,12 @@ final class UserRowView: LeituraRowView {
         sendNow.target = self
         sendNow.action = #selector(sendNowTapped)
         sendNow.isHidden = true
-        addSubview(sendNow)
         block.translatesAutoresizingMaskIntoConstraints = true
         block.layer?.borderWidth = 1
         block.layer?.borderColor = ReadingStyle.mineEdge.cgColor
         label.translatesAutoresizingMaskIntoConstraints = true
-        for view in [block, label, text] as [NSView] { addSubview(view) }
+        // The link goes in last, over the block: under it, the block took its clicks.
+        for view in [block, label, text, sendNow] as [NSView] { addSubview(view) }
     }
 
     @available(*, unavailable)
