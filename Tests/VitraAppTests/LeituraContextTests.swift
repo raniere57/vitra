@@ -81,3 +81,45 @@ struct LeituraQueueTests {
     #expect(LeituraView.quoted("  uma linha\n\noutra  ") == "> uma linha\n>\n> outra")
     #expect(LeituraView.quoted("  \n ") == "")
 }
+
+@MainActor
+@Suite("Leitura: replying to a passage")
+struct LeituraReplyTests {
+    @Test func aSelectionOffersToReplyAndAnEmptyOneDoesNot() {
+        let view = ReadingTextView()
+        view.frame = NSRect(x: 0, y: 0, width: 400, height: 60)
+        view.show(ReadingStyle.plain("uma frase para responder"))
+        view.selectionSettled()
+        #expect(view.reply == nil)
+
+        view.setSelectedRange(NSRange(location: 4, length: 5))
+        view.selectionSettled()
+        let button = try! #require(view.reply)
+        #expect(view.bounds.contains(button.frame))
+
+        // Another text in the same (reused) view: the offer was the old one's.
+        view.show(ReadingStyle.plain("outro texto"))
+        #expect(view.reply == nil)
+    }
+
+    @Test func theQuoteGoesBeforeTheWordsAndNeverAlone() {
+        let composer = LeituraComposer(frame: NSRect(x: 0, y: 0, width: 600, height: 120))
+        composer.addQuote("  o trecho\ncitado ")
+        composer.addQuote("o trecho\ncitado")
+        #expect(composer.outgoing.isEmpty)
+        composer.message = "concordo"
+        #expect(composer.outgoing == "> o trecho\n> citado\n\nconcordo")
+        #expect(composer.preferredHeight(width: 600) > LeituraComposer(frame: .zero).preferredHeight(width: 600))
+        composer.clear()
+        composer.message = "só isto"
+        #expect(composer.outgoing == "só isto")
+    }
+
+    @Test func theUsersQuoteIsDrawnBehindABarAndTheirWordsAreNot() {
+        let text = UserRowView.attributed("> citado\n\nminha resposta")
+        #expect(text.string == "citado\nminha resposta")
+        #expect(text.attribute(.quoteBar, at: 0, effectiveRange: nil) != nil)
+        #expect(text.attribute(.quoteBar, at: text.length - 1, effectiveRange: nil) == nil)
+        #expect(UserRowView.attributed("a > b").string == "a > b")
+    }
+}

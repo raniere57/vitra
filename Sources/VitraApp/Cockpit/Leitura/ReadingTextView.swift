@@ -36,6 +36,8 @@ final class ReadingTextView: NSTextView {
 
     func show(_ text: NSAttributedString) {
         guard textStorage?.isEqual(to: text) != true else { return }
+        // A reused row shows another text: the button was the old one's.
+        hideReply()
         textStorage?.setAttributedString(text)
     }
 
@@ -55,7 +57,7 @@ final class ReadingTextView: NSTextView {
 
     // MARK: - Replying to a passage
 
-    private var reply: NSButton?
+    private(set) var reply: NSButton?
 
     /// A selection made, "Responder" appears by it: the passage goes quoted
     /// into the composer. NSTextView tracks the drag inside `mouseDown`, so
@@ -63,7 +65,7 @@ final class ReadingTextView: NSTextView {
     override func mouseDown(with event: NSEvent) {
         hideReply()
         super.mouseDown(with: event)
-        showReply()
+        selectionSettled()
     }
 
     override func resignFirstResponder() -> Bool {
@@ -87,7 +89,9 @@ final class ReadingTextView: NSTextView {
         reply = nil
     }
 
-    private func showReply() {
+    /// The selection is what it will be: "Responder" by it, if it holds words.
+    func selectionSettled() {
+        hideReply()
         let range = selectedRange()
         guard range.length > 0, let layout = layoutManager, let container = textContainer,
               !Self.selectedText(string, range).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

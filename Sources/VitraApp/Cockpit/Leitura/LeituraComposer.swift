@@ -184,7 +184,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
 
     /// What goes to the maestro: the pasted files' paths, which it reads as
     /// a paste into its prompt does, then the words.
-    private var outgoing: String {
+    var outgoing: String {
         let paths = ShellQuoting.join(attachments.map(\.path))
         let words = text.string.trimmingCharacters(in: .whitespacesAndNewlines)
         let said = [paths, words].filter { !$0.isEmpty }.joined(separator: " ")
