@@ -310,6 +310,29 @@ public final class PreviewPanel: NSView {
         return browser
     }
 
+    /// Where a browser waits while it is not the one on screen: a view that
+    /// stays in the window, under everything. Taken out of the window, a
+    /// page is told it is hidden (`document.visibilityState`), and players,
+    /// timers and many apps stop — while an agent is still working in it.
+    public weak var parkingLot: NSView?
+
+    /// Takes the browser on screen off it, keeping its page running.
+    public func parkCurrentBrowser() {
+        guard content is BrowserView else { return }
+        clearContent(keepingDirectory: true)
+    }
+
+    private func park(_ browser: BrowserView) {
+        guard let lot = parkingLot else { return browser.removeFromSuperview() }
+        // The size it had: a page laid out for a panel must not be relaid
+        // out for whatever the lot happens to measure.
+        let size = browser.frame.size.width > 1 ? browser.frame.size : NSSize(width: 1024, height: 720)
+        browser.autoresizingMask = []
+        browser.removeFromSuperview()
+        browser.frame = NSRect(origin: .zero, size: size)
+        lot.addSubview(browser)
+    }
+
     /// The browser kept under `key`, on screen or not; nil when there is none.
     /// For an agent working in a tab that is not the one being looked at.
     public func keptBrowser(for key: String) -> BrowserView? { browsers[key] }
@@ -345,7 +368,11 @@ public final class PreviewPanel: NSView {
         // down when its pane goes, or when the panel itself is dropped.
         let keptBrowser = (content as? BrowserView).map { browser in browsers.values.contains { $0 === browser } } ?? false
         if !keptBrowser || !keepingDirectory { content?.prepareForRemoval() }
-        content?.removeFromSuperview()
+        if keptBrowser, keepingDirectory, let browser = content as? BrowserView {
+            park(browser)
+        } else {
+            content?.removeFromSuperview()
+        }
         content = nil
         if !keepingDirectory {
             browsers.values.forEach { $0.prepareForRemoval() }

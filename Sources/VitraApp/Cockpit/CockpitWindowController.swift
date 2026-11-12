@@ -15,6 +15,9 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     private let tabBar = CockpitTabBar()
     private let stage = NSView()
+    /// Under everything, never shown: where every project's browsers wait
+    /// while off screen, still in the window so their pages keep running.
+    private let browserParking = NSView()
     private lazy var welcome = WelcomeView(target: self, action: #selector(openProject(_:)))
 
     private var projects: [CockpitProject]
@@ -233,6 +236,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         // at that start too: a kept maestro's file is still its word.
         let wasInterrupted = Attention.takeInterrupted(for: project.path)
         let view = ProjectView(project: project, kit: kit, resumesInterruptedWork: wasInterrupted)
+        view.browserParking = browserParking
         view.workers.onStopAll = { [weak self] ids in self?.feed.cancel(ids) }
         view.loadResumo = { [weak self] done in self?.feed.resumo(for: project, done) }
         view.onModeChange = { [weak self] mode in
@@ -485,6 +489,12 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         content.wantsLayer = true
         content.layer?.backgroundColor = CockpitStyle.ground.cgColor
 
+        browserParking.frame = content.bounds
+        browserParking.autoresizingMask = [.width, .height]
+        content.addSubview(browserParking, positioned: .below, relativeTo: nil)
+        // What covers the lot must be solid, whatever a project draws.
+        stage.wantsLayer = true
+        stage.layer?.backgroundColor = CockpitStyle.bar.cgColor
         for view in [tabBar, stage] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)

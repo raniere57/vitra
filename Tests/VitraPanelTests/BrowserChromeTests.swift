@@ -61,3 +61,36 @@ struct BrowserChromeTests {
     _ = try await browser.click(ref: ref)
     #expect(try await browser.snapshot().contains("button \"42\""))
 }
+
+/// A page taken off screen while an agent works in it must not be told it
+/// is hidden: players and many apps stop when it is.
+@MainActor
+@Test func aBrowserOffScreenStaysVisibleToItsPage() async throws {
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+    let lot = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    window.contentView?.addSubview(lot)
+    window.orderBack(nil)
+    defer { window.orderOut(nil) }
+
+    let panel = PreviewPanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+    window.contentView?.addSubview(panel)
+    panel.parkingLot = lot
+    let browser = panel.browser(for: "maestro")
+    try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+        browser.load(URL(string: "about:blank")!) { done.resume(with: $0) }
+    }
+    panel.parkCurrentBrowser()
+    #expect(browser.superview === lot)
+    try await Task.sleep(nanoseconds: 300_000_000)
+    #expect(try await browser.evaluate("return document.visibilityState") as? String == "visible")
+
+    // The same page out of the window is what the lot is there to avoid.
+    browser.removeFromSuperview()
+    try await Task.sleep(nanoseconds: 300_000_000)
+    #expect(try await browser.evaluate("return document.visibilityState") as? String == "hidden")
+
+    // Back on screen, it is the panel's again.
+    _ = panel.browser(for: "maestro")
+    #expect(browser.superview !== lot)
+    panel.dropBrowser(for: "maestro")
+}

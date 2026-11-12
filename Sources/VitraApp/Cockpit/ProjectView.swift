@@ -71,6 +71,11 @@ final class ProjectView: NSView {
         panel.onOpenURL = { [weak self] url in self?.usersBrowser().load(url) { _ in } }
         return panel
     }()
+    /// Where this project's browsers wait while not on screen; the window's.
+    var browserParking: NSView? {
+        didSet { browserPanel.parkingLot = browserParking }
+    }
+
     private var browserTabs = BrowserTabs()
     /// Tabs brought back from before a restart, not loaded yet.
     private var pendingPages: [String: URL] = [:]
@@ -436,6 +441,8 @@ final class ProjectView: NSView {
     func select(_ tab: SideTab) {
         let previous = tabs.selected
         tabs.select(tab)
+        // Off screen, not out of the window: its page keeps running.
+        if previous == .browser, tab != .browser { browserPanel.parkCurrentBrowser() }
         if previous == .git, tab != .git { git.setActive(false) }
 
         let content: NSView

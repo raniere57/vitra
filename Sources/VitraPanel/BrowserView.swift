@@ -482,6 +482,13 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         web.navigationDelegate = self
         web.uiDelegate = chrome
         web.isInspectable = true
+        // A window behind another is still a place an agent works in:
+        // WebKit would otherwise call its pages hidden and pause them.
+        let occlusion = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")
+        if web.responds(to: occlusion) {
+            typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
+            unsafeBitCast(web.method(for: occlusion), to: Setter.self)(web, occlusion, false)
+        }
         web.allowsBackForwardNavigationGestures = true
         web.translatesAutoresizingMaskIntoConstraints = false
         // The web view paints its own background. Left transparent, a page that
