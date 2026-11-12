@@ -26,6 +26,8 @@ enum TranscriptLine {
         case toolResult(ToolResult)
         case compacted(id: String, time: Date?)
         case turnDuration(id: String, time: Date?, seconds: TimeInterval)
+        /// The maestro stopped: its turn is over until something starts another.
+        case turnEnded
         /// A prompt typed while the maestro worked, waiting for its turn.
         case queued(id: String, time: Date?, text: String)
         /// A waiting prompt left the queue: the one with this text, or the
@@ -121,8 +123,15 @@ enum TranscriptLine {
     }
 
     private static func assistantEvents(_ entry: [String: Any], id: String, time: Date?) -> [Event] {
-        guard let blocks = (entry["message"] as? [String: Any])?["content"] as? [[String: Any]] else { return [] }
-        return blocks.enumerated().compactMap { index, block in
+        guard let message = entry["message"] as? [String: Any], let blocks = message["content"] as? [[String: Any]] else { return [] }
+        // The reply's last words: Claude Code logs the thought before them
+        // with the same stop reason, so only text closes the turn.
+        let ends = message["stop_reason"] as? String == "end_turn" && blocks.contains { $0["type"] as? String == "text" }
+        return events(of: blocks, id: id, time: time) + (ends ? [.turnEnded] : [])
+    }
+
+    private static func events(of blocks: [[String: Any]], id: String, time: Date?) -> [Event] {
+        blocks.enumerated().compactMap { index, block in
             // One entry may carry several blocks; each event needs its own id.
             let blockID = index == 0 ? id : "\(id)#\(index)"
             switch block["type"] as? String {
@@ -152,7 +161,9 @@ enum TranscriptLine {
             return [.compacted(id: id, time: time)]
         case "turn_duration":
             guard let ms = (entry["durationMs"] as? NSNumber)?.doubleValue else { return [] }
-            return [.turnDuration(id: id, time: time, seconds: ms / 1000)]
+            return [.turnDuration(id: id, time: time, seconds: ms / 1000), .turnEnded]
+        case "stop_hook_summary":
+            return [.turnEnded]
         case "local_command":
             return textEvents(entry["content"] as? String ?? "", id: id, time: time)
         default:

@@ -37,6 +37,19 @@ final class LeituraView: NSView {
     private var session: String?
     private var items: [TranscriptItem] = []
     private var queued: [UserMessage] = []
+    private var transcriptTurn: (isOpen: Bool?, started: Date?, lastActivity: Date?) = (nil, nil, nil)
+    /// A turn the transcript left open counts as work for this long after
+    /// its last line: a maestro killed mid-turn must not "work" forever.
+    private static let openTurnGrace: TimeInterval = 20 * 60
+
+    /// Working, by the hooks or — when they missed the turn's start, as they
+    /// do for one a background task or a queued prompt began — by the
+    /// transcript itself.
+    private var isWorking: Bool {
+        if attention == .working { return true }
+        guard attention != .needsPermission, transcriptTurn.isOpen == true, let last = transcriptTurn.lastActivity else { return false }
+        return list.context.now().timeIntervalSince(last) < Self.openTurnGrace
+    }
     private var hasOlder = false
     private var isLoadingOlder = false
     private var isMissing = false
@@ -184,6 +197,9 @@ final class LeituraView: NSView {
         showMissing(update.isMissing && update.items.isEmpty)
         items = update.items
         queued = update.queued
+        transcriptTurn = (update.isTurnOpen, update.turnStarted, update.lastActivity)
+        composer.setWorking(isWorking)
+        updateClock()
         refresh()
     }
 
@@ -200,7 +216,7 @@ final class LeituraView: NSView {
 
     private func rows() -> [LeituraRow] {
         var rows = items.map(LeituraRow.item)
-        if attention == .working, let since = workingSince {
+        if isWorking, let since = workingSince ?? transcriptTurn.started ?? transcriptTurn.lastActivity {
             var current: String?
             if case let .activity(activity)? = items.last { current = activity.running?.summary }
             rows.append(.live(LiveState(since: since, current: current)))
@@ -227,14 +243,14 @@ final class LeituraView: NSView {
     func attention(_ state: AttentionState?, since: Date?) {
         attention = state
         workingSince = state == .working ? (since ?? Date()) : nil
-        composer.setWorking(state == .working)
+        composer.setWorking(isWorking)
         banner.isHidden = state != .needsPermission
         updateClock()
         refresh()
     }
 
     private func updateClock() {
-        let runs = isVisible && attention == .working
+        let runs = isVisible && isWorking
         guard runs != (clock != nil) else { return }
         clock?.invalidate()
         clock = nil

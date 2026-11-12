@@ -51,13 +51,13 @@ enum ReadingRenderer {
                 indent: indent, firstIndent: indent - 18, after: endsBlock ? gap : 5, tabs: [indent]
             )
         case .quote:
-            let block = NSTextBlock()
-            block.setWidth(14, type: .absoluteValueType, for: .padding, edge: .minX)
-            let style = ReadingStyle.paragraphStyle(after: gap)
-            style.textBlocks = [block]
-            attributes[.paragraphStyle] = style
+            // Indented by its paragraph style, not a text block: TextKit 1
+            // pads a block's first line only and measures it past its end,
+            // which drew the bar down over the paragraph that followed.
+            attributes[.paragraphStyle] = ReadingStyle.paragraphStyle(indent: 14, firstIndent: 14, after: gap)
             attributes[.foregroundColor] = CockpitStyle.code
-            attributes[.quoteBar] = true
+            // The bar runs beside the words, not the gap under them.
+            text.addAttribute(.quoteBar, value: true, range: span.range)
         case .rule:
             let block = NSTextBlock()
             block.setWidth(1, type: .absoluteValueType, for: .border, edge: .maxY)

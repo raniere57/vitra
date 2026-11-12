@@ -123,3 +123,35 @@ struct LeituraReplyTests {
         #expect(UserRowView.attributed("a > b").string == "a > b")
     }
 }
+
+@Suite("Leitura: is the maestro mid-turn, by the transcript")
+struct LeituraTurnTests {
+    private func line(_ entry: [String: Any]) -> Data { try! JSONSerialization.data(withJSONObject: entry) }
+    private func user(_ text: String) -> Data {
+        line(["type": "user", "uuid": text, "timestamp": "2026-11-12T09:00:00.000Z", "message": ["content": text]])
+    }
+    private func assistant(_ kind: String, stop: String) -> Data {
+        let block: [String: Any] = kind == "text" ? ["type": "text", "text": "pronto"] : ["type": kind, "id": "c1", "name": "Bash", "input": [:] as [String: Any]]
+        return line(["type": "assistant", "uuid": kind + stop, "timestamp": "2026-11-12T09:01:00.000Z", "message": ["stop_reason": stop, "content": [block]]])
+    }
+    private func chunk(_ lines: [Data]) -> TranscriptChunk { TranscriptChunk(events: lines.flatMap(TranscriptLine.events(from:))) }
+
+    @Test func aPromptOpensTheTurnAndTheLastWordsCloseIt() {
+        #expect(chunk([]).isTurnOpen == nil)
+        let working = chunk([user("faz"), assistant("tool_use", stop: "tool_use")])
+        #expect(working.isTurnOpen == true)
+        #expect(working.turnStarted != nil)
+        let done = chunk([user("faz"), assistant("tool_use", stop: "tool_use"), assistant("text", stop: "end_turn")])
+        #expect(done.isTurnOpen == false)
+        #expect(done.turnStarted == nil)
+    }
+
+    @Test func aTurnOpenAcrossTwoStretchesBeganInTheOlderOne() {
+        let older = chunk([user("faz")])
+        let newer = chunk([assistant("tool_use", stop: "tool_use")])
+        let joined = older.joined(newer)
+        #expect(joined.isTurnOpen == true)
+        #expect(joined.turnStarted == older.turnStarted)
+        #expect(older.joined(chunk([assistant("text", stop: "end_turn")])).isTurnOpen == false)
+    }
+}

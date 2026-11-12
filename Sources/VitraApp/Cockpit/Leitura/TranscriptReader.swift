@@ -18,6 +18,11 @@ final class TranscriptReader: @unchecked Sendable {
         var items: [TranscriptItem]
         /// Prompts waiting in Claude Code's queue, oldest first.
         var queued: [UserMessage] = []
+        /// The transcript's own word on whether the maestro is mid-turn, when
+        /// it began, and when the file last said anything.
+        var isTurnOpen: Bool?
+        var turnStarted: Date?
+        var lastActivity: Date?
         /// There is more of the conversation before the first item.
         var hasOlder: Bool
         /// The file is not there (yet): the session never wrote it.
@@ -202,7 +207,7 @@ final class TranscriptReader: @unchecked Sendable {
     }
 
     private func publish() {
-        let update = Update(items: chunk.items, queued: chunk.queued, hasOlder: start > 0, isMissing: fileSize() == nil)
+        let update = Update(items: chunk.items, queued: chunk.queued, isTurnOpen: chunk.isTurnOpen, turnStarted: chunk.turnStarted, lastActivity: chunk.lastTime, hasOlder: start > 0, isMissing: fileSize() == nil)
         let onUpdate = onUpdate
         DispatchQueue.main.async { MainActor.assumeIsolated { onUpdate(update) } }
     }

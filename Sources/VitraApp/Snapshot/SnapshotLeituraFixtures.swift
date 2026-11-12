@@ -96,6 +96,12 @@ enum SnapshotLeitura {
 
     1. `Exportar CSV…` no menu do Ranking grava o recorte que está na tela
     2. O arquivo abre direto no Numbers e no Excel
+
+    > Carga parcial do relatório: semana de 09/11 a 11/11, que é longa o bastante para quebrar em duas linhas dentro da citação.
+    > • 5 empresas, 294 pessoas
+    > • As semanas anteriores não mudaram
+
+    Com o teu ok eu publico.
     """
 
     /// A wide table and a long code block, for the table picture.

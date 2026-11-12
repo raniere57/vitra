@@ -17,6 +17,12 @@ struct TranscriptChunk: Equatable, Sendable {
     private(set) var leadingImageSources: [String] = []
     /// A command's answer met before any command here.
     private(set) var leadingCommandOutput: String?
+    /// Whether the last thing here left the maestro mid-turn: nil when this
+    /// stretch says nothing either way. The hooks tell the same, but miss a
+    /// turn that a background task or a queued prompt started.
+    private(set) var isTurnOpen: Bool?
+    /// When the turn still open began.
+    private(set) var turnStarted: Date?
     /// Prompts typed mid-turn that the maestro has not taken yet.
     private(set) var queued: [UserMessage] = []
     /// Prompts taken here whose enqueue is in an older stretch.
@@ -28,6 +34,10 @@ struct TranscriptChunk: Equatable, Sendable {
     static let pause: TimeInterval = 5 * 60
 
     private var pendingThought = false
+    /// The first thing here that spoke of a turn was the maestro going on
+    /// with one, not a prompt starting it.
+    private var opensMidTurn = false
+    private var sawTurn = false
     /// Thoughts before any item here: they close the older stretch's run of
     /// calls, unless a call here takes them first.
     private var leadingThoughts = 0
@@ -44,6 +54,7 @@ struct TranscriptChunk: Equatable, Sendable {
     // MARK: - Folding events in
 
     mutating func apply(_ event: TranscriptLine.Event) {
+        noteTurn(event)
         switch event {
         case let .userText(id, time, text):
             if case var .user(last) = items.last, last.id == id {
@@ -106,11 +117,35 @@ struct TranscriptChunk: Equatable, Sendable {
             append(.divider(ReadingDivider(id: id, time: time, kind: .compacted)), at: time, allowsPause: false)
         case let .turnDuration(id, time, seconds):
             append(.worked(Worked(id: id, time: time, seconds: seconds)), at: time, allowsPause: false)
+        case .turnEnded:
+            break
         case let .queued(id, time, text):
             queued.append(UserMessage(id: id, time: time, text: text, isQueued: true))
         case let .unqueued(text):
             if !unqueue(text) { leadingUnqueues.append(text) }
         }
+    }
+
+    private mutating func noteTurn(_ event: TranscriptLine.Event) {
+        let time: Date?
+        switch event {
+        case .turnEnded, .interrupted:
+            sawTurn = true
+            isTurnOpen = false
+            turnStarted = nil
+            return
+        case let .userText(_, at, _), let .userImage(_, at, _), let .task(_, at, _), let .assistantText(_, at, _),
+             let .thinking(_, at), let .toolUse(_, at, _):
+            time = at
+        default:
+            return
+        }
+        if !sawTurn {
+            sawTurn = true
+            if case .userText = event {} else if case .userImage = event {} else if case .task = event {} else { opensMidTurn = true }
+        }
+        if isTurnOpen != true { turnStarted = time }
+        isTurnOpen = true
     }
 
     /// Takes a waiting prompt out: the one saying `text`, else the oldest.
@@ -188,6 +223,11 @@ struct TranscriptChunk: Equatable, Sendable {
             result.leadingUnqueues.append(text)
         }
         result.queued += newer.queued
+        if let open = newer.isTurnOpen {
+            // A turn open across the seam began where the older stretch says.
+            result.turnStarted = open ? (isTurnOpen == true && newer.opensMidTurn ? turnStarted : newer.turnStarted) : nil
+            result.isTurnOpen = open
+        }
         // Thoughts that open the newer stretch: in the older one's run of
         // calls if it ends with one, else pending for the next run.
         var pending = result.pendingThought
