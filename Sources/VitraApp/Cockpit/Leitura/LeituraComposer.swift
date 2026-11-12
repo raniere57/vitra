@@ -78,6 +78,14 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
 
     override var isFlipped: Bool { true }
 
+    /// A click anywhere on the field is a click on the text: the placeholder
+    /// lies over it and the field around it, and neither takes the keyboard —
+    /// which would stay with the terminal underneath, typing into it unseen.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === placeholder || hit === field || hit === self ? text : hit
+    }
+
     private func configure(_ button: NSButton, action: Selector) {
         button.isBordered = false
         button.wantsLayer = true

@@ -64,3 +64,14 @@ struct LeituraQueueTests {
         composer.clear()
     }
 }
+
+/// The placeholder lies over the text: a click on it must still reach the
+/// text, or the keyboard stays with the terminal underneath.
+@MainActor
+@Test func aClickOnTheComposersPlaceholderLandsInTheText() {
+    let composer = LeituraComposer(frame: NSRect(x: 0, y: 0, width: 600, height: 80))
+    composer.layoutSubtreeIfNeeded()
+    let onPlaceholder = NSPoint(x: composer.text.enclosingScrollView!.frame.midX, y: composer.text.enclosingScrollView!.frame.midY)
+    #expect(composer.hitTest(onPlaceholder)?.isDescendant(of: composer.text.enclosingScrollView!) == true || composer.hitTest(onPlaceholder) === composer.text)
+    #expect(composer.hitTest(NSPoint(x: 40, y: 60)) === composer.text)
+}
