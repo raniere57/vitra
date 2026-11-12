@@ -83,7 +83,7 @@ final class MaestroUpdatePill: NSView {
 
     private func apply(compact: Bool) {
         let isArmed = phase == .armed
-        label.stringValue = isArmed ? "atualiza ao terminar" : "versão antiga"
+        label.stringValue = isArmed ? "reinicia ao terminar" : "Vitra atualizado"
         label.isHidden = compact
         clock.isHidden = !(compact && isArmed)
         // "Atualizar" on an amber wash of its own, so it reads as the thing
@@ -98,7 +98,7 @@ final class MaestroUpdatePill: NSView {
             button.image = nil
             button.imagePosition = .noImage
             button.attributedTitle = NSAttributedString(
-                string: isArmed ? "×" : "\u{2002}Atualizar\u{2002}",
+                string: isArmed ? "×" : "\u{2002}Reiniciar maestro\u{2002}",
                 attributes: [
                     .font: isArmed ? CockpitStyle.ui(13, .medium) : CockpitStyle.ui(11, .semibold),
                     .foregroundColor: isArmed ? CockpitStyle.muted : CockpitStyle.text,
