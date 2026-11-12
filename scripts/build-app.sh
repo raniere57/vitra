@@ -14,6 +14,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD="$ROOT/.build/release"
 APP="$ROOT/dist/Vitra.app"
 VERSION="0.1.2"
+# A build number of its own each time: macOS caches an app's Dock icon by
+# identifier and version, and a build that once shipped without its icon
+# would keep the blank one for as long as the version stayed the same.
+BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -55,7 +59,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key>      <string>Vitra</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>$VERSION</string>
-    <key>CFBundleVersion</key>         <string>$VERSION</string>
+    <key>CFBundleVersion</key>         <string>$BUILD_NUMBER</string>
     <key>CFBundleIconFile</key>        <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
     <key>NSHighResolutionCapable</key> <true/>
