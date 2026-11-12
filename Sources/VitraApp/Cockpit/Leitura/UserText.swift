@@ -25,6 +25,32 @@ enum UserText {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private static let attachment = try? NSRegularExpression(
+        pattern: #"'(/[^'\n]+\.(?:png|jpe?g|gif|webp|heic|tiff?|bmp|pdf))'|(?<![\w/])(/(?:[^\s'"\\]|\\ )+\.(?:png|jpe?g|gif|webp|heic|tiff?|bmp|pdf))(?![\w.])"#,
+        options: [.caseInsensitive]
+    )
+
+    /// The images and PDFs a message names by path — which is how a paste
+    /// reaches the maestro — taken out of its words, to be shown as what
+    /// they are. Only files that exist: a path merely talked about stays.
+    static func attachments(in text: String, exists: (String) -> Bool = FileManager.default.fileExists(atPath:)) -> (text: String, paths: [String]) {
+        guard text.contains("/"), let attachment else { return (text, []) }
+        var paths: [String] = []
+        var words = text
+        let matches = attachment.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        for match in matches.reversed() {
+            let group = match.range(at: 1).location != NSNotFound ? match.range(at: 1) : match.range(at: 2)
+            guard let found = Range(group, in: text), let whole = Range(match.range, in: words) else { continue }
+            let path = String(text[found]).replacingOccurrences(of: "\\ ", with: " ")
+            guard exists(path) else { continue }
+            paths.insert(path, at: 0)
+            words.replaceSubrange(whole, with: "")
+        }
+        guard !paths.isEmpty else { return (text, []) }
+        words = words.replacingOccurrences(of: "[ \\t]{2,}", with: " ", options: .regularExpression)
+        return (words.trimmingCharacters(in: .whitespacesAndNewlines), paths)
+    }
+
     /// The text inside the first `<tag>…</tag>`, trimmed; nil when absent.
     static func tag(_ name: String, in text: String) -> String? {
         guard let open = text.range(of: "<\(name)>"),

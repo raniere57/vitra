@@ -192,3 +192,27 @@ struct LeituraTurnTests {
     BrowserPages.save(.init(pages: [:], current: nil), project: "/work/x", defaults: defaults)
     #expect(BrowserPages.load(project: "/work/x", defaults: defaults) == nil)
 }
+
+@Suite("Leitura: a pasted file shows as itself, not as its path")
+struct LeituraAttachmentTests {
+    private let existing: Set<String> = ["/a/b/paste-1.png", "/Users/x/Application Support/Kop/Images/abc.PNG", "/docs/relatorio.pdf"]
+
+    @Test func pathsOfFilesThatExistLeaveTheWords() {
+        let said = UserText.attachments(in: "/a/b/paste-1.png '/Users/x/Application Support/Kop/Images/abc.PNG' olha isso e /docs/relatorio.pdf") { existing.contains($0) }
+        #expect(said.paths == ["/a/b/paste-1.png", "/Users/x/Application Support/Kop/Images/abc.PNG", "/docs/relatorio.pdf"])
+        #expect(said.text == "olha isso e")
+    }
+
+    @Test func aPathOnlyTalkedAboutStays() {
+        let text = "o arquivo /tmp/nao-existe.png sumiu, e src/a.png também"
+        let said = UserText.attachments(in: text) { existing.contains($0) }
+        #expect(said.paths.isEmpty)
+        #expect(said.text == text)
+    }
+
+    @Test func aMessageThatIsOnlyAPasteIsOnlyAnImage() {
+        let events = TranscriptLine.textEvents("/a/b/paste-1.png", id: "u1", time: nil)
+        // The real file system has no such file: the path stays as words.
+        #expect(events == [.userText(id: "u1", time: nil, text: "/a/b/paste-1.png")])
+    }
+}

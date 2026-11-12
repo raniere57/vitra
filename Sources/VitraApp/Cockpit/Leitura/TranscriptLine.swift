@@ -29,7 +29,7 @@ enum TranscriptLine {
         /// The maestro stopped: its turn is over until something starts another.
         case turnEnded
         /// A prompt typed while the maestro worked, waiting for its turn.
-        case queued(id: String, time: Date?, text: String)
+        case queued(id: String, time: Date?, text: String, images: [ImageRef])
         /// A waiting prompt left the queue: the one with this text, or the
         /// oldest when nil. It comes back as a user entry when it was read.
         case unqueued(text: String?)
@@ -191,12 +191,16 @@ enum TranscriptLine {
     private static func queueOperation(_ entry: [String: Any], time: Date?) -> [Event] {
         let content = entry["content"] as? String
         if content?.hasPrefix("<task-notification>") == true { return [] }
-        let text = content.map(UserText.clean)
+        // The same words a user entry would show, so a prompt leaving the
+        // queue is matched by what it says.
+        let said = content.map { UserText.attachments(in: UserText.clean($0)) }
+        let text = said?.text
         switch entry["operation"] as? String {
         case "enqueue":
-            guard let text, !text.isEmpty else { return [] }
+            guard let said, !(said.text.isEmpty && said.paths.isEmpty) else { return [] }
             let stamp = entry["timestamp"] as? String ?? ""
-            return [.queued(id: "queued-\(stamp)-\(text.utf8.count)", time: time, text: text)]
+            let images = said.paths.map { ImageRef(path: $0) }
+            return [.queued(id: "queued-\(stamp)-\(said.text.utf8.count)", time: time, text: said.text, images: images)]
         case "dequeue", "remove", "popAll":
             return [.unqueued(text: text)]
         default:
@@ -228,7 +232,10 @@ enum TranscriptLine {
         }
         if text.hasPrefix("[Request interrupted by user") { return [.interrupted(id: id, time: time)] }
         if raw.hasPrefix("<local-command-caveat>") || text.isEmpty { return [] }
-        return [.userText(id: id, time: time, text: text)]
+        // A paste goes to the maestro as a path; here it is the picture.
+        let said = UserText.attachments(in: text)
+        let images: [Event] = said.paths.map { .userImage(id: id, time: time, ImageRef(path: $0)) }
+        return images + (said.text.isEmpty ? [] : [.userText(id: id, time: time, text: said.text)])
     }
 
     private static func imageSources(in text: String) -> [Event] {

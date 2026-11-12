@@ -119,8 +119,8 @@ struct TranscriptChunk: Equatable, Sendable {
             append(.worked(Worked(id: id, time: time, seconds: seconds)), at: time, allowsPause: false)
         case .turnEnded:
             break
-        case let .queued(id, time, text):
-            queued.append(UserMessage(id: id, time: time, text: text, isQueued: true))
+        case let .queued(id, time, text, images):
+            queued.append(UserMessage(id: id, time: time, text: text, images: images, isQueued: true))
         case let .unqueued(text):
             if !unqueue(text) { leadingUnqueues.append(text) }
         }
