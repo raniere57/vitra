@@ -232,6 +232,12 @@ private func pick(
     #expect(pick(catalogue, after, lineup: .standard)?.offer == grok46)
 }
 
+@Test func aWorkerThatNeverRanAnythingLearnsBeforeOneKnownFromAnotherKind() {
+    // glm has run, only not on reviews: deepseek, never used at all, goes first.
+    let history = runs(grok46, 4, score: 5) + runs(glm, 2, kind: .implement, score: 5)
+    #expect(pick(catalogue, history, lineup: .standard)?.offer == deepseek)
+}
+
 @Test func aHardPieceLearnsAmongStrongWorkersOnly() {
     let proven = runs(opus, 4, score: 5, difficulty: .hard)
     let turn = pick(catalogue, proven, difficulty: .hard, lineup: .standard)

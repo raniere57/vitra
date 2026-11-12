@@ -128,7 +128,8 @@ public enum WorkerPicker {
 
         if let learner = learningTurn(
             kind: kind, difficulty: difficulty, ofKind: ofKind, offers: offers, eligible: eligible,
-            demotedInLineup: tierEligible.filter { demoted($0) != nil }, candidate: candidate
+            demotedInLineup: tierEligible.filter { demoted($0) != nil }, candidate: candidate,
+            everRan: { offer in history.contains { isRun($0, of: offer) } }
         ) {
             return Choice(offer: learner, pick: PickReason(code: .learning, text: "learning turn"))
         }
@@ -217,7 +218,7 @@ public enum WorkerPicker {
     private static func learningTurn(
         kind: TaskKind, difficulty: Difficulty, ofKind: [Run], offers: [ModelCatalog.Offer],
         eligible: [ModelCatalog.Offer], demotedInLineup: [ModelCatalog.Offer],
-        candidate: (ModelCatalog.Offer) -> Candidate
+        candidate: (ModelCatalog.Offer) -> Candidate, everRan: (ModelCatalog.Offer) -> Bool
     ) -> ModelCatalog.Offer? {
         let same = ofKind.filter { ($0.spec.difficulty ?? .normal) == difficulty }
         guard same.count % explorationEvery == explorationEvery - 1,
@@ -229,8 +230,13 @@ public enum WorkerPicker {
         func cliRuns(_ offer: ModelCatalog.Offer) -> Int { ofKind.filter { $0.spec.cli == offer.cli }.count }
         return pool.map(candidate)
             .filter { $0.delivered < deliveriesToLearn && lowerEffortTried($0.offer, offers: offers, ofKind: ofKind) }
-            .min { ($0.costRank, cliRuns($0.offer), $0.order) < ($1.costRank, cliRuns($1.offer), $1.order) }?
-            .offer
+            // A worker that never ran anything goes before one known from another kind.
+            .map { (candidate: $0, used: everRan($0.offer) ? 1 : 0) }
+            .min {
+                ($0.candidate.costRank, $0.used, cliRuns($0.candidate.offer), $0.candidate.order)
+                    < ($1.candidate.costRank, $1.used, cliRuns($1.candidate.offer), $1.candidate.order)
+            }?
+            .candidate.offer
     }
 
     /// A hard piece goes to a strong worker when one may run, an easy one to a
