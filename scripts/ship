@@ -28,6 +28,12 @@ run_build() {
   local signed size
   signed="$(grep -Eo "signed as .*|signing ad-hoc" /tmp/vitra-ship-build.log | tail -1)"
   size="$(du -h "$ROOT/dist/Vitra.app/Contents/MacOS/Vitra" | cut -f1)"
+  # An ad-hoc build has a new identity each time: installed, macOS would drop
+  # every permission Vitra was given (Screen Recording, Accessibility).
+  if [[ "$signed" != signed\ as* && -z "${VITRA_ALLOW_ADHOC:-}" ]]; then
+    echo "build NÃO assinado com o certificado Vitra Dev (ad-hoc): instalar isto faria o macOS pedir as permissões de novo. Não instale; VITRA_ALLOW_ADHOC=1 para seguir assim mesmo."
+    return 1
+  fi
   echo "build ok · $signed · binário $size"
 }
 
