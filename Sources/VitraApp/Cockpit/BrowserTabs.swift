@@ -11,9 +11,12 @@ struct BrowserTabs {
         var lastUsed: Date
     }
 
-    /// How long a tab may sit untouched before it is closed: each one is a
-    /// WebKit process, and this is a machine with little memory to spare.
-    static let idleLimit: TimeInterval = 30 * 60
+    /// How long a tab may sit untouched before its page is let go: each
+    /// one is a WebKit process, and this is a machine with little memory to
+    /// spare. Long enough for an agent to wait on a page — a video playing,
+    /// a job running — without it vanishing under it. The tab itself stays,
+    /// and comes back on its address when next shown or used.
+    static let idleLimit: TimeInterval = 2 * 60 * 60
     static let maestro = "maestro"
     private static let users = "você"
 

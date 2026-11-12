@@ -830,6 +830,31 @@ final class ProjectView: NSView {
         refreshBrowserStrip()
     }
 
+    /// An idle tab's page is let go, not the tab: it stays in the strip and
+    /// loads its address again when shown or used. The page being looked at
+    /// is left alone.
+    private func unloadBrowserTab(_ id: String) {
+        let isOnScreen = window != nil && tabs.selected == .browser && browserTabs.current == id
+        guard !isOnScreen, let browser = browserPanel.keptBrowser(for: id) else { return }
+        if let url = browser.currentURL, url.scheme != "about" { pendingPages[id] = url }
+        browserPanel.dropBrowser(for: id)
+        // Counted from now: nothing is left to let go of until it loads again.
+        browserTabs.touch(id, now: Date())
+    }
+
+    /// The project left the screen, or came back to it. Its browser must
+    /// not leave the window with it: out of the window a page is hidden,
+    /// and what an agent started in it stops.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard tabs.selected == .browser, !isShutDown else { return }
+        if window == nil {
+            browserPanel.parkCurrentBrowser()
+        } else if let id = browserTabs.current {
+            _ = page(for: id)
+        }
+    }
+
     private func closeBrowserTab(_ id: String) {
         guard browserTabs.contains(id) else { return }
         // Let go of, not hidden: a page kept alive behind a closed tab is a
@@ -864,7 +889,7 @@ final class ProjectView: NSView {
         housekeeping = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.browserTabs.idle(now: Date()).forEach(self.closeBrowserTab)
+                self.browserTabs.idle(now: Date()).forEach(self.unloadBrowserTab)
                 self.saveBrowserPages()
             }
         }

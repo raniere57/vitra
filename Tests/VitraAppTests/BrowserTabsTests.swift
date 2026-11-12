@@ -30,14 +30,14 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     #expect(second == "você 2")
 }
 
-@Test func aTabNobodyTouchedForHalfAnHourIsDueToClose() {
+@Test func aTabNobodyTouchedForTwoHoursIsDueToBeLetGo() {
     var tabs = BrowserTabs()
     _ = tabs.use("maestro", now: t0)
     _ = tabs.use("ab12cd34", now: t0)
     tabs.touch("maestro", now: t0.addingTimeInterval(20 * 60))
-    #expect(tabs.idle(now: t0.addingTimeInterval(29 * 60)).isEmpty)
-    #expect(tabs.idle(now: t0.addingTimeInterval(31 * 60)) == ["ab12cd34"])
-    #expect(tabs.idle(now: t0.addingTimeInterval(51 * 60)) == ["maestro", "ab12cd34"])
+    #expect(tabs.idle(now: t0.addingTimeInterval(119 * 60)).isEmpty)
+    #expect(tabs.idle(now: t0.addingTimeInterval(121 * 60)) == ["ab12cd34"])
+    #expect(tabs.idle(now: t0.addingTimeInterval(141 * 60)) == ["maestro", "ab12cd34"])
 }
 
 @Test func aWorkersTabGoesWhenTheWorkerIsDoneAndNobodyElsesDoes() {
