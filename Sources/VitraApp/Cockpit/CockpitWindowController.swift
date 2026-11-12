@@ -124,6 +124,8 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
+        // A project often begins here: its folder is made on the way in.
+        panel.canCreateDirectories = true
         panel.prompt = "Abrir projeto"
         panel.message = "Escolha a pasta do projeto. O maestro trabalha a partir dela."
         // Who the maestro is is chosen here, once, with the folder.
