@@ -216,3 +216,8 @@ struct LeituraAttachmentTests {
         #expect(events == [.userText(id: "u1", time: nil, text: "/a/b/paste-1.png")])
     }
 }
+
+@Test func aLongPasteLosesItsWrapperAndKeepsItsWords() {
+    let raw = "<pasted_content id=\"eed3\">\nlinha um\nlinha dois\n</pasted_content id=\"eed3\">\ne o resto"
+    #expect(UserText.clean(raw) == "linha um\nlinha dois\ne o resto")
+}

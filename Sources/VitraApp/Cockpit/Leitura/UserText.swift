@@ -20,6 +20,9 @@ enum UserText {
         }
         // Self-closing markers such as `<artifact-content-authored-by-others/>`.
         text = text.replacingOccurrences(of: #"<[a-z][a-z-]*/>"#, with: "", options: .regularExpression)
+        // A long paste is wrapped in `<pasted_content id="…">`: the wrapper
+        // is the harness's, what is inside is the user's.
+        text = text.replacingOccurrences(of: #"</?pasted_content[^>]*>\n?"#, with: "", options: .regularExpression)
         // The thumbnails show the images; their placeholders say nothing more.
         text = text.replacingOccurrences(of: #"\[Image #\d+\]\s?"#, with: "", options: .regularExpression)
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
