@@ -110,6 +110,19 @@ struct AgentIdentity: Equatable, Sendable {
         case solo
         case worker
 
+        /// `ancestor` is the nearest ancestor's environment that names a run,
+        /// a worker or a role: a CLI that starts the helper with a clean
+        /// environment, as Cursor does, still has its own to be read. A run or
+        /// a worker named there is a worker, whatever else it says.
+        static func decide(own: [String: String], ancestor: () -> [String: String]?) -> ServedRole {
+            if own.nonEmpty(agentKey) != nil || own.nonEmpty(runKey) != nil || own[VitraMCPConfig.roleKey] != nil
+                || own.nonEmpty(paneKey) != nil {
+                return decide(own: own)
+            }
+            guard let above = ancestor(), above[VitraMCPConfig.roleKey] != nil else { return .worker }
+            return decide(own: above)
+        }
+
         static func decide(own: [String: String]) -> ServedRole {
             let names = own.nonEmpty(agentKey) != nil || own.nonEmpty(runKey) != nil
             if own[VitraMCPConfig.roleKey] == StdioBridge.soloRole { return names ? .worker : .solo }
@@ -126,7 +139,8 @@ struct AgentIdentity: Equatable, Sendable {
         for _ in 0..<maxAncestorSteps {
             guard let parent = parentProcessID(of: child), parent > 1 else { return nil }
             if let environment = environment(ofProcess: parent),
-               environment.nonEmpty(agentKey) != nil || environment.nonEmpty(runKey) != nil {
+               environment.nonEmpty(agentKey) != nil || environment.nonEmpty(runKey) != nil
+                || environment.nonEmpty(VitraMCPConfig.roleKey) != nil {
                 return environment
             }
             child = parent

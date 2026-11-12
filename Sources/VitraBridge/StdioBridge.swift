@@ -17,7 +17,9 @@ public enum StdioBridge {
         // only when the maestro said so in its own environment. A worker gets
         // the browser and the preview, and nothing to delegate with: the
         // maestro hands work out, a worker does it.
-        let role = AgentIdentity.ServedRole.decide(own: ProcessInfo.processInfo.environment)
+        let role = AgentIdentity.ServedRole.decide(own: ProcessInfo.processInfo.environment) {
+            AgentIdentity.nearestAncestorEnvironment(of: getpid())
+        }
         let server = makeServer(role: role, agent: AgentIdentity.current.agent)
         let out = OutputQueue()
         let group = DispatchGroup()

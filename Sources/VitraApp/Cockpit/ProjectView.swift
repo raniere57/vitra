@@ -184,6 +184,9 @@ final class ProjectView: NSView {
     private var resumesInterruptedWork: Bool
     /// Called with the new mode once the user has switched to it.
     var onModeChange: ((MaestroMode) -> Void)?
+    /// A Cursor maestro's chat was created: its id, to be kept with the project.
+    var onSessionChange: ((String) -> Void)?
+    private lazy var cursorChat: String? = project.session
     /// Set while the maestro is being stopped to start again in another mode,
     /// so the shell's exit relaunches it instead of counting as a failure.
     private var relaunchPending = false
@@ -256,7 +259,7 @@ final class ProjectView: NSView {
         self.project = project
         self.mode = project.mode
         self.isSideHidden = project.sidePanelHidden
-        self.isReading = project.isReading
+        self.isReading = project.isReading && project.maestro.hasReading
         self.kit = kit
         // The snapshot tool must neither read nor write the user's queues.
         self.queueStore = startsTerminal ? PromptQueueStore.directory : nil
@@ -1019,6 +1022,10 @@ final class ProjectView: NSView {
     private func launchMaestro(in session: TerminalSession) {
         // A file left by a maestro from an earlier launch is not this one's word.
         Attention.remove(for: project.path)
+        if project.maestro == .cursor {
+            launchCursorMaestro(in: session)
+            return
+        }
         guard let binary = Bundle.main.executablePath else { return }
         // Failing to write the maestro's files leaves a working shell
         // in the project; the reason is printed where the user is looking.
@@ -1050,6 +1057,42 @@ final class ProjectView: NSView {
             // as one at a prompt, and would try to run the message.
             let message = "Vitra: não deu para preparar o maestro (\(error.localizedDescription))"
             session.send(text: "printf '%s\\n' " + ShellQuote.quote(message) + "\n")
+        }
+    }
+
+    /// Starts a Cursor maestro: in the project's chat when it has one, else
+    /// in a chat made for it first, whose id Cursor chooses.
+    private func launchCursorMaestro(in session: TerminalSession) {
+        let mode = self.mode
+        let prompt = nextLaunchPrompt ?? (resumesInterruptedWork ? Maestro.resumePrompt(mode: mode) : nil)
+        resumesInterruptedWork = false
+        nextLaunchPrompt = nil
+        let start: (String, Bool) -> Void = { [weak self] chat, isNew in
+            guard let self, !self.isShutDown else { return }
+            do {
+                let brief = try Maestro.installCursorBrief(mode: mode, in: Maestro.supportDirectory)
+                session.send(text: Maestro.cursorLaunchLine(chat: chat, isNew: isNew, mode: mode, brief: brief, prompt: prompt))
+                self.maestroLaunched()
+            } catch {
+                let message = "Vitra: não deu para preparar o maestro (\(error.localizedDescription))"
+                session.send(text: "printf '%s\\n' " + ShellQuote.quote(message) + "\n")
+            }
+        }
+        if let chat = cursorChat {
+            start(chat, false)
+            return
+        }
+        let directory = project.path
+        Task { @MainActor [weak self] in
+            let chat = await Task.detached { CursorChat.create(in: directory) }.value
+            guard let chat else {
+                let message = "Vitra: o Cursor não criou a conversa. Confira `agent status` e reabra o projeto."
+                session.send(text: "printf '%s\\n' " + ShellQuote.quote(message) + "\n")
+                return
+            }
+            self?.cursorChat = chat
+            self?.onSessionChange?(chat)
+            start(chat, true)
         }
     }
 

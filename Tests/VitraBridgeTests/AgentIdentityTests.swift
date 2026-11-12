@@ -239,3 +239,17 @@ private func fakeRuns() throws -> (root: URL, run: URL) {
     let identity = AgentIdentity.resolve(own: [:], startingAt: grandchild)
     #expect(identity.agent == "abcd1234")
 }
+
+@Test func aHelperStartedWithACleanEnvironmentTakesItsRoleFromTheCLIAboveIt() {
+    typealias Role = AgentIdentity.ServedRole
+    // Cursor starts the helper with nothing of ours: the agent's own environment says.
+    #expect(Role.decide(own: [:]) { ["VITRA_ROLE": "maestro", "VITRA_PANE": "/p"] } == .maestro)
+    #expect(Role.decide(own: [:]) { ["VITRA_ROLE": "solo", "VITRA_PANE": "/p"] } == .solo)
+    // A worker above is a worker, whatever role it also carries.
+    #expect(Role.decide(own: [:]) { ["VITRA_ROLE": "maestro", "VITRA_RUN": "/x/runs/abcd1234"] } == .worker)
+    // A pane alone above is not a maestro: any CLI run in the project's shell has it.
+    #expect(Role.decide(own: [:]) { ["VITRA_PANE": "/p"] } == .worker)
+    #expect(Role.decide(own: [:]) { nil } == .worker)
+    // What the helper's own environment says is never overruled from above.
+    #expect(Role.decide(own: ["VITRA_AGENT": "abcd1234"]) { ["VITRA_ROLE": "maestro"] } == .worker)
+}

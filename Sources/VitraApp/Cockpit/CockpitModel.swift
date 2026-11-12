@@ -34,6 +34,10 @@ struct CockpitProject: Codable, Equatable {
     /// are ended, and nothing of it runs until the tab is clicked again.
     var isAsleep = false
 
+    /// Which CLI is this project's maestro. Chosen when the project is
+    /// added and kept with it: a conversation belongs to the CLI it is in.
+    var maestro: MaestroCLI = .claude
+
     init(path: String, session: String? = nil, mode: MaestroMode = .orchestrator, sidePanelHidden: Bool = false, isReading: Bool = false) {
         // One spelling per directory, so a trailing slash never makes a
         // second tab for the same place.
@@ -44,7 +48,7 @@ struct CockpitProject: Codable, Equatable {
         self.isReading = isReading
     }
 
-    private enum CodingKeys: String, CodingKey { case path, session, mode, sidePanelHidden, isReading, isAsleep }
+    private enum CodingKeys: String, CodingKey { case path, session, mode, sidePanelHidden, isReading, isAsleep, maestro }
 
     /// Files saved before the mode existed, or with one this build does not
     /// know, open in the orchestrator mode.
@@ -58,9 +62,23 @@ struct CockpitProject: Codable, Equatable {
             isReading: (try? container.decodeIfPresent(Bool.self, forKey: .isReading)) ?? true
         )
         isAsleep = (try? container.decodeIfPresent(Bool.self, forKey: .isAsleep)) ?? false
+        maestro = (try? container.decodeIfPresent(MaestroCLI.self, forKey: .maestro)) ?? .claude
     }
 
     var name: String { URL(fileURLWithPath: path).lastPathComponent }
+}
+
+/// The CLI a project's maestro runs in.
+enum MaestroCLI: String, Codable, Equatable, CaseIterable {
+    case claude
+    case cursor
+
+    /// What the user calls it.
+    var title: String { self == .cursor ? "Cursor" : "Claude Code" }
+
+    /// Leitura, the tab's dots, the usage figure and the Fila's timing are
+    /// read from what Claude Code writes; another CLI has the terminal only.
+    var hasReading: Bool { self == .claude }
 }
 
 /// How a project's maestro works: handing pieces to workers, or alone.
@@ -74,9 +92,11 @@ enum MaestroMode: String, Codable, Equatable {
 
 enum CockpitProjects {
     /// `projects` with `path` open; unchanged when it already is.
-    static func adding(_ path: String, to projects: [CockpitProject]) -> [CockpitProject] {
-        // A project opens in Leitura: the conversation, rendered to be read.
-        let project = CockpitProject(path: path, isReading: true)
+    static func adding(_ path: String, maestro: MaestroCLI = .claude, to projects: [CockpitProject]) -> [CockpitProject] {
+        // A project opens in Leitura, the conversation rendered to be read,
+        // when its maestro's CLI has one to render.
+        var project = CockpitProject(path: path, isReading: maestro.hasReading)
+        project.maestro = maestro
         return projects.contains { $0.path == project.path } ? projects : projects + [project]
     }
 
@@ -162,7 +182,11 @@ struct CockpitState: Codable, Equatable {
     private var repaired: CockpitState {
         let projects = projects.map { project in
             let isUUID = project.session.flatMap { UUID(uuidString: $0) } != nil
-            return isUUID ? project : CockpitProject(path: project.path, mode: project.mode, sidePanelHidden: project.sidePanelHidden, isReading: project.isReading)
+            guard !isUUID else { return project }
+            var clean = CockpitProject(path: project.path, mode: project.mode, sidePanelHidden: project.sidePanelHidden, isReading: project.isReading)
+            clean.maestro = project.maestro
+            clean.isAsleep = project.isAsleep
+            return clean
         }
         let last = max(projects.count - 1, 0)
         return CockpitState(projects: projects, selected: min(max(selected, 0), last), closed: closed)
@@ -535,6 +559,36 @@ enum Maestro {
             brief: instructions.path,
             prompt: prompt
         )
+    }
+
+    /// The line that starts a Cursor maestro in the project's shell.
+    ///
+    /// Cursor takes no file of instructions and starts its MCP servers with a
+    /// clean environment, so the role rides on the agent's own environment,
+    /// where the helper looks for it among its ancestors, and the brief goes
+    /// in as the first thing said in a new chat. `--force` is never passed:
+    /// what it may run unasked is the user's to say, in Cursor.
+    static func cursorLaunchLine(chat: String, isNew: Bool, mode: MaestroMode, brief: String, prompt: String? = nil) -> String {
+        let role = mode == .solo ? StdioBridge.soloRole : VitraMCPConfig.maestroRole
+        var line = [
+            VitraMCPConfig.roleKey + "=" + role, "agent", "--approve-mcps", "--trust", "--resume", ShellQuote.quote(chat),
+        ]
+        if isNew {
+            line.append("\"$(cat " + ShellQuote.quote(brief) + ")\"")
+        } else if let prompt {
+            line.append(ShellQuote.quote(prompt))
+        }
+        return line.joined(separator: " ") + "\n"
+    }
+
+    /// Writes the brief a Cursor maestro is given and returns its path.
+    static func installCursorBrief(mode: MaestroMode, in directory: URL) throws -> String {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let isSolo = mode == .solo
+        let file = directory.appendingPathComponent(isSolo ? "cursor-solo.md" : "cursor-brief.md")
+        let opening = "These are your standing instructions for this whole chat. Read them, answer only \"pronto\", and wait for the user.\n\n"
+        try Data((opening + (isSolo ? soloBrief : brief)).utf8).write(to: file, options: .atomic)
+        return file.path
     }
 
     /// What a maestro that was cut off mid-turn is told when it comes back.

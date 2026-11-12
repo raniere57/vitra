@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Testing
 @testable import VitraApp
+import VitraCore
 @testable import VitraOrchestrator
 
 private let start = Date(timeIntervalSince1970: 1_000_000)
@@ -682,4 +683,39 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(other.projects.map(\.path) == ["/c", "/a", "/b"])
     #expect(other.selected == 2)
     #expect(CockpitProjects.moving(projects, from: 1, to: 1, selected: 0).projects == projects)
+}
+
+// MARK: The maestro's CLI
+
+@Test func aProjectSavedBeforeTheChoiceHasClaudeAsItsMaestro() throws {
+    let old = try JSONDecoder().decode(CockpitProject.self, from: Data(#"{"path":"/a"}"#.utf8))
+    #expect(old.maestro == .claude)
+    var cursor = CockpitProject(path: "/b")
+    cursor.maestro = .cursor
+    let back = try JSONDecoder().decode(CockpitProject.self, from: JSONEncoder().encode(cursor))
+    #expect(back.maestro == .cursor)
+}
+
+@Test func aCursorProjectOpensInTheTerminalAndAClaudeOneInLeitura() {
+    let projects = CockpitProjects.adding("/a", maestro: .cursor, to: [])
+    #expect(projects.first?.maestro == .cursor)
+    #expect(projects.first?.isReading == false)
+    #expect(CockpitProjects.adding("/b", to: []).first?.isReading == true)
+}
+
+@Test func aCursorMaestroIsStartedWithItsRoleInItsOwnEnvironmentAndNeverForced() {
+    let chat = "bb434c0f-d6ac-4bf1-a6f8-4f5b7ed5b247"
+    let new = Maestro.cursorLaunchLine(chat: chat, isNew: true, mode: .orchestrator, brief: "/tmp/b r.md")
+    #expect(new == "VITRA_ROLE=maestro agent --approve-mcps --trust --resume \(ShellQuote.quote(chat)) \"$(cat \(ShellQuote.quote("/tmp/b r.md")))\"\n")
+    // Carried on: no brief again, only what tells it to go on.
+    let resumed = Maestro.cursorLaunchLine(chat: chat, isNew: false, mode: .solo, brief: "/tmp/b.md", prompt: "continue")
+    #expect(resumed == "VITRA_ROLE=solo agent --approve-mcps --trust --resume \(ShellQuote.quote(chat)) \(ShellQuote.quote("continue"))\n")
+    #expect(!new.contains("--force") && !new.contains("--yolo"))
+}
+
+@Test func onlyAUUIDIsTakenForACursorChatId() {
+    #expect(CursorChat.id(in: "warning\nBB434C0F-D6AC-4BF1-A6F8-4F5B7ED5B247\n") == "bb434c0f-d6ac-4bf1-a6f8-4f5b7ed5b247")
+    #expect(CursorChat.id(in: "not signed in") == nil)
+    #expect(CursorChat.id(in: "x; rm -rf /") == nil)
+    #expect(CursorChat.id(in: "") == nil)
 }

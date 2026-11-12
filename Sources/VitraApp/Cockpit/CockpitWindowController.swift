@@ -126,19 +126,31 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         panel.allowsMultipleSelection = false
         panel.prompt = "Abrir projeto"
         panel.message = "Escolha a pasta do projeto. O maestro trabalha a partir dela."
+        // Who the maestro is is chosen here, once, with the folder.
+        let choice = NSPopUpButton()
+        MaestroCLI.allCases.forEach { choice.addItem(withTitle: $0.title) }
+        let label = NSTextField(labelWithString: "Maestro:")
+        let note = NSTextField(labelWithString: "Com o Cursor: só o modo terminal, sem Leitura nem avisos na aba.")
+        note.textColor = .secondaryLabelColor
+        note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        let row = NSStackView(views: [label, choice, note])
+        row.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        row.frame = NSRect(origin: .zero, size: row.fittingSize)
+        panel.accessoryView = row
+        panel.isAccessoryViewDisclosed = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        open(url.path)
+        open(url.path, maestro: MaestroCLI.allCases[max(choice.indexOfSelectedItem, 0)])
     }
 
     /// Opens the project at `path`, as it was when it was closed if it is
     /// remembered: the same conversation, mode and panel.
-    private func open(_ path: String) {
+    private func open(_ path: String, maestro: MaestroCLI = .claude) {
         let opened = CockpitProject(path: path, isReading: true)
         if let index = closed.firstIndex(where: { $0.path == opened.path }) {
             let remembered = closed.remove(at: index)
             if !projects.contains(where: { $0.path == remembered.path }) { projects.append(remembered) }
         } else {
-            projects = CockpitProjects.adding(path, to: projects)
+            projects = CockpitProjects.adding(path, maestro: maestro, to: projects)
         }
         save()
         select(projects.firstIndex { $0.path == opened.path } ?? projects.count - 1)
@@ -291,7 +303,8 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         // The maestro's conversation is given its id before the maestro starts
         // and written down at once, so it is there to resume even if the app
         // does not get to quit cleanly.
-        if projects[selected].session == nil {
+        // (Cursor chooses its own chat's id; that one is noted once it is made.)
+        if projects[selected].session == nil, projects[selected].maestro == .claude {
             projects[selected].session = UUID().uuidString.lowercased()
         }
         // Which tab is in front is part of what reopening puts back.
@@ -323,6 +336,11 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         view.onSideHiddenChange = { [weak self] hidden in
             guard let self, let index = self.projects.firstIndex(where: { $0.path == project.path }) else { return }
             self.projects[index].sidePanelHidden = hidden
+            self.save()
+        }
+        view.onSessionChange = { [weak self] session in
+            guard let self, let index = self.projects.firstIndex(where: { $0.path == project.path }) else { return }
+            self.projects[index].session = session
             self.save()
         }
         view.onReadingChange = { [weak self] reading in

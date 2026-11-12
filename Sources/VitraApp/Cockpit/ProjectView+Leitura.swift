@@ -76,7 +76,11 @@ extension ProjectView {
     }
 
     /// ⌘L.
-    func toggleReading() { setReading(!isReading) }
+    func toggleReading() {
+        // Leitura renders what Claude Code writes down; another CLI has none.
+        guard project.maestro.hasReading else { return NSSound.beep() }
+        setReading(!isReading)
+    }
 
     /// Switches the pane, and hands the keyboard to what is now in front:
     /// the composer in Leitura, the terminal back in Terminal.
