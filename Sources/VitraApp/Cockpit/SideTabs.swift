@@ -32,6 +32,10 @@ enum SideTab: String, CaseIterable {
         }
     }
 
+    /// How much of the window the panel takes showing this tab: half for a
+    /// page, two fifths for everything else.
+    var share: CGFloat { self == .browser ? 0.5 : 0.4 }
+
     /// A page or a file needs room to be read; a list does not.
     var isWide: Bool { self == .browser || self == .files || self == .terminal }
 }

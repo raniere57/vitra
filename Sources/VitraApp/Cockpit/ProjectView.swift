@@ -53,10 +53,6 @@ final class ProjectView: NSView {
     private var maestroHost: HostedPTY?
     private var sharedHost: HostedPTY?
 
-    /// How much of the window the right side takes while it shows a page or
-    /// a file, which need room to be read.
-    private static let wideShare: CGFloat = 0.5
-
     private let side = NSView()
     private let tabs = SideTabs()
     private let tabsRule = NSView.rule(CockpitStyle.softLine)
@@ -121,7 +117,6 @@ final class ProjectView: NSView {
     private lazy var filesPanel = makePanel(for: .files)
     private lazy var filesArea = FilesArea(panel: filesPanel, root: URL(fileURLWithPath: project.path))
     private var sideNarrow: NSLayoutConstraint?
-    private var sideWide: NSLayoutConstraint?
     /// The panel put away: no width at all.
     private var sideCollapsed: NSLayoutConstraint?
     private let divider = NSView.rule(CockpitStyle.line, vertical: true)
@@ -547,32 +542,25 @@ final class ProjectView: NSView {
         if hidden, (window?.firstResponder as? NSView)?.isDescendant(of: side) == true { focusTerminal() }
     }
 
-    /// The narrow panel's width. In Leitura the conversation is a column of
-    /// fixed measure, so the room it leaves at its sides goes to the panel
-    /// instead of lying empty; in the terminal the panel keeps its own width.
-    private var narrowSideWidth: CGFloat {
-        guard isReading, bounds.width > 0 else { return CockpitStyle.workersWidth }
-        let reading = ReadingStyle.maxColumn + 2 * Self.readingMargin
-        return max(CockpitStyle.workersWidth, min(bounds.width - reading, bounds.width * Self.wideShare))
+    /// The panel's width: its tab's share of the window, never less than a
+    /// list needs; flipped (⌘\), just what a list needs.
+    private var sideWidth: CGFloat {
+        guard !isWidthFlipped, bounds.width > 0 else { return CockpitStyle.workersWidth }
+        return max(CockpitStyle.workersWidth, (bounds.width * tabs.selected.share).rounded())
     }
 
-    /// The room kept at each side of the reading column.
-    private static let readingMargin: CGFloat = 36
-
-    /// Follows the window: the reading column's leftover changes with it.
+    /// Follows the window: a share of it changes with it.
     override func layout() {
-        if let narrow = sideNarrow, narrow.constant != narrowSideWidth { narrow.constant = narrowSideWidth }
+        if let width = sideNarrow, width.isActive, width.constant != sideWidth { width.constant = sideWidth }
         super.layout()
     }
 
-    /// One of the panel's three widths: none, narrow for the lists, half the
-    /// window for a page or a file.
+    /// The panel put away, or at its tab's width.
     private func applySideWidth() {
-        let isWide = tabs.selected.isWide != isWidthFlipped
         // Off before on: two held at once cannot be satisfied.
-        [sideNarrow, sideWide, sideCollapsed].forEach { $0?.isActive = false }
-        sideNarrow?.constant = narrowSideWidth
-        (isSideHidden ? sideCollapsed : (isWide ? sideWide : sideNarrow))?.isActive = true
+        [sideNarrow, sideCollapsed].forEach { $0?.isActive = false }
+        sideNarrow?.constant = sideWidth
+        (isSideHidden ? sideCollapsed : sideNarrow)?.isActive = true
         side.isHidden = isSideHidden
         divider.isHidden = isSideHidden
     }
@@ -1227,12 +1215,11 @@ final class ProjectView: NSView {
             return true
         }
 
-        // The right side has two shapes: narrow for the lists, and half the
-        // window for a page or a file.
+        // The right side takes its tab's share of the window (`sideWidth`),
+        // kept up to date in `layout()`.
         let narrow = side.widthAnchor.constraint(equalToConstant: CockpitStyle.workersWidth)
-        let wide = side.widthAnchor.constraint(equalTo: widthAnchor, multiplier: Self.wideShare)
         let collapsed = side.widthAnchor.constraint(equalToConstant: 0)
-        (sideNarrow, sideWide, sideCollapsed) = (narrow, wide, collapsed)
+        (sideNarrow, sideCollapsed) = (narrow, collapsed)
         // Under the tabs' rule, unless the hint strip sits there first.
         let slotUnderRule = tabSlot.topAnchor.constraint(equalTo: tabsRule.bottomAnchor)
         slotUnderRule.priority = .fittingSizeCompression
