@@ -124,7 +124,8 @@ final class LeituraView: NSView {
             empty.topAnchor.constraint(equalTo: topAnchor),
             empty.leadingAnchor.constraint(equalTo: leadingAnchor),
             empty.trailingAnchor.constraint(equalTo: trailingAnchor),
-            empty.bottomAnchor.constraint(equalTo: bottomAnchor),
+            // Over the list only: the first message is written from here too.
+            empty.bottomAnchor.constraint(equalTo: banner.topAnchor),
             pill.centerXAnchor.constraint(equalTo: list.centerXAnchor),
             pill.bottomAnchor.constraint(equalTo: list.bottomAnchor, constant: -14),
         ])
@@ -154,6 +155,7 @@ final class LeituraView: NSView {
                 } else {
                     self.composer.clear()
                     self.list.scrollToBottom()
+                    self.lookForNewConversation()
                 }
             }
         }
@@ -197,6 +199,18 @@ final class LeituraView: NSView {
         resolveSession()
         // A transcript that was missing may have been written since.
         if isMissing { reader?.open() }
+    }
+
+    /// The first message is what makes Claude Code write the conversation's
+    /// file: looked for a few times after a send from the empty state.
+    private func lookForNewConversation() {
+        guard isMissing else { return }
+        for delay in [1.0, 2.5, 5, 10] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.isMissing else { return }
+                self.sessionMayHaveChanged()
+            }
+        }
     }
 
     private func resolveSession() {
@@ -265,7 +279,6 @@ final class LeituraView: NSView {
         isMissing = missing
         empty.isHidden = !missing
         list.isHidden = missing
-        composer.isHidden = missing
     }
 
     // MARK: - The maestro's state

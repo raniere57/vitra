@@ -320,7 +320,8 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
         .write(to: file, atomically: true, encoding: .utf8)
     let state = CockpitState.load(from: file)
     #expect(state.selected == 0)
-    #expect(state.projects == [CockpitProject(path: "/work/vitra")])
+    // A project saved before Leitura existed opens in it, as a new one does.
+    #expect(state.projects == [CockpitProject(path: "/work/vitra", isReading: true)])
 }
 
 // MARK: - The maestro

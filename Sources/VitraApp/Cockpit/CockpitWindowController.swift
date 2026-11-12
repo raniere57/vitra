@@ -108,7 +108,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
         projects = CockpitProjects.adding(url.path, to: projects)
         save()
-        let opened = CockpitProject(path: url.path)
+        let opened = CockpitProject(path: url.path, isReading: true)
         select(projects.firstIndex { $0.path == opened.path } ?? projects.count - 1)
     }
 

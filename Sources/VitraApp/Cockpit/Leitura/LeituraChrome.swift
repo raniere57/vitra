@@ -65,17 +65,17 @@ final class LeituraEmptyState: NSView {
         super.init(frame: frame)
         wantsLayer = true
         layer?.backgroundColor = ReadingStyle.page.cgColor
-        let icon = NSImageView(image: NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: nil) ?? NSImage())
+        let icon = NSImageView(image: NSImage(systemSymbolName: "bubble.left.and.text.bubble.right", accessibilityDescription: nil) ?? NSImage())
         icon.contentTintColor = ReadingStyle.faint
         icon.symbolConfiguration = .init(pointSize: 26, weight: .light)
-        let title = NSTextField.label("Ainda não há conversa para ler", font: CockpitStyle.display, color: ReadingStyle.text)
+        let title = NSTextField.label("Comece a conversa", font: CockpitStyle.display, color: ReadingStyle.text)
         title.alignment = .center
         let body = NSTextField.wrapping(
-            "A Leitura mostra a conversa do maestro a partir do registro que o Claude Code grava. Esta sessão ainda não gravou nada — isso acontece depois da primeira mensagem — ou o registro dela não está onde o Claude Code costuma guardá-lo.",
+            "Escreva a primeira mensagem para o maestro aqui embaixo. Se ele pedir algo antes de começar — confiar na pasta, entrar na conta —, isso aparece no terminal.",
             font: ReadingStyle.small, color: ReadingStyle.quiet
         )
         body.alignment = .center
-        let button = NSButton(title: "Voltar ao terminal", target: self, action: #selector(back))
+        let button = NSButton(title: "Ver o terminal", target: self, action: #selector(back))
         button.bezelStyle = .rounded
         let stack = NSStackView(views: [icon, title, body, button])
         stack.orientation = .vertical

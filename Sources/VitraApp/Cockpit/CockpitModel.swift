@@ -51,7 +51,7 @@ struct CockpitProject: Codable, Equatable {
             session: try container.decodeIfPresent(String.self, forKey: .session),
             mode: (try? container.decodeIfPresent(MaestroMode.self, forKey: .mode)) ?? .orchestrator,
             sidePanelHidden: (try? container.decodeIfPresent(Bool.self, forKey: .sidePanelHidden)) ?? false,
-            isReading: (try? container.decodeIfPresent(Bool.self, forKey: .isReading)) ?? false
+            isReading: (try? container.decodeIfPresent(Bool.self, forKey: .isReading)) ?? true
         )
     }
 
@@ -70,7 +70,8 @@ enum MaestroMode: String, Codable, Equatable {
 enum CockpitProjects {
     /// `projects` with `path` open; unchanged when it already is.
     static func adding(_ path: String, to projects: [CockpitProject]) -> [CockpitProject] {
-        let project = CockpitProject(path: path)
+        // A project opens in Leitura: the conversation, rendered to be read.
+        let project = CockpitProject(path: path, isReading: true)
         return projects.contains { $0.path == project.path } ? projects : projects + [project]
     }
 }
@@ -93,7 +94,23 @@ struct CockpitState: Codable, Equatable {
         let saved = (try? decoder.decode(CockpitState.self, from: data))
             ?? (try? decoder.decode([CockpitProject].self, from: data)).map { CockpitState(projects: $0) }
             ?? CockpitState()
-        return saved.repaired
+        return url == defaultURL ? saved.repaired.readingByDefault() : saved.repaired
+    }
+
+    /// Leitura became the default after projects had been saved in the
+    /// terminal, which was all there was: once, they all move to it. What
+    /// the user switches back afterwards stays as they left it.
+    private func readingByDefault(defaults: UserDefaults = .standard) -> CockpitState {
+        let key = "leituraIsDefault"
+        guard !defaults.bool(forKey: key) else { return self }
+        defaults.set(true, forKey: key)
+        var state = self
+        state.projects = projects.map { project in
+            var project = project
+            project.isReading = true
+            return project
+        }
+        return state
     }
 
     func save(to url: URL = defaultURL) throws {
@@ -109,7 +126,7 @@ struct CockpitState: Codable, Equatable {
     private var repaired: CockpitState {
         let projects = projects.map { project in
             let isUUID = project.session.flatMap { UUID(uuidString: $0) } != nil
-            return isUUID ? project : CockpitProject(path: project.path, mode: project.mode, sidePanelHidden: project.sidePanelHidden)
+            return isUUID ? project : CockpitProject(path: project.path, mode: project.mode, sidePanelHidden: project.sidePanelHidden, isReading: project.isReading)
         }
         let last = max(projects.count - 1, 0)
         return CockpitState(projects: projects, selected: min(max(selected, 0), last))
