@@ -292,7 +292,10 @@ public final class TerminalRenderer {
                 // A quiet row fades toward the page; what is selected stays
                 // as it is, since it is being read.
                 if quiet > 0, !cell.flags.contains(.selected) {
-                    foreground = foreground.mixed(with: defaultBackground, amount: quiet)
+                    // What the program already drew faint is near the floor:
+                    // faded as much again it could not be read at all.
+                    let amount = cell.flags.contains(.faint) ? quiet / 3 : quiet
+                    foreground = foreground.mixed(with: defaultBackground, amount: amount)
                     if background != defaultBackground { background = background.mixed(with: defaultBackground, amount: quiet) }
                 }
 
@@ -336,8 +339,8 @@ public final class TerminalRenderer {
     /// How far a quiet row fades: a call a little, its output more.
     private static func quietAmount(_ level: UInt8) -> Float {
         switch level {
-        case 1: 0.30
-        case 2: 0.55
+        case 1: 0.48
+        case 2: 0.68
         default: 0
         }
     }
