@@ -63,6 +63,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIconFile</key>        <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
     <key>NSHighResolutionCapable</key> <true/>
+    <!-- The panel is a browser: it opens plain-http pages too (a dev server,
+         a router, an intranet box by its address). Web content only; the
+         app's own requests stay under App Transport Security. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+      <key>NSAllowsArbitraryLoadsInWebContent</key> <true/>
+      <key>NSAllowsLocalNetworking</key>            <true/>
+    </dict>
     <key>NSSupportsAutomaticTermination</key> <false/>
     <key>NSSupportsSuddenTermination</key>    <false/>
     <!-- Viewer of last resort: this is what lets "vitra open" hand any file to

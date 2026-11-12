@@ -378,7 +378,23 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     private func failLoad(_ error: Error) {
         progress.stopAnimation(nil)
         progress.isHidden = true
+        showFailure(error)
         finishLoads(with: .failure(ToolFailure(error.localizedDescription)))
+    }
+
+    /// A page that did not load says why, where the page would be: a blank
+    /// panel tells nobody whether the address is wrong, the server is down
+    /// or the connection was refused.
+    private func showFailure(_ error: Error) {
+        let failure = error as NSError
+        // Not failures: a navigation the user or the page replaced, and a
+        // load that became a download.
+        let isCancelled = failure.domain == NSURLErrorDomain && failure.code == NSURLErrorCancelled
+        let becameDownload = failure.domain == "WebKitErrorDomain" && failure.code == 102
+        guard !isCancelled, !becameDownload, let webView else { return }
+        let address = (failure.userInfo[NSURLErrorFailingURLStringErrorKey] as? String) ?? self.address.stringValue
+        webView.loadHTMLString(BrowserScripts.failurePage(address: address, reason: failure.localizedDescription), baseURL: nil)
+        self.address.stringValue = address
     }
 
     private func finishLoads(with result: Result<Void, Error>) {

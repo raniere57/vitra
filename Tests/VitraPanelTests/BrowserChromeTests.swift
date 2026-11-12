@@ -94,3 +94,10 @@ struct BrowserChromeTests {
     #expect(browser.superview !== lot)
     panel.dropBrowser(for: "maestro")
 }
+
+@Test func aFailurePageShowsTheAddressAndReasonAsTextNeverAsMarkup() {
+    let page = BrowserScripts.failurePage(address: "http://x/<script>alert(1)</script>", reason: "A \"conexão\" foi <recusada> & pronto")
+    #expect(!page.contains("<script>alert(1)</script>"))
+    #expect(page.contains("&lt;script&gt;alert(1)&lt;/script&gt;"))
+    #expect(page.contains("A &quot;conexão&quot; foi &lt;recusada&gt; &amp; pronto"))
+}

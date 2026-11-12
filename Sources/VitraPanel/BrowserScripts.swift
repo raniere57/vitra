@@ -61,6 +61,23 @@ enum BrowserScripts {
     }
     """
 
+    /// What the panel shows in place of a page that did not load.
+    static func failurePage(address: String, reason: String) -> String {
+        func escaped(_ text: String) -> String {
+            text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
+        }
+        return """
+        <!doctype html><meta charset="utf-8"><title>Não abriu</title>
+        <body style="margin:0;background:#15171c;color:#c9ccd3;font:15px -apple-system,system-ui;display:flex;min-height:100vh;align-items:center;justify-content:center">
+        <div style="max-width:520px;padding:32px;text-align:center">
+        <div style="font-size:19px;color:#f1f2f4;font-weight:600;margin-bottom:10px">Esta página não abriu</div>
+        <div style="font:13px ui-monospace,Menlo,monospace;color:#8a8f99;word-break:break-all;margin-bottom:14px">\(escaped(address))</div>
+        <div>\(escaped(reason))</div>
+        </div></body>
+        """
+    }
+
     /// Every inner frame says hello once it has loaded, which is how the
     /// browser gets a handle to run the tools inside it.
     static let frameHello = """
