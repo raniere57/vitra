@@ -68,6 +68,21 @@ final class ReadingTextView: NSTextView {
         selectionSettled()
     }
 
+    /// The text view sets the I-beam over all of itself, the button included:
+    /// over the button the pointer is a hand.
+    private func isOverReply(_ event: NSEvent) -> Bool {
+        guard let reply else { return false }
+        return reply.frame.contains(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        if isOverReply(event) { NSCursor.pointingHand.set() } else { super.mouseMoved(with: event) }
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        if isOverReply(event) { NSCursor.pointingHand.set() } else { super.cursorUpdate(with: event) }
+    }
+
     override func resignFirstResponder() -> Bool {
         hideReply()
         return super.resignFirstResponder()
