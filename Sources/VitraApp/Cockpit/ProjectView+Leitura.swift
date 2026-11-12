@@ -1,4 +1,5 @@
 import AppKit
+import VitraCore
 import QuartzCore
 
 /// Terminal · Leitura: the maestro's pane as the terminal it is, or as its
@@ -15,7 +16,7 @@ extension ProjectView {
         view.onQueue = { [weak self] text in self?.enqueue(text) }
         // Claude Code's own "send queued messages now": ⌃X ⌃S, the chord that
         // every terminal passes on (⌃⏎ reaches some as a plain Return).
-        view.onDeliverQueue = { [weak self] in self?.terminal?.session.send(text: "\u{18}\u{13}") }
+        view.onDeliverQueue = { [weak self] in self?.deliverQueueNow() }
         view.suggestionSource = { [weak self] in self?.terminal?.suggestedInput() }
         view.onOpenLink = { [weak self] url in self?.openTerminalLink(url, external: false) }
         view.onOpenWorker = { [weak self] id in
@@ -147,6 +148,24 @@ extension ProjectView {
     /// ⌃U on an empty prompt does nothing: a few more than any prompt has lines.
     private static let clears = 8
     private static let clearDelay: TimeInterval = 0.12
+
+    /// Claude Code's "send queued messages now": ⌃⏎, as the key itself and
+    /// not as bytes — the terminal encodes it the way the program asked to
+    /// be told (Kitty protocol, modifyOtherKeys), which raw control bytes do
+    /// not survive. Then ⌃X ⌃S, its other binding, for a terminal state in
+    /// which ⌃⏎ is only a Return; with nothing left in the queue it does nothing.
+    func deliverQueueNow() {
+        guard let session = terminal?.session else { return }
+        session.send(KeyEvent(keyCode: Self.returnKey, modifiers: .control, text: "\r", unshiftedCodepoint: 13))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            session.send(KeyEvent(keyCode: Self.xKey, modifiers: .control, text: "\u{18}", unshiftedCodepoint: 120))
+            session.send(KeyEvent(keyCode: Self.sKey, modifiers: .control, text: "\u{13}", unshiftedCodepoint: 115))
+        }
+    }
+
+    private static let returnKey: UInt16 = 36
+    private static let xKey: UInt16 = 7
+    private static let sKey: UInt16 = 1
 
     // MARK: - The switch calls for attention
 
