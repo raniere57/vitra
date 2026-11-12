@@ -13,6 +13,9 @@ import VitraCore
 final class LeituraComposer: NSView, NSTextViewDelegate {
     var onSend: ((String) -> Void)?
     var onQueue: ((String) -> Void)?
+    /// ⌃⏎: what is written goes, and with what already waits in Claude
+    /// Code's queue is delivered at once instead of when the turn ends.
+    var onSendNow: ((String) -> Void)?
     var onEscape: (() -> Void)?
     var onHeightChange: (() -> Void)?
     /// A pasted image or file was clicked: its path, to open in the preview.
@@ -122,7 +125,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     /// The labels follow whether the maestro is mid-turn.
     func setWorking(_ working: Bool) {
         isWorking = working
-        let title = working ? "Enviar (entra na fila do Claude)" : "Enviar"
+        let title = working ? "Enviar (entra na fila · ⌃⏎ envia já)" : "Enviar"
         send.attributedTitle = NSAttributedString(string: title + "  ⏎", attributes: [.font: ReadingStyle.smallMedium, .foregroundColor: CockpitStyle.bar])
         send.layer?.backgroundColor = CockpitStyle.accent.cgColor
         send.toolTip = working
@@ -300,6 +303,8 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         case #selector(NSResponder.insertNewline(_:)):
             if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
                 textView.insertNewlineIgnoringFieldEditor(nil)
+            } else if NSApp.currentEvent?.modifierFlags.contains(.control) == true {
+                onSendNow?(outgoing)
             } else {
                 sendTapped()
             }
@@ -345,6 +350,14 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
 final class ComposerTextView: NSTextView {
     /// The paths a paste just put in the text.
     var onAttach: (([String]) -> Void)?
+
+    /// A plain-text view says it cannot paste when the pasteboard holds
+    /// only an image — a screenshot, a copied picture — and ⌘V then does
+    /// nothing at all. This one takes images: it can always try.
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(paste(_:)) { return true }
+        return super.validateUserInterfaceItem(item)
+    }
 
     override func paste(_ sender: Any?) {
         let found = PasteboardAttachments.read(from: .general, store: AttachmentStore())

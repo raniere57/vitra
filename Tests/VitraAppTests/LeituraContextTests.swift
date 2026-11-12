@@ -169,3 +169,22 @@ struct LeituraTurnTests {
     #expect(!composer.textView(composer.text, doCommandBy: #selector(NSResponder.insertTab(_:))))
     #expect(composer.message == "outra coisa")
 }
+
+/// A plain-text view refuses ⌘V when the pasteboard holds only an image;
+/// the composer takes images, so its Paste is always on.
+@MainActor
+@Test func pasteIsOfferedInTheComposerWhateverThePasteboardHolds() {
+    let composer = LeituraComposer(frame: NSRect(x: 0, y: 0, width: 600, height: 80))
+    let item = NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+    #expect(composer.text.validateUserInterfaceItem(item))
+}
+
+@Test func theBrowsersPagesComeBackAfterARestart() {
+    let defaults = UserDefaults(suiteName: "vitra.tests.browserPages.\(UUID().uuidString)")!
+    let saved = BrowserPages.Saved(pages: ["maestro": "https://example.com/aula/3", "você": "https://example.com"], current: "maestro")
+    BrowserPages.save(saved, project: "/work/x", defaults: defaults)
+    #expect(BrowserPages.load(project: "/work/x", defaults: defaults) == saved)
+    #expect(BrowserPages.load(project: "/work/y", defaults: defaults) == nil)
+    BrowserPages.save(.init(pages: [:], current: nil), project: "/work/x", defaults: defaults)
+    #expect(BrowserPages.load(project: "/work/x", defaults: defaults) == nil)
+}

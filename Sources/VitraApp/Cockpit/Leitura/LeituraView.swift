@@ -13,6 +13,8 @@ final class LeituraView: NSView {
     /// Sends a message; answers why it could not, or nil once it went.
     var onSend: ((String, @escaping @MainActor (String?) -> Void) -> Void)?
     var onQueue: ((String) -> Void)?
+    /// Delivers what waits in Claude Code's queue now.
+    var onDeliverQueue: (() -> Void)?
     /// The prompt the maestro's terminal suggests now, if any.
     var suggestionSource: (() -> String?)?
     private var suggestionPoll: Timer?
@@ -157,6 +159,19 @@ final class LeituraView: NSView {
                     self.list.scrollToBottom()
                     self.lookForNewConversation()
                 }
+            }
+        }
+        list.context.sendQueuedNow = { [weak self] in self?.onDeliverQueue?() }
+        composer.onSendNow = { [weak self] text in
+            guard let self else { return }
+            guard !text.isEmpty else { return self.onDeliverQueue?() ?? () }
+            self.onSend?(text) { [weak self] problem in
+                guard let self else { return }
+                if let problem { return self.composer.showProblem(problem) }
+                self.composer.clear()
+                self.list.scrollToBottom()
+                // After the paste and its Return have reached the prompt.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.onDeliverQueue?() }
             }
         }
         composer.onQueue = { [weak self] text in

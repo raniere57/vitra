@@ -31,6 +31,8 @@ final class LeituraContext {
     var openLink: ((URL) -> Void)?
     var openWorker: ((String) -> Void)?
     var openImage: ((ImageRef) -> Void)?
+    /// "enviar agora" on a prompt waiting in Claude Code's queue.
+    var sendQueuedNow: (() -> Void)?
     /// A row changed its own height (opened, closed): the list re-measures it.
     var rowChanged: ((String) -> Void)?
 

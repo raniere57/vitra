@@ -86,9 +86,24 @@ final class UserRowView: LeituraRowView {
     private let label = NSTextField.label(font: CockpitStyle.micro, color: CockpitStyle.accent)
     private let text = ReadingTextView()
     private var thumbs: [ThumbnailView] = []
+    /// On a prompt still in the queue: deliver it without waiting for the turn.
+    private let sendNow = NSButton()
+    static let queuedMinWidth: CGFloat = 290
+
+    @objc private func sendNowTapped() { context?.sendQueuedNow?() }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
+        sendNow.isBordered = false
+        sendNow.attributedTitle = NSAttributedString(string: "enviar agora", attributes: [
+            .font: CockpitStyle.caption, .foregroundColor: CockpitStyle.accent,
+            .underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: CockpitStyle.accent.withAlphaComponent(0.4),
+        ])
+        sendNow.toolTip = "Entrega já ao maestro, sem esperar o turno acabar (⌃⏎ no campo de mensagem)"
+        sendNow.target = self
+        sendNow.action = #selector(sendNowTapped)
+        sendNow.isHidden = true
+        addSubview(sendNow)
         block.translatesAutoresizingMaskIntoConstraints = true
         block.layer?.borderWidth = 1
         block.layer?.borderColor = ReadingStyle.mineEdge.cgColor
@@ -143,7 +158,7 @@ final class UserRowView: LeituraRowView {
         let maxInner = column - 2 * padH
         let natural = attributed(message.text).boundingRect(with: NSSize(width: maxInner, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin]).width
         let thumbs = CGFloat(message.images.count) * (thumb * ThumbnailView.aspect + 8)
-        return min(maxInner, max(ceil(natural) + 2, thumbs, 160))
+        return min(maxInner, max(ceil(natural) + 2, thumbs, message.isQueued ? queuedMinWidth : 160))
     }
 
     static func height(_ message: UserMessage, width: CGFloat) -> CGFloat {
@@ -162,7 +177,10 @@ final class UserRowView: LeituraRowView {
         if message.isQueued {
             title.append(NSAttributedString(string: "  ·  na fila", attributes: [.font: CockpitStyle.meta, .foregroundColor: CockpitStyle.muted]))
         }
-        alphaValue = message.isQueued ? 0.62 : 1
+        // The words wait, quieter; the way to hurry them does not.
+        text.alphaValue = message.isQueued ? 0.62 : 1
+        block.alphaValue = message.isQueued ? 0.7 : 1
+        sendNow.isHidden = !message.isQueued
         if !time.isEmpty {
             title.append(NSAttributedString(string: "  ·  " + time, attributes: [.font: CockpitStyle.meta, .foregroundColor: ReadingStyle.faint]))
         }
@@ -193,6 +211,8 @@ final class UserRowView: LeituraRowView {
         let x = blockX + Self.padH
         var y = Self.top + Self.padV
         label.frame = NSRect(x: x, y: y, width: inner, height: Self.header)
+        sendNow.sizeToFit()
+        sendNow.frame = NSRect(x: x + inner - sendNow.frame.width, y: y - 2, width: sendNow.frame.width, height: Self.header + 4)
         y += Self.header + Self.headerGap
         let body = message.text.isEmpty ? 0 : ReadingTextView.height(of: text.attributedString(), width: inner)
         text.frame = NSRect(x: x, y: y, width: inner, height: body)

@@ -13,6 +13,9 @@ extension ProjectView {
             self.sendFromLeitura(text, done: done)
         }
         view.onQueue = { [weak self] text in self?.enqueue(text) }
+        // Claude Code's own "send queued messages now": ⌃X ⌃S, the chord that
+        // every terminal passes on (⌃⏎ reaches some as a plain Return).
+        view.onDeliverQueue = { [weak self] in self?.terminal?.session.send(text: "\u{18}\u{13}") }
         view.suggestionSource = { [weak self] in self?.terminal?.suggestedInput() }
         view.onOpenLink = { [weak self] url in self?.openTerminalLink(url, external: false) }
         view.onOpenWorker = { [weak self] id in

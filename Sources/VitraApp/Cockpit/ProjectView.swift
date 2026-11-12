@@ -72,6 +72,8 @@ final class ProjectView: NSView {
         return panel
     }()
     private var browserTabs = BrowserTabs()
+    /// Tabs brought back from before a restart, not loaded yet.
+    private var pendingPages: [String: URL] = [:]
     private var runTitles: [String: String] = [:]
     private let browserStrip = BrowserTabStrip()
     private let browserPanelSlot = NSView()
@@ -262,6 +264,7 @@ final class ProjectView: NSView {
         applySideWidth()
         if isReading { applyReading() }
         guard startsTerminal else { return }
+        restoreBrowserPages()
         startHousekeeping()
         startTerminal(launchingMaestro: true)
     }
@@ -402,6 +405,7 @@ final class ProjectView: NSView {
         housekeeping?.invalidate()
         queueRetry?.invalidate()
         if let activityMonitor { NSEvent.removeMonitor(activityMonitor) }
+        saveBrowserPages()
         browserTabs.tabs.map(\.id).forEach(browserPanel.dropBrowser(for:))
         browserPanel.clearContent()
         filesPanel.clearContent()
@@ -450,7 +454,7 @@ final class ProjectView: NSView {
         case .browser:
             // Opened by hand with nothing in it: a tab of the user's own.
             if browserTabs.current == nil { _ = browserTabs.openUsers(now: Date()) }
-            if let id = browserTabs.current { _ = browserPanel.browser(for: id) }
+            if let id = browserTabs.current { _ = page(for: id) }
             refreshBrowserStrip()
             content = browserArea
         case .files:
@@ -729,7 +733,7 @@ final class ProjectView: NSView {
         // seen. After that it works where it is and the view is left alone.
         browserTabs.show(id)
         select(.browser)
-        return (browserPanel.browser(for: id), isNew)
+        return (page(for: id), isNew)
     }
 
     /// A tab to look at, whoever it belongs to.
@@ -758,14 +762,47 @@ final class ProjectView: NSView {
         let id = browserTabs.current.flatMap { BrowserTabs.isUsers($0) ? $0 : nil } ?? browserTabs.openUsers(now: Date())
         browserTabs.touch(id, now: Date())
         select(.browser)
-        return browserPanel.browser(for: id)
+        return page(for: id)
+    }
+
+    /// The tab's browser, made if need be — and, for a tab brought back from
+    /// before a restart, sent to the page it was on.
+    private func page(for id: String) -> BrowserView {
+        let view = browserPanel.browser(for: id)
+        if let url = pendingPages.removeValue(forKey: id) { view.load(url) { _ in } }
+        return view
+    }
+
+    /// The maestro's and the user's tabs as they were when the app last
+    /// went away. Their pages load when each is first shown: a page is a
+    /// WebKit process, not worth starting for a panel nobody opened.
+    private func restoreBrowserPages() {
+        guard let saved = BrowserPages.load(project: project.path) else { return }
+        let now = Date()
+        for (id, address) in saved.pages.sorted(by: { $0.key < $1.key }) {
+            guard let url = URL(string: address), id == BrowserTabs.maestro || BrowserTabs.isUsers(id) else { continue }
+            _ = browserTabs.use(id, now: now)
+            pendingPages[id] = url
+        }
+        if let current = saved.current { browserTabs.show(current) }
+    }
+
+    /// Workers' tabs are not kept: their runs do not outlive the app.
+    private func saveBrowserPages() {
+        var pages: [String: String] = [:]
+        for tab in browserTabs.tabs where tab.id == BrowserTabs.maestro || BrowserTabs.isUsers(tab.id) {
+            let url = browserPanel.keptBrowser(for: tab.id)?.currentURL ?? pendingPages[tab.id]
+            guard let url, url.scheme != "about" else { continue }
+            pages[tab.id] = url.absoluteString
+        }
+        BrowserPages.save(.init(pages: pages, current: browserTabs.current), project: project.path)
     }
 
     private func showBrowserTab(_ id: String) {
         browserTabs.show(id)
         browserTabs.touch(id, now: Date())
         if tabs.selected == .browser, let current = browserTabs.current {
-            _ = browserPanel.browser(for: current)
+            _ = page(for: current)
         }
         refreshBrowserStrip()
     }
@@ -777,7 +814,7 @@ final class ProjectView: NSView {
         browserPanel.dropBrowser(for: id)
         browserTabs.close(id)
         if let current = browserTabs.current {
-            if tabs.selected == .browser { _ = browserPanel.browser(for: current) }
+            if tabs.selected == .browser { _ = page(for: current) }
         } else {
             if browserPanel.isMaximized { toggleMaximized(browserPanel) }
             browserPanel.clearContent()
@@ -805,6 +842,7 @@ final class ProjectView: NSView {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.browserTabs.idle(now: Date()).forEach(self.closeBrowserTab)
+                self.saveBrowserPages()
             }
         }
         activityMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown, .scrollWheel]) { [weak self] event in
