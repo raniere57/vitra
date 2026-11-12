@@ -957,6 +957,9 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// The corner buttons' own cursor over them, the pointing hand over a link,
     /// the I-beam everywhere else.
     override func mouseMoved(with event: NSEvent) {
+        // A tracking area fires through whatever lies over the terminal
+        // (Leitura, a sheet): there the cursor is that view's to choose.
+        guard let hit = window?.contentView?.hitTest(event.locationInWindow), hit.isDescendant(of: self) else { return }
         let point = convert(event.locationInWindow, from: nil)
         if let button = cornerButtons.first(where: { !$0.isHidden && $0.frame.contains(point) }) {
             button.cursor.set()

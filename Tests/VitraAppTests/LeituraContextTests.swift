@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Testing
 @testable import VitraApp
 
@@ -49,5 +49,18 @@ struct LeituraQueueTests {
 
     @Test func aBackgroundTaskNoticeIsNotTheUsersPrompt() {
         #expect(chunk([line("enqueue", "<task-notification><summary>fim</summary></task-notification>")]).queued.isEmpty)
+    }
+}
+
+/// Typed text must take the page's colour: an empty text view types in black,
+/// which on the dark page reads as nothing being typed at all.
+@MainActor
+@Test func whatIsTypedInTheComposerIsVisible() {
+    let composer = LeituraComposer(frame: NSRect(x: 0, y: 0, width: 600, height: 80))
+    for round in 0 ..< 2 {
+        composer.text.insertText("oi", replacementRange: composer.text.selectedRange())
+        let color = composer.text.textStorage?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        #expect(color == ReadingStyle.text, "round \(round)")
+        composer.clear()
     }
 }

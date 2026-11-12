@@ -9,7 +9,7 @@ final class AnswerRowView: LeituraRowView {
     static let top: CGFloat = 12
     /// Room under the answer for "copiar resposta": on its own line, so it
     /// never lies over the text it copies.
-    static let bottom: CGFloat = 30
+    static let bottom: CGFloat = 10
     static let segmentGap: CGFloat = 14
 
     private var texts: [ReadingTextView] = []
@@ -23,9 +23,10 @@ final class AnswerRowView: LeituraRowView {
         super.init(frame: frame)
         copy.isBordered = false
         copy.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "copiar resposta")
-        copy.imagePosition = .imageLeading
-        copy.contentTintColor = ReadingStyle.quiet
-        setCopyTitle("copiar resposta", color: ReadingStyle.quiet)
+        copy.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
+        copy.imagePosition = .imageOnly
+        copy.toolTip = "Copiar resposta"
+        setCopied(false)
         copy.target = self
         copy.action = #selector(copyAnswer)
         copy.isHidden = true
@@ -94,9 +95,9 @@ final class AnswerRowView: LeituraRowView {
             view.frame = NSRect(x: column.x, y: y, width: column.width, height: height)
             y += height + Self.segmentGap
         }
-        copy.sizeToFit()
-        let width = copy.frame.width + 12
-        copy.frame = NSRect(x: column.x - 4, y: bounds.height - 24, width: width, height: 20)
+        // In the gutter beside the answer's last line: it takes no line of
+        // its own and can never sit over the text.
+        copy.frame = NSRect(x: column.x + column.width + 6, y: bounds.height - Self.bottom - 24, width: 24, height: 24)
     }
 
     override func refreshHighlights() {
@@ -131,13 +132,13 @@ final class AnswerRowView: LeituraRowView {
     @objc private func copyAnswer() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(markdown, forType: .string)
-        setCopyTitle("copiada", color: CockpitStyle.success)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-            self?.setCopyTitle("copiar resposta", color: ReadingStyle.quiet)
-        }
+        setCopied(true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.setCopied(false) }
     }
 
-    private func setCopyTitle(_ title: String, color: NSColor) {
-        copy.attributedTitle = NSAttributedString(string: " " + title, attributes: [.font: CockpitStyle.caption, .foregroundColor: color])
+    /// The icon alone: two sheets to copy, a green tick once copied.
+    private func setCopied(_ copied: Bool) {
+        copy.image = NSImage(systemSymbolName: copied ? "checkmark" : "doc.on.doc", accessibilityDescription: copied ? "copiada" : "copiar resposta")
+        copy.contentTintColor = copied ? CockpitStyle.success : ReadingStyle.quiet
     }
 }

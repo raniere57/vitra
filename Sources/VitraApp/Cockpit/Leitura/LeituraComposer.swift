@@ -56,6 +56,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         text.isAutomaticQuoteSubstitutionEnabled = false
         text.isAutomaticDashSubstitutionEnabled = false
         text.setAccessibilityLabel("Mensagem para o maestro")
+        applyTypingLook()
         scroll.documentView = text
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
@@ -191,7 +192,15 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
 
     // MARK: - Keys
 
+    /// What is typed next looks like the rest. An empty text view forgets its
+    /// colour and types in black — invisible on this page — so it is told
+    /// again each time it empties.
+    private func applyTypingLook() {
+        text.typingAttributes = [.font: ReadingStyle.body, .foregroundColor: ReadingStyle.text]
+    }
+
     func textDidChange(_ notification: Notification) {
+        if text.string.isEmpty { applyTypingLook() }
         if !status.isHidden { showProblem(nil) }
         dropMissingAttachments()
         placeholder.isHidden = !text.string.isEmpty
