@@ -540,15 +540,9 @@ extension CockpitWindowController: ToolHost {
     }
 
     func browser(pane: String?, agent: String?) throws -> BrowserView {
-        let (index, view) = try locate(pane)
-        let (browser, isNew) = view.browser(agent: agent)
-        // A tab that just opened is worth showing. One already open is being
-        // worked in, and its project stays wherever the user left it.
-        if isNew {
-            if index != selected { select(index) }
-            window?.orderFront(nil)
-        }
-        return browser
+        // An agent opening a page never moves the user: not to its project,
+        // not to the front. The page is there when they go and look.
+        try locate(pane).view.browser(agent: agent).0
     }
 
     func browser(pane: String?, tab: String) throws -> BrowserView {

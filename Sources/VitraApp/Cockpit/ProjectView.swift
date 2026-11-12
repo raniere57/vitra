@@ -732,15 +732,31 @@ final class ProjectView: NSView {
     /// was opened just now. `agent` is a worker's run, or nil for the maestro.
     func browser(agent: String?) -> (BrowserView, isNew: Bool) {
         let id = BrowserTabs.id(forAgent: agent)
+        // Read before the tab opens: opening one makes it the current.
+        let shown = browserTabs.current
         let isNew = browserTabs.use(id, now: Date())
         if !isNew, let kept = browserPanel.keptBrowser(for: id) {
             return (kept, false)
         }
-        // New: it comes to the front, once, so what the agent is doing can be
-        // seen. After that it works where it is and the view is left alone.
-        browserTabs.show(id)
-        select(.browser)
-        return (page(for: id), isNew)
+        // New: the front tab of the browser, for when the user opens it — but
+        // the panel stays on whatever they are looking at. An agent at work
+        // must not pull them off it.
+        let reading = tabs.selected == .browser ? shown.flatMap { $0 == id ? nil : $0 } : nil
+        if reading == nil { browserTabs.show(id) }
+        let view = page(for: id)
+        if let reading {
+            // The user is on another page of the browser: it stays in front,
+            // and the new tab appears in the strip beside it.
+            browserTabs.show(reading)
+            _ = page(for: reading)
+            refreshBrowserStrip()
+        } else if tabs.selected == .browser {
+            refreshBrowserStrip()
+        } else {
+            // Not on screen: kept in the window, so its page runs.
+            browserPanel.parkCurrentBrowser()
+        }
+        return (view, isNew)
     }
 
     /// A tab to look at, whoever it belongs to.
