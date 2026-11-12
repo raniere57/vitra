@@ -10,8 +10,8 @@ import AppKit
 @MainActor
 final class LeituraView: NSView {
     var onBackToTerminal: (() -> Void)?
-    /// Sends a message; returns why it could not, or nil once it went.
-    var onSend: ((String) -> String?)?
+    /// Sends a message; answers why it could not, or nil once it went.
+    var onSend: ((String, @escaping @MainActor (String?) -> Void) -> Void)?
     var onQueue: ((String) -> Void)?
     var onOpenLink: ((URL) -> Void)? {
         didSet { list.context.openLink = onOpenLink }
@@ -105,11 +105,14 @@ final class LeituraView: NSView {
         composer.onEscape = { [weak self] in self?.focusList() }
         composer.onSend = { [weak self] text in
             guard let self else { return }
-            if let problem = self.onSend?(text) {
-                self.composer.showProblem(problem)
-            } else {
-                self.composer.clear()
-                self.list.scrollToBottom()
+            self.onSend?(text) { [weak self] problem in
+                guard let self else { return }
+                if let problem {
+                    self.composer.showProblem(problem)
+                } else {
+                    self.composer.clear()
+                    self.list.scrollToBottom()
+                }
             }
         }
         composer.onQueue = { [weak self] text in

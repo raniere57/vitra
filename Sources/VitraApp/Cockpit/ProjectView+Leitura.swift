@@ -8,7 +8,10 @@ extension ProjectView {
     func makeLeitura() -> LeituraView {
         let view = LeituraView(project: project)
         view.onBackToTerminal = { [weak self] in self?.setReading(false) }
-        view.onSend = { [weak self] text in self?.sendFromLeitura(text) ?? "O projeto foi fechado." }
+        view.onSend = { [weak self] text, done in
+            guard let self else { return done("O projeto foi fechado.") }
+            self.sendFromLeitura(text, done: done)
+        }
         view.onQueue = { [weak self] text in self?.enqueue(text) }
         view.onOpenLink = { [weak self] url in self?.openTerminalLink(url, external: false) }
         view.onOpenWorker = { [weak self] id in
@@ -120,17 +123,31 @@ extension ProjectView {
 
     /// The composer's message into the maestro's prompt, the way the Fila
     /// sends: pasted whole, then Return. Nil once it went; else why not.
-    func sendFromLeitura(_ text: String) -> String? {
+    func sendFromLeitura(_ text: String, done: @escaping @MainActor (String?) -> Void) {
         guard let terminal, terminal.session.isRunningProgram else {
-            return "O maestro não está rodando no terminal. Volte ao terminal para iniciá-lo."
+            return done("O maestro não está rodando no terminal. Volte ao terminal para iniciá-lo.")
         }
-        // Pasted onto half a line the user typed there, it would be a third message.
-        if !(terminal.typedInput() ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Há texto digitado no terminal do maestro; envie ou apague por lá antes."
+        let leftover = { (terminal.typedInput() ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard !leftover().isEmpty else {
+            submit(text, to: terminal.session)
+            return done(nil)
         }
-        submit(text, to: terminal.session)
-        return nil
+        // Something sits half-typed in the terminal's prompt, which cannot be
+        // seen from here: pasted onto it, the message would be a third one.
+        // The prompt is emptied (⌃U, a line at a time) and looked at again.
+        terminal.session.send(text: String(repeating: "\u{15}", count: Self.clears))
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.clearDelay) { [weak self] in
+            guard leftover().isEmpty else {
+                return done("Há texto digitado no terminal do maestro que não consegui apagar; apague por lá (⌘L) e envie de novo.")
+            }
+            self?.submit(text, to: terminal.session)
+            done(nil)
+        }
     }
+
+    /// ⌃U on an empty prompt does nothing: a few more than any prompt has lines.
+    private static let clears = 8
+    private static let clearDelay: TimeInterval = 0.25
 
     // MARK: - The switch calls for attention
 

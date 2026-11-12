@@ -3,8 +3,8 @@ import VitraCore
 
 /// Talking to the maestro without leaving Leitura: a rounded field that grows
 /// to eight lines. ⏎ sends, ⇧⏎ breaks the line, ⎋ hands the keyboard back to
-/// the list. Images and files pasted become paths, exactly as a paste into
-/// the terminal does, since the maestro reads files by path.
+/// the list. Images and files pasted show as previews and go as paths, as a
+/// paste into the terminal does, since the maestro reads files by path.
 ///
 /// While the maestro works the button says the message will wait in Claude
 /// Code's own queue — which is what typing into its prompt does — and offers
@@ -129,20 +129,30 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         for path in paths where !attachments.contains(where: { $0.path == path }) {
             let view = ThumbnailView(image: ImageRef(path: path))
             view.onClick = { [weak self] in self?.onOpenAttachment?(path) }
+            view.toolTip = "Clique para ampliar · ⌫ no início do texto remove"
             addSubview(view)
             attachments.append((path, view))
         }
+        attachmentsChanged()
     }
 
-    /// A preview lives while its path is in the text: delete the path and
-    /// the preview goes with it.
-    private func dropMissingAttachments() {
-        let string = text.string
-        attachments.removeAll { attachment in
-            let isGone = !string.contains(ShellQuoting.quote(attachment.path))
-            if isGone { attachment.view.removeFromSuperview() }
-            return isGone
-        }
+    /// ⌫ at the very start of the text takes the last preview away.
+    private func removeLastAttachment() {
+        attachments.popLast()?.view.removeFromSuperview()
+        attachmentsChanged()
+    }
+
+    private func attachmentsChanged() {
+        needsLayout = true
+        onHeightChange?()
+    }
+
+    /// What goes to the maestro: the pasted files' paths, which it reads as
+    /// a paste into its prompt does, then the words.
+    private var outgoing: String {
+        let paths = ShellQuoting.join(attachments.map(\.path))
+        let words = text.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return [paths, words].filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     // MARK: - Size
@@ -193,7 +203,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         queue.sizeToFit()
         queue.frame = NSRect(x: send.frame.minX - queue.frame.width - 16, y: buttonsY, width: queue.frame.width + 8, height: 26)
         status.frame = NSRect(x: column.x + 4, y: field.frame.maxY + 3, width: column.width, height: 15)
-        let isEmpty = text.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let isEmpty = outgoing.isEmpty
         send.alphaValue = isEmpty ? 0.45 : 1
         queue.alphaValue = isEmpty ? 0.45 : 1
     }
@@ -210,7 +220,6 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
         if text.string.isEmpty { applyTypingLook() }
         if !status.isHidden { showProblem(nil) }
-        dropMissingAttachments()
         placeholder.isHidden = !text.string.isEmpty
         needsLayout = true
         onHeightChange?()
@@ -225,6 +234,9 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
                 sendTapped()
             }
             return true
+        case #selector(NSResponder.deleteBackward(_:)) where textView.selectedRange() == NSRange(location: 0, length: 0) && !attachments.isEmpty:
+            removeLastAttachment()
+            return true
         case #selector(NSResponder.cancelOperation(_:)):
             onEscape?()
             return true
@@ -234,23 +246,27 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     }
 
     @objc private func sendTapped() {
-        let message = text.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = outgoing
         guard !message.isEmpty else { return }
         onSend?(message)
     }
 
     @objc private func queueTapped() {
-        let message = text.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = outgoing
         guard !message.isEmpty else { return }
         onQueue?(message)
     }
 
     /// The field emptied once its message went.
-    func clear() { message = "" }
+    func clear() {
+        attachments.forEach { $0.view.removeFromSuperview() }
+        attachments = []
+        message = ""
+    }
 }
 
-/// The composer's text: a paste of images or files becomes their paths, as
-/// it does in the terminal (`PasteboardAttachments`); anything else pastes as
+/// The composer's text: a paste of images or files becomes previews over
+/// the text (`PasteboardAttachments` saves them); anything else pastes as
 /// plain text.
 final class ComposerTextView: NSTextView {
     /// The paths a paste just put in the text.
@@ -262,8 +278,8 @@ final class ComposerTextView: NSTextView {
             pasteAsPlainText(sender)
             return
         }
-        // Before the text changes: the previews are checked against it.
+        // A preview over the text, not a path in it: the path goes with the
+        // message when it is sent.
         onAttach?(found.map(\.path))
-        insertText(ShellQuoting.join(found.map(\.path)) + " ", replacementRange: selectedRange())
     }
 }
