@@ -99,8 +99,43 @@ final class UserRowView: LeituraRowView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
+    /// The user's words as typed; lines behind ">" are a passage they
+    /// answered, drawn quieter behind a bar like any quote.
     static func attributed(_ text: String) -> NSAttributedString {
-        ReadingStyle.plain(text)
+        guard text.hasPrefix(">") || text.contains("\n>") else { return ReadingStyle.plain(text) }
+        let result = NSMutableAttributedString()
+        var plain: [Substring] = []
+        var quote: [String] = []
+        func flush() {
+            if !plain.isEmpty {
+                let body = plain.joined(separator: "\n").trimmingCharacters(in: .newlines)
+                if !body.isEmpty { result.append(ReadingStyle.plain(body + "\n")) }
+                plain = []
+            }
+            if !quote.isEmpty {
+                let style = ReadingStyle.paragraphStyle(after: 8)
+                style.firstLineHeadIndent = 12
+                style.headIndent = 12
+                result.append(NSAttributedString(string: quote.joined(separator: " ") + "\n", attributes: [
+                    .font: CockpitStyle.ui(13), .foregroundColor: ReadingStyle.quiet, .paragraphStyle: style, .quoteBar: true,
+                ]))
+                quote = []
+            }
+        }
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix(">") {
+                if !plain.isEmpty { flush() }
+                let words = line.dropFirst().trimmingCharacters(in: .whitespaces)
+                if !words.isEmpty { quote.append(words) }
+            } else {
+                if !quote.isEmpty { flush() }
+                plain.append(line)
+            }
+        }
+        flush()
+        // No newline left hanging after the last paragraph.
+        if result.string.hasSuffix("\n") { result.deleteCharacters(in: NSRange(location: result.length - 1, length: 1)) }
+        return result
     }
 
     /// The block's inner width: the text's own width, up to the column.
@@ -287,6 +322,31 @@ final class WorkedRowView: LeituraRowView {
 /// does not decode it again.
 final class ThumbnailView: NSView {
     var onClick: (() -> Void)?
+    /// Set where the image can be taken away: a cross sits in its corner.
+    var onRemove: (() -> Void)? {
+        didSet {
+            guard onRemove != nil, remove == nil else { return }
+            let button = NSButton(image: NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "remover") ?? NSImage(), target: self, action: #selector(removeTapped))
+            button.isBordered = false
+            button.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+            button.contentTintColor = .white
+            button.shadow = { let shadow = NSShadow(); shadow.shadowBlurRadius = 3; shadow.shadowColor = .black; return shadow }()
+            button.toolTip = "Remover"
+            button.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
+            addSubview(button)
+            remove = button
+        }
+    }
+    private var remove: NSButton?
+
+    override func layout() {
+        super.layout()
+        // The top right corner, whichever way this view's y runs.
+        remove?.frame.origin = NSPoint(x: bounds.width - 21, y: isFlipped ? 1 : bounds.height - 21)
+    }
+
+    @objc private func removeTapped() { onRemove?() }
+
     static let aspect: CGFloat = 1.45
     nonisolated(unsafe) private static let cache = NSCache<NSString, NSImage>()
 

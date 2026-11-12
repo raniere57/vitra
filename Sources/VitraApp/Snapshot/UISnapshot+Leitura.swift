@@ -42,9 +42,13 @@ extension UISnapshot {
             freezeClock(project.leitura, at: context.fixtures.now)
             project.isReading = true
             project.applyReading()
-            project.leitura.showForSnapshot(items, queued: [UserMessage(id: "q1", time: Date(), text: "e depois confere o cursor nos botões", isQueued: true)], attention: state, since: since)
+            project.leitura.showForSnapshot(items, queued: [UserMessage(id: "q1", time: Date(), text: "> O arquivo abre direto no Numbers e no Excel\n\ne no LibreOffice, abre também?", isQueued: true)], attention: state, since: since)
             project.leitura.list.context.open(activity: "a2")
             if let draft { project.leitura.composer.message = draft }
+            if draft != nil {
+                project.leitura.composer.addQuote("Fiquei com a entrega do b2179ee2: o cabeçalho sai em português e os valores usam vírgula decimal, como no relatório.")
+                project.leitura.composer.layoutSubtreeIfNeeded()
+            }
             project.pulseSwitch(state == .needsPermission)
         }
     }

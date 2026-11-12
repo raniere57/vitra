@@ -53,6 +53,76 @@ final class ReadingTextView: NSTextView {
         if let url = link as? URL { onOpenLink?(url) } else if let text = link as? String, let url = URL(string: text) { onOpenLink?(url) }
     }
 
+    // MARK: - Replying to a passage
+
+    private var reply: NSButton?
+
+    /// A selection made, "Responder" appears by it: the passage goes quoted
+    /// into the composer. NSTextView tracks the drag inside `mouseDown`, so
+    /// when it returns the selection is final.
+    override func mouseDown(with event: NSEvent) {
+        hideReply()
+        super.mouseDown(with: event)
+        showReply()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        hideReply()
+        return super.resignFirstResponder()
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event)
+        if selectedRange().length > 0 {
+            let item = NSMenuItem(title: "Responder a este trecho", action: #selector(replyToSelection), keyEquivalent: "")
+            item.target = self
+            menu?.insertItem(item, at: 0)
+            menu?.insertItem(.separator(), at: 1)
+        }
+        return menu
+    }
+
+    private func hideReply() {
+        reply?.removeFromSuperview()
+        reply = nil
+    }
+
+    private func showReply() {
+        let range = selectedRange()
+        guard range.length > 0, let layout = layoutManager, let container = textContainer,
+              !Self.selectedText(string, range).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+        let rect = layout.boundingRect(forGlyphRange: layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil), in: container)
+        let button = NSButton(title: "", target: self, action: #selector(replyToSelection))
+        button.isBordered = false
+        button.attributedTitle = NSAttributedString(string: "↩ Responder", attributes: [.font: ReadingStyle.smallMedium, .foregroundColor: CockpitStyle.bar])
+        button.wantsLayer = true
+        button.layer?.backgroundColor = CockpitStyle.accent.cgColor
+        button.layer?.cornerRadius = 7
+        button.sizeToFit()
+        let size = NSSize(width: button.frame.width + 16, height: 24)
+        // Over the selection when there is room in the view, else under it.
+        let above = rect.minY - size.height - 4
+        let y = above >= 0 ? above : min(rect.maxY + 4, max(bounds.height - size.height, 0))
+        let x = min(max(rect.minX, 0), max(bounds.width - size.width, 0))
+        button.frame = NSRect(origin: NSPoint(x: x, y: y), size: size)
+        addSubview(button)
+        reply = button
+    }
+
+    @objc private func replyToSelection() {
+        let text = Self.selectedText(string, selectedRange())
+        hideReply()
+        setSelectedRange(NSRange(location: selectedRange().location, length: 0))
+        var ancestor = superview
+        while let view = ancestor, !(view is LeituraView) { ancestor = view.superview }
+        (ancestor as? LeituraView)?.quote(text)
+    }
+
+    private static func selectedText(_ string: String, _ range: NSRange) -> String {
+        (string as NSString).substring(with: range)
+    }
+
     /// Scrolling belongs to the list; a text view in a row never scrolls.
     override func scrollWheel(with event: NSEvent) { nextResponder?.scrollWheel(with: event) }
 

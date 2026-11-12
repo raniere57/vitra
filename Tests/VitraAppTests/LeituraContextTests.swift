@@ -75,3 +75,9 @@ struct LeituraQueueTests {
     #expect(composer.hitTest(onPlaceholder)?.isDescendant(of: composer.text.enclosingScrollView!) == true || composer.hitTest(onPlaceholder) === composer.text)
     #expect(composer.hitTest(NSPoint(x: 40, y: 60)) === composer.text)
 }
+
+@MainActor
+@Test func aQuotedPassageIsAMarkdownBlockQuote() {
+    #expect(LeituraView.quoted("  uma linha\n\noutra  ") == "> uma linha\n>\n> outra")
+    #expect(LeituraView.quoted("  \n ") == "")
+}

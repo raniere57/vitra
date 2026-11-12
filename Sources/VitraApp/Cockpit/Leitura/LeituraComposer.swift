@@ -35,6 +35,9 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     /// What was pasted and is still named in the text, with its preview.
     private var attachments: [(path: String, view: ThumbnailView)] = []
     private var attachmentsHeight: CGFloat { attachments.isEmpty ? 0 : Self.attachment + Self.attachmentGap }
+    /// Passages of the conversation this message answers.
+    private var quotes: [QuoteChip] = []
+    private var quotesHeight: CGFloat { CGFloat(quotes.count) * (QuoteChip.height + Self.attachmentGap) }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -129,16 +132,48 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         for path in paths where !attachments.contains(where: { $0.path == path }) {
             let view = ThumbnailView(image: ImageRef(path: path))
             view.onClick = { [weak self] in self?.onOpenAttachment?(path) }
-            view.toolTip = "Clique para ampliar · ⌫ no início do texto remove"
+            view.onRemove = { [weak self] in self?.removeAttachment(path) }
+            view.toolTip = "Clique para ampliar"
             addSubview(view)
             attachments.append((path, view))
         }
         attachmentsChanged()
     }
 
-    /// ⌫ at the very start of the text takes the last preview away.
-    private func removeLastAttachment() {
-        attachments.popLast()?.view.removeFromSuperview()
+    private func removeAttachment(_ path: String) {
+        attachments.removeAll { attachment in
+            guard attachment.path == path else { return false }
+            attachment.view.removeFromSuperview()
+            return true
+        }
+        attachmentsChanged()
+    }
+
+    /// The passage a reply is about, shown over the text; the same passage
+    /// is not quoted twice.
+    func addQuote(_ passage: String) {
+        let passage = passage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !passage.isEmpty, !quotes.contains(where: { $0.passage == passage }) else { return }
+        let chip = QuoteChip(passage: passage)
+        chip.onRemove = { [weak self, weak chip] in
+            guard let self, let chip else { return }
+            chip.removeFromSuperview()
+            self.quotes.removeAll { $0 === chip }
+            self.attachmentsChanged()
+        }
+        addSubview(chip)
+        quotes.append(chip)
+        attachmentsChanged()
+    }
+
+    /// ⌫ at the very start of the text takes away what sits over it, last
+    /// first: a preview, then a quote.
+    private func removeLastExtra() {
+        if let attachment = attachments.popLast() {
+            attachment.view.removeFromSuperview()
+        } else {
+            quotes.popLast()?.removeFromSuperview()
+        }
         attachmentsChanged()
     }
 
@@ -152,7 +187,10 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     private var outgoing: String {
         let paths = ShellQuoting.join(attachments.map(\.path))
         let words = text.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        return [paths, words].filter { !$0.isEmpty }.joined(separator: " ")
+        let said = [paths, words].filter { !$0.isEmpty }.joined(separator: " ")
+        // A quote alone says nothing: it goes with the words about it.
+        guard !said.isEmpty else { return "" }
+        return (quotes.map { LeituraView.quoted($0.passage) } + [said]).joined(separator: "\n\n")
     }
 
     // MARK: - Size
@@ -174,7 +212,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     func preferredHeight(width: CGFloat) -> CGFloat {
         let column = ReadingStyle.column(in: width).width
         let problem: CGFloat = status.isHidden ? 0 : 18
-        return Self.verticalPad + Self.fieldPad + attachmentsHeight + textHeight(width: column - 2 * Self.fieldPad) + 8 + 26 + Self.fieldPad + problem + Self.verticalPad
+        return Self.verticalPad + Self.fieldPad + quotesHeight + attachmentsHeight + textHeight(width: column - 2 * Self.fieldPad) + 8 + 26 + Self.fieldPad + problem + Self.verticalPad
     }
 
     override func layout() {
@@ -185,14 +223,19 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         let problem: CGFloat = status.isHidden ? 0 : 18
         let fieldHeight = bounds.height - 2 * Self.verticalPad - problem
         field.frame = NSRect(x: column.x, y: Self.verticalPad, width: column.width, height: fieldHeight)
+        var quoteY = Self.verticalPad + Self.fieldPad
+        for chip in quotes {
+            chip.frame = NSRect(x: column.x + Self.fieldPad, y: quoteY, width: inner, height: QuoteChip.height)
+            quoteY += QuoteChip.height + Self.attachmentGap
+        }
         var thumbX = column.x + Self.fieldPad
         for attachment in attachments {
             let width = Self.attachment * ThumbnailView.aspect
-            attachment.view.frame = NSRect(x: thumbX, y: Self.verticalPad + Self.fieldPad, width: width, height: Self.attachment)
+            attachment.view.frame = NSRect(x: thumbX, y: quoteY, width: width, height: Self.attachment)
             attachment.view.isHidden = thumbX + width > field.frame.maxX - Self.fieldPad
             thumbX += width + Self.attachmentGap
         }
-        scroll.frame = NSRect(x: column.x + Self.fieldPad, y: Self.verticalPad + Self.fieldPad + attachmentsHeight, width: inner, height: textHeight)
+        scroll.frame = NSRect(x: column.x + Self.fieldPad, y: quoteY + attachmentsHeight, width: inner, height: textHeight)
         text.frame.size.width = inner
         placeholder.frame = NSRect(x: scroll.frame.minX, y: scroll.frame.minY - 1, width: inner, height: lineHeight)
         placeholder.isHidden = !text.string.isEmpty
@@ -234,8 +277,8 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
                 sendTapped()
             }
             return true
-        case #selector(NSResponder.deleteBackward(_:)) where textView.selectedRange() == NSRange(location: 0, length: 0) && !attachments.isEmpty:
-            removeLastAttachment()
+        case #selector(NSResponder.deleteBackward(_:)) where textView.selectedRange() == NSRange(location: 0, length: 0) && !(attachments.isEmpty && quotes.isEmpty):
+            removeLastExtra()
             return true
         case #selector(NSResponder.cancelOperation(_:)):
             onEscape?()
@@ -261,6 +304,8 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     func clear() {
         attachments.forEach { $0.view.removeFromSuperview() }
         attachments = []
+        quotes.forEach { $0.removeFromSuperview() }
+        quotes = []
         message = ""
     }
 }
@@ -282,4 +327,55 @@ final class ComposerTextView: NSTextView {
         // message when it is sent.
         onAttach?(found.map(\.path))
     }
+}
+
+/// A quoted passage over the composer's text: a bar, two lines of it at
+/// most, and a cross to drop it.
+final class QuoteChip: NSView {
+    static let height: CGFloat = 40
+    let passage: String
+    var onRemove: (() -> Void)?
+
+    private let bar = NSView.filled(CockpitStyle.accent.withAlphaComponent(0.7), cornerRadius: 1.25)
+    private let label = NSTextField.label(font: CockpitStyle.ui(12.5), color: ReadingStyle.quiet)
+    private let close = NSButton()
+
+    init(passage: String) {
+        self.passage = passage
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = ReadingStyle.page.cgColor
+        layer?.cornerRadius = 7
+        label.stringValue = passage.split(whereSeparator: \.isNewline).joined(separator: " ")
+        label.maximumNumberOfLines = 2
+        label.lineBreakMode = .byTruncatingTail
+        label.cell?.wraps = true
+        label.cell?.truncatesLastVisibleLine = true
+        label.toolTip = passage
+        close.isBordered = false
+        close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "remover citação")
+        close.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
+        close.contentTintColor = ReadingStyle.quiet
+        close.toolTip = "Remover citação"
+        close.target = self
+        close.action = #selector(removeTapped)
+        for view in [bar, label, close] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(view)
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        bar.frame = NSRect(x: 8, y: 6, width: 2.5, height: bounds.height - 12)
+        close.frame = NSRect(x: bounds.width - 26, y: (bounds.height - 20) / 2, width: 20, height: 20)
+        label.frame = NSRect(x: 18, y: 4, width: max(bounds.width - 18 - 32, 0), height: bounds.height - 8)
+    }
+
+    @objc private func removeTapped() { onRemove?() }
 }

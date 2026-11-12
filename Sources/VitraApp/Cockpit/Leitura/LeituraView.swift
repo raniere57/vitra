@@ -249,6 +249,22 @@ final class LeituraView: NSView {
     func focusComposer() { window?.makeFirstResponder(composer.text) }
     func focusList() { window?.makeFirstResponder(list.table) }
 
+    /// A passage of the conversation, set over what is being written as
+    /// the thing the reply is about.
+    func quote(_ passage: String) {
+        composer.addQuote(passage)
+        focusComposer()
+    }
+
+    /// Markdown's block quote: each line of the passage behind "> ".
+    static func quoted(_ passage: String) -> String {
+        let trimmed = passage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return trimmed.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces).isEmpty ? ">" : "> " + $0 }
+            .joined(separator: "\n")
+    }
+
     func showFind() { find.open(in: self) }
 
     func findStep(forward: Bool) {
