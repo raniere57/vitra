@@ -10,10 +10,15 @@ import Foundation
 /// 1. Who may run at all: installed, offered, not excluded, able to run the
 ///    commands asked for, its provider not out, not resting after three
 ///    failures in a row.
-/// 2. Every fifth piece of a kind and difficulty is a learning turn: a
-///    demoted lineup worker gets its chance back, else the cheapest worker
-///    with fewer than two deliveries on the kind (strong ones only for a hard
-///    piece). Never two learning turns in a row.
+/// 2. Every other piece of a kind and difficulty is a learning turn while
+///    there is somebody to learn about: a demoted lineup worker gets its
+///    chance back, else the cheapest worker with fewer than two deliveries on
+///    the kind, or one back from the cold (strong ones only for a hard piece).
+///    A worker that failed or was rated below 4 is left in the cold for a day,
+///    and for twice as long each time it does badly again in a row.
+/// 3. A worker outside the lineup that has proved itself takes an easy or
+///    normal piece from the lineup's: rated 4 or more, no dearer, and more
+///    than twice as fast on the kind (three deliveries each).
 /// 3. The first worker of the difficulty's lineup that may run and is not
 ///    demoted: average below 4 over two ratings or more on the kind, or more
 ///    than twice as slow as the next lineup worker (three deliveries each).
@@ -47,7 +52,11 @@ public enum WorkerPicker {
     /// Delivered runs a worker needs on a kind before it stops being tried.
     static let deliveriesToLearn = 2
     /// Every this-many-th piece of a kind goes to the least used worker.
-    static let explorationEvery = 5
+    static let explorationEvery = 2
+    /// How long a worker that did badly on a kind is left out of it; doubled
+    /// for each bad run in a row, up to the cap.
+    static let cold: TimeInterval = 24 * 3600
+    static let coldCap: TimeInterval = 32 * 24 * 3600
     /// A run that failed this fast never really ran: a quota, a sign-in.
     /// Kept for a failure whose words were not recognised.
     static let quickFailure: TimeInterval = 60
@@ -126,15 +135,30 @@ public enum WorkerPicker {
             )
         }
 
-        if let learner = learningTurn(
+        // A redo is not the piece to learn on: it already went wrong once.
+        if excludedWorkers.isEmpty, let learner = learningTurn(
             kind: kind, difficulty: difficulty, ofKind: ofKind, offers: offers, eligible: eligible,
-            demotedInLineup: tierEligible.filter { demoted($0) != nil }, candidate: candidate,
+            demotedInLineup: tierEligible.filter { demoted($0) != nil }, candidate: candidate, now: now,
             everRan: { offer in history.contains { isRun($0, of: offer) } }
         ) {
             return Choice(offer: learner, pick: PickReason(code: .learning, text: "learning turn"))
         }
 
         if let index = tier.firstIndex(where: { blocker($0) == nil && demoted($0) == nil }) {
+            // Proved outside the lineup, and over twice as fast as its pick.
+            let mine = candidate(tier[index])
+            let proven = difficulty == .hard || mine.deliveries < deliveriesToCompare ? [] :
+                strengthPool(eligible.filter { !tier.contains($0) }, difficulty: difficulty).map(candidate).filter {
+                    $0.deliveries >= deliveriesToCompare && $0.ratings >= ratingsToDemote
+                        && ($0.average ?? 0) >= Double(Rating.satisfactory) && $0.coldUntil.map { $0 <= now } ?? true
+                        && $0.costRank <= mine.costRank && $0.medianSeconds * slowerThan < mine.medianSeconds
+                }
+            if let faster = proven.min(by: { ($0.medianSeconds, $0.order) < ($1.medianSeconds, $1.order) }) {
+                return Choice(offer: faster.offer, pick: PickReason(
+                    code: .record,
+                    text: "not in the lineup: rated \(Rating.satisfactory)+ and over twice as fast as \(shortName(mine.offer)) on \(kind.rawValue)"
+                ))
+            }
             return lineupChoice(
                 tier, at: index, difficulty: difficulty, kind: kind,
                 why: { blocker($0) ?? demoted($0).map { _ in .demoted } }, demoted: demoted, resters: resters
@@ -145,6 +169,7 @@ public enum WorkerPicker {
         let others = strengthPool(eligible.filter { !tier.contains($0) }, difficulty: difficulty).map(candidate)
             // Known bad on this kind, at this effort: never picked on its own.
             .filter { $0.average.map { $0 >= Double(Rating.satisfactory) } ?? true }
+            .filter { $0.coldUntil.map { $0 <= now } ?? true }
             // Nor one that has run twice here and delivered nothing.
             .filter { $0.runs.count < deliveriesToLearn || $0.delivered > 0 }
         let good = others.filter { ($0.average ?? 0) >= Double(Rating.satisfactory) }
@@ -218,18 +243,22 @@ public enum WorkerPicker {
     private static func learningTurn(
         kind: TaskKind, difficulty: Difficulty, ofKind: [Run], offers: [ModelCatalog.Offer],
         eligible: [ModelCatalog.Offer], demotedInLineup: [ModelCatalog.Offer],
-        candidate: (ModelCatalog.Offer) -> Candidate, everRan: (ModelCatalog.Offer) -> Bool
+        candidate: (ModelCatalog.Offer) -> Candidate, now: Date, everRan: (ModelCatalog.Offer) -> Bool
     ) -> ModelCatalog.Offer? {
         let same = ofKind.filter { ($0.spec.difficulty ?? .normal) == difficulty }
-        guard same.count % explorationEvery == explorationEvery - 1,
+        guard !same.isEmpty, same.count % explorationEvery == 0,
               same.max(by: { $0.started < $1.started })?.pick?.code != .learning
         else { return nil }
         // A hard piece learns among strong workers only.
         let pool = difficulty == .hard ? eligible.filter(isStrong) : strengthPool(eligible, difficulty: difficulty)
-        if let back = demotedInLineup.first(where: pool.contains) { return back }
+        func isCold(_ offer: ModelCatalog.Offer) -> Bool { candidate(offer).coldUntil.map { $0 > now } ?? false }
+        if let back = demotedInLineup.first(where: { pool.contains($0) && !isCold($0) }) { return back }
         func cliRuns(_ offer: ModelCatalog.Offer) -> Int { ofKind.filter { $0.spec.cli == offer.cli }.count }
         return pool.map(candidate)
-            .filter { $0.delivered < deliveriesToLearn && lowerEffortTried($0.offer, offers: offers, ofKind: ofKind) }
+            .filter { !isCold($0.offer) }
+            // Still unknown here, or back from the cold for another chance.
+            .filter { $0.delivered < deliveriesToLearn || $0.coldUntil != nil }
+            .filter { lowerEffortTried($0.offer, offers: offers, ofKind: ofKind) }
             // A worker that never ran anything goes before one known from another kind.
             .map { (candidate: $0, used: everRan($0.offer) ? 1 : 0) }
             .min {
@@ -329,6 +358,27 @@ public enum WorkerPicker {
         var average: Double? {
             let ratings = ranked.compactMap { $0.rating?.score }
             return ratings.isEmpty ? nil : Double(ratings.reduce(0, +)) / Double(ratings.count)
+        }
+
+        var deliveries: Int { Self.delivered(ranked).count }
+        var ratings: Int { ranked.compactMap { $0.rating?.score }.count }
+
+        /// Until when the worker is left out of this kind: its latest runs
+        /// here failed or were rated below satisfactory. A day for one, twice
+        /// as long for each more in a row; nil when the latest verdict is good.
+        var coldUntil: Date? {
+            var streak = 0
+            var last: Date?
+            for run in runs.sorted(by: { $0.started > $1.started }) {
+                if Scoreboard.hasFailed(run) || run.rating.map({ !$0.isSatisfactory }) == true {
+                    streak += 1
+                    last = last ?? run.ended ?? run.started
+                } else if run.rating != nil {
+                    break
+                }
+            }
+            guard let last else { return nil }
+            return last.addingTimeInterval(min(WorkerPicker.cold * pow(2, Double(streak - 1)), WorkerPicker.coldCap))
         }
 
         var medianSeconds: TimeInterval { Scoreboard.median(Self.delivered(ranked).map(\.duration)) ?? .infinity }

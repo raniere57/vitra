@@ -102,7 +102,7 @@ public struct PickReason: Codable, Equatable, Sendable {
     public enum Code: String, Codable, Sendable {
         /// A worker of the lineup; `position` says which.
         case lineup
-        /// Every fifth piece: a worker that has no record yet, or a demoted one.
+        /// Every other piece: a worker that has no record yet, one back from the cold, or a demoted one.
         case learning
         /// Not in the lineup: chosen by its record.
         case record

@@ -177,7 +177,9 @@ private func pick(
 
 @Test func aLineupWorkerRatedBelowFourTwiceIsDemoted() {
     let poor = runs(opus, 2, score: 3, difficulty: .hard)
-    let choice = pick(catalogue, poor, difficulty: .hard, lineup: .standard)
+    // A third piece, so that this one is not a learning turn.
+    let other = runs(sonnet, 1, score: 5, difficulty: .hard, at: start.addingTimeInterval(10))
+    let choice = pick(catalogue, poor + other, difficulty: .hard, lineup: .standard)
     #expect(choice?.offer == sonnet)
     #expect(choice?.reason == "2nd in your lineup: opus (low) is demoted, rated 3.0 on review")
     #expect(choice?.pick.cause == .demoted)
@@ -191,7 +193,9 @@ private func pick(
 @Test func aLineupWorkerTwiceAsSlowAsTheNextIsDemoted() {
     let slow = runs(opus, 3, seconds: 300, score: 5, difficulty: .hard)
     let fast = runs(sonnet, 3, seconds: 100, score: 5, difficulty: .hard, at: start.addingTimeInterval(10))
-    let choice = pick(catalogue, slow + fast, difficulty: .hard, lineup: .standard)
+    // A seventh piece, so that this one is not a learning turn.
+    let other = runs(sonnet, 1, seconds: 100, score: 5, difficulty: .hard, at: start.addingTimeInterval(20))
+    let choice = pick(catalogue, slow + fast + other, difficulty: .hard, lineup: .standard)
     #expect(choice?.offer == sonnet)
     #expect(choice?.reason == "2nd in your lineup: opus (low) is demoted, over twice as slow as sonnet (high) on review")
     #expect(choice?.pick.cause == .slow)
@@ -204,9 +208,12 @@ private func pick(
 }
 
 @Test func aDemotedWorkerGetsItsChanceBackOnALearningTurn() {
-    // Four hard reviews: the fifth is a learning turn, and demoted opus takes it.
+    // Four hard reviews: the next is a learning turn. Opus, rated badly twice,
+    // is in the cold for two days...
     let history = runs(opus, 2, score: 3, difficulty: .hard) + runs(sonnet, 2, score: 5, difficulty: .hard, at: start.addingTimeInterval(10))
-    let turn = pick(catalogue, history, difficulty: .hard, lineup: .standard)
+    #expect(pick(catalogue, history, difficulty: .hard, lineup: .standard)?.offer != opus)
+    // ... and takes the turn once they have passed.
+    let turn = pick(catalogue, history, difficulty: .hard, lineup: .standard, now: start.addingTimeInterval(49 * 3600))
     #expect(turn?.offer == opus)
     #expect(turn?.reason == "learning turn")
     #expect(turn?.pick.code == .learning)
@@ -217,7 +224,7 @@ private func pick(
 
 // MARK: Learning turns
 
-@Test func everyFifthPieceOfAKindAndDifficultyIsALearningTurn() {
+@Test func everyOtherPieceOfAKindAndDifficultyIsALearningTurn() {
     let proven = runs(grok46, 4, score: 5)
     let turn = pick(catalogue, proven, lineup: .standard)
     // The cheapest untried: free ones cost nothing, and a lower effort goes first.
@@ -255,7 +262,7 @@ private func pick(
 @Test func runsThatNeverRanBecauseOfTheirProviderDoNotCountTowardsTheTurn() {
     let long = now.addingTimeInterval(-2 * 3600)
     let quota = runs(glm, 2, failed: true, providerFailure: .quota("limit"), at: long)
-    #expect(pick(catalogue, runs(grok46, 2, score: 5) + quota, lineup: .standard)?.offer == grok46)
+    #expect(pick(catalogue, runs(grok46, 3, score: 5) + quota, lineup: .standard)?.offer == grok46)
     #expect(pick(catalogue, runs(grok46, 4, score: 5), lineup: .standard)?.reason == "learning turn")
 }
 
@@ -264,9 +271,42 @@ private func pick(
     let proven = runs(sonnet, 4, score: 5)
     let lineup = Lineup(hard: [], normal: [sonnet], easy: [])
     #expect(pick([sonnet, haikuMedium, haikuLow], proven, installed: [.claude], lineup: lineup)?.offer == haikuLow)
-    let lowRan = proven + runs(haikuLow, 2, score: 5, at: start.addingTimeInterval(10)) + runs(sonnet, 3, score: 5, at: start.addingTimeInterval(20))
-    #expect(lowRan.count == 9)
+    let lowRan = proven + runs(haikuLow, 2, score: 5, at: start.addingTimeInterval(10)) + runs(sonnet, 4, score: 5, at: start.addingTimeInterval(20))
+    #expect(lowRan.count == 10)
     #expect(pick([sonnet, haikuMedium, haikuLow], lowRan, installed: [.claude], lineup: lineup)?.offer == haikuMedium)
+}
+
+// MARK: The cold
+
+@Test func aWorkerThatDidBadlyIsLeftInTheColdTwiceAsLongEachTime() {
+    let day: TimeInterval = 24 * 3600
+    let lineup = Lineup(hard: [], normal: [grok46], easy: [])
+    let proven = runs(grok46, 4, score: 5)
+    func learner(_ bad: Int, after: TimeInterval) -> ModelCatalog.Offer? {
+        // glm's bad runs end ten seconds after `start`, give or take.
+        let history = proven + runs(glm, bad, score: 2, at: start) + runs(grok46, bad % 2, score: 5)
+        return pick([grok46, glm], history, lineup: lineup, now: start.addingTimeInterval(after))?.offer
+    }
+    // One bad run: out for a day, then tried again.
+    #expect(learner(1, after: day - 60) == grok46)
+    #expect(learner(1, after: day + 60) == glm)
+    // Bad again: two days. A third time: four.
+    #expect(learner(2, after: 2 * day - 60) == grok46)
+    #expect(learner(2, after: 2 * day + 60) == glm)
+    #expect(learner(3, after: 4 * day - 60) == grok46)
+    #expect(learner(3, after: 4 * day + 60) == glm)
+}
+
+@Test func aProvenWorkerOutsideTheLineupTakesThePieceWhenOverTwiceAsFast() {
+    let lineup = Lineup(hard: [], normal: [grok46], easy: [])
+    let slow = runs(grok46, 3, seconds: 300, score: 5)
+    let fast = runs(glm, 4, seconds: 100, score: 5, at: start.addingTimeInterval(10))
+    let choice = pick([grok46, glm], slow + fast, lineup: lineup)
+    #expect(choice?.offer == glm)
+    #expect(choice?.pick.code == .record)
+    // Rated poorly, speed is not enough.
+    let poor = runs(glm, 4, seconds: 100, score: 3, at: start.addingTimeInterval(10))
+    #expect(pick([grok46, glm], slow + poor, lineup: lineup, now: start.addingTimeInterval(40 * 24 * 3600))?.offer == grok46)
 }
 
 // MARK: Known bad
