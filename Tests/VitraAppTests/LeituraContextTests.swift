@@ -155,3 +155,17 @@ struct LeituraTurnTests {
         #expect(older.joined(chunk([assistant("text", stop: "end_turn")])).isTurnOpen == false)
     }
 }
+
+@MainActor
+@Test func theSuggestedPromptIsTakenIntoTheTextOnlyWhenNothingIsTyped() {
+    let composer = LeituraComposer(frame: NSRect(x: 0, y: 0, width: 600, height: 80))
+    composer.setSuggestion("pode instalar")
+    #expect(composer.textView(composer.text, doCommandBy: #selector(NSResponder.insertTab(_:))))
+    #expect(composer.message == "pode instalar")
+    #expect(composer.suggestion == nil)
+
+    composer.message = "outra coisa"
+    composer.setSuggestion("sim")
+    #expect(!composer.textView(composer.text, doCommandBy: #selector(NSResponder.insertTab(_:))))
+    #expect(composer.message == "outra coisa")
+}

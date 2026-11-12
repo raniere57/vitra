@@ -32,6 +32,27 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     private let queue = NSButton()
     private let status = NSTextField.label(font: CockpitStyle.caption, color: CockpitStyle.dangerText)
     private(set) var isWorking = false
+    /// What the maestro suggests saying next: shown where the placeholder
+    /// is, taken into the text with Tab.
+    private(set) var suggestion: String?
+    private let tabHint = NSTextField.label("⇥ tab", font: CockpitStyle.caption, color: ReadingStyle.faint)
+
+    func setSuggestion(_ text: String?) {
+        guard text != suggestion else { return }
+        suggestion = text
+        placeholder.stringValue = text ?? "Mensagem para o maestro…"
+        placeholder.toolTip = text.map { "Sugestão do maestro: " + $0 + " — Tab para usar" }
+        needsLayout = true
+    }
+
+    /// The suggestion into the text, to send as it is or edit first.
+    private func takeSuggestion() -> Bool {
+        guard let suggestion, text.string.isEmpty else { return false }
+        setSuggestion(nil)
+        message = suggestion
+        text.setSelectedRange(NSRange(location: (suggestion as NSString).length, length: 0))
+        return true
+    }
     /// What was pasted and is still named in the text, with its preview.
     private var attachments: [(path: String, view: ThumbnailView)] = []
     private var attachmentsHeight: CGFloat { attachments.isEmpty ? 0 : Self.attachment + Self.attachmentGap }
@@ -68,7 +89,8 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         configure(send, action: #selector(sendTapped))
         configure(queue, action: #selector(queueTapped))
         queue.toolTip = "Guardar na Fila do Vitra: vai quando o maestro terminar o turno"
-        for view in [field, scroll, placeholder, send, queue, status] as [NSView] {
+        placeholder.lineBreakMode = .byTruncatingTail
+        for view in [field, scroll, placeholder, tabHint, send, queue, status] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
@@ -86,7 +108,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     /// which would stay with the terminal underneath, typing into it unseen.
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
-        return hit === placeholder || hit === field || hit === self ? text : hit
+        return hit === placeholder || hit === tabHint || hit === field || hit === self ? text : hit
     }
 
     private func configure(_ button: NSButton, action: Selector) {
@@ -237,7 +259,12 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         }
         scroll.frame = NSRect(x: column.x + Self.fieldPad, y: quoteY + attachmentsHeight, width: inner, height: textHeight)
         text.frame.size.width = inner
-        placeholder.frame = NSRect(x: scroll.frame.minX, y: scroll.frame.minY - 1, width: inner, height: lineHeight)
+        let showsHint = suggestion != nil && text.string.isEmpty
+        tabHint.isHidden = !showsHint
+        tabHint.sizeToFit()
+        let hintWidth = showsHint ? tabHint.frame.width + 10 : 0
+        placeholder.frame = NSRect(x: scroll.frame.minX, y: scroll.frame.minY - 1, width: inner - hintWidth, height: lineHeight)
+        tabHint.frame = NSRect(x: scroll.frame.maxX - tabHint.frame.width, y: scroll.frame.minY + 2, width: tabHint.frame.width, height: 15)
         placeholder.isHidden = !text.string.isEmpty
         send.sizeToFit()
         let sendWidth = send.frame.width + 20
@@ -280,6 +307,8 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         case #selector(NSResponder.deleteBackward(_:)) where textView.selectedRange() == NSRange(location: 0, length: 0) && !(attachments.isEmpty && quotes.isEmpty):
             removeLastExtra()
             return true
+        case #selector(NSResponder.insertTab(_:)) where suggestion != nil && textView.string.isEmpty:
+            return takeSuggestion()
         case #selector(NSResponder.cancelOperation(_:)):
             onEscape?()
             return true

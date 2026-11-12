@@ -1314,11 +1314,45 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
             guard from <= to else { continue }
             for column in from ... to {
                 let cell = snapshot[column, row]
-                guard !cell.flags.contains(.faint) else { continue }
+                guard !isGhost(cell) else { continue }
                 typed += snapshot.text(of: cell) ?? " "
             }
         }
         return typed.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// The prompt the program suggests next — Claude Code draws one dim in
+    /// its empty input once a turn ends, taken with Tab — or nil when there
+    /// is none, or something is typed there. Its opening hints ("Try …")
+    /// are not suggestions of what to say.
+    func suggestedInput() -> String? {
+        guard typedInput() == "", let input = inputSpan() else { return nil }
+        var words: [String] = []
+        for row in Int(input.firstRow) ... Int(input.lastRow) {
+            let from = row == Int(input.firstRow) ? Int(input.start) : 0
+            let to = row == Int(input.lastRow) ? Int(input.end) : Int(snapshot.columns) - 1
+            guard from <= to else { continue }
+            let line = (from ... to).map { column -> String in
+                let cell = snapshot[column, row]
+                return isGhost(cell) ? snapshot.text(of: cell) ?? " " : " "
+            }.joined()
+            words += line.split(separator: " ").map(String.init)
+        }
+        let suggestion = words.joined(separator: " ")
+        guard !suggestion.isEmpty, !suggestion.hasPrefix("Try \""), !suggestion.hasPrefix("Press ") else { return nil }
+        return suggestion
+    }
+
+    /// Text the program drew as a hint, not something typed: faint, or in a
+    /// grey well under the terminal's own text colour.
+    private func isGhost(_ cell: RenderCell) -> Bool {
+        if cell.flags.contains(.faint) { return true }
+        let color = cell.foreground, base = snapshot.defaultForeground
+        guard color != base else { return false }
+        let channels = [Int(color.red), Int(color.green), Int(color.blue)]
+        let isGrey = channels.max()! - channels.min()! < 24
+        let brightness = channels.reduce(0, +), baseBrightness = Int(base.red) + Int(base.green) + Int(base.blue)
+        return isGrey && brightness * 10 < baseBrightness * 7
     }
 
     /// How many rows away from the cursor an input is looked for.

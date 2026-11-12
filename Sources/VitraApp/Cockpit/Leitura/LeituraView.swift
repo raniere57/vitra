@@ -13,6 +13,35 @@ final class LeituraView: NSView {
     /// Sends a message; answers why it could not, or nil once it went.
     var onSend: ((String, @escaping @MainActor (String?) -> Void) -> Void)?
     var onQueue: ((String) -> Void)?
+    /// The prompt the maestro's terminal suggests now, if any.
+    var suggestionSource: (() -> String?)?
+    private var suggestionPoll: Timer?
+    private var suggestionChecks = 0
+    /// Claude Code writes its suggestion a moment after the turn ends.
+    private static let suggestionInterval: TimeInterval = 1.5
+    private static let suggestionTries = 12
+
+    /// Looks for a suggestion now and for a while after: none while the
+    /// maestro works or Leitura is hidden.
+    private func watchSuggestion() {
+        suggestionPoll?.invalidate()
+        suggestionPoll = nil
+        guard isVisible, !isWorking else { return composer.setSuggestion(nil) }
+        suggestionChecks = 0
+        composer.setSuggestion(suggestionSource?())
+        suggestionPoll = Timer.scheduledTimer(withTimeInterval: Self.suggestionInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard self.isVisible, !self.isWorking, self.suggestionChecks < Self.suggestionTries else {
+                    self.suggestionPoll?.invalidate()
+                    self.suggestionPoll = nil
+                    return
+                }
+                self.suggestionChecks += 1
+                self.composer.setSuggestion(self.suggestionSource?())
+            }
+        }
+    }
     var onOpenLink: ((URL) -> Void)? {
         didSet { list.context.openLink = onOpenLink }
     }
@@ -158,6 +187,7 @@ final class LeituraView: NSView {
             reader?.follow(false)
         }
         updateClock()
+        watchSuggestion()
     }
 
     /// The maestro may be in another conversation now (/resume, /clear,
@@ -246,6 +276,7 @@ final class LeituraView: NSView {
         composer.setWorking(isWorking)
         banner.isHidden = state != .needsPermission
         updateClock()
+        watchSuggestion()
         refresh()
     }
 

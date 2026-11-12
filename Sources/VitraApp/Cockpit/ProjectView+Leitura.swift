@@ -13,6 +13,7 @@ extension ProjectView {
             self.sendFromLeitura(text, done: done)
         }
         view.onQueue = { [weak self] text in self?.enqueue(text) }
+        view.suggestionSource = { [weak self] in self?.terminal?.suggestedInput() }
         view.onOpenLink = { [weak self] url in self?.openTerminalLink(url, external: false) }
         view.onOpenWorker = { [weak self] id in
             self?.choose(.workers)
