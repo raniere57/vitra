@@ -127,27 +127,22 @@ extension ProjectView {
         guard let terminal, terminal.session.isRunningProgram else {
             return done("O maestro não está rodando no terminal. Volte ao terminal para iniciá-lo.")
         }
-        let leftover = { (terminal.typedInput() ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-        guard !leftover().isEmpty else {
-            submit(text, to: terminal.session)
-            return done(nil)
-        }
-        // Something sits half-typed in the terminal's prompt, which cannot be
-        // seen from here: pasted onto it, the message would be a third one.
-        // The prompt is emptied (⌃U, a line at a time) and looked at again.
-        terminal.session.send(text: String(repeating: "\u{15}", count: Self.clears))
+        // What may sit half-typed in the terminal's prompt cannot be seen from
+        // here, and pasted onto it the message would be a third one: the
+        // prompt is emptied first (⌃U, a line at a time). Not checked by
+        // reading the screen back — Claude Code's suggested next prompt reads
+        // as typed text there, and a send must not be refused over a guess.
+        let session = terminal.session
+        session.send(text: String(repeating: "\u{15}", count: Self.clears))
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.clearDelay) { [weak self] in
-            guard leftover().isEmpty else {
-                return done("Há texto digitado no terminal do maestro que não consegui apagar; apague por lá (⌘L) e envie de novo.")
-            }
-            self?.submit(text, to: terminal.session)
-            done(nil)
+            self?.submit(text, to: session)
         }
+        done(nil)
     }
 
     /// ⌃U on an empty prompt does nothing: a few more than any prompt has lines.
     private static let clears = 8
-    private static let clearDelay: TimeInterval = 0.25
+    private static let clearDelay: TimeInterval = 0.12
 
     // MARK: - The switch calls for attention
 
