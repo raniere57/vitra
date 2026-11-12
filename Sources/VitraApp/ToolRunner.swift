@@ -56,16 +56,26 @@ final class ToolRunner {
         self.host = host
     }
 
-    /// The pane the call in flight came from, for the window and browser it
-    /// should land in. One call at a time on the main actor, so a property.
-    private var callingPane: String?
-    /// The worker the call came from; nil for the maestro. The helper puts it
-    /// in the arguments from its own environment, never from the model.
-    private var callingAgent: String?
+    /// Who a call in flight came from. Calls from several projects run at
+    /// once — each waits on its page, and the others go on meanwhile — so
+    /// this travels with the call's own task, never in a property: kept in
+    /// one, a second call overwrote the first's, and a page opened in the
+    /// wrong project or under another caller's permissions.
+    private struct Caller: Sendable {
+        /// The pane the call came from, for the window and browser it lands in.
+        var pane: String?
+        /// The worker the call came from; nil for the maestro. The helper
+        /// puts it in the arguments from its own environment, never the model.
+        var agent: String?
+        /// A worker's call: held to its tier, and shown only its own tab.
+        var isWorker = false
+    }
 
-    /// Whether the call in flight is a worker's: held to its tier, and shown
-    /// only its own tab.
-    private var callingWorker = false
+    @TaskLocal private static var caller = Caller()
+
+    private var callingPane: String? { Self.caller.pane }
+    private var callingAgent: String? { Self.caller.agent }
+    private var callingWorker: Bool { Self.caller.isWorker }
 
     func run(tool: String, arguments: JSONValue, pane: String?) async throws -> String {
         // A worker's tier is read here from its run's record, not taken from
@@ -73,12 +83,11 @@ final class ToolRunner {
         if let refusal = WorkerToolPolicy.appRefusal(tool: tool, arguments: arguments) {
             throw ToolError(refusal)
         }
-        callingPane = pane
-        callingAgent = arguments["_agent"]?.stringValue
-        callingWorker = WorkerToolPolicy.isWorkerCall(arguments)
-        defer { (callingPane, callingAgent, callingWorker) = (nil, nil, false) }
+        let caller = Caller(pane: pane, agent: arguments["_agent"]?.stringValue, isWorker: WorkerToolPolicy.isWorkerCall(arguments))
         do {
-            return try await dispatch(tool: tool, arguments: arguments)
+            return try await Self.$caller.withValue(caller) {
+                try await dispatch(tool: tool, arguments: arguments)
+            }
         } catch let failure as ToolFailure {
             // The panel reports failures in its own type, which knows nothing
             // about MCP; this is where they become something the agent reads.

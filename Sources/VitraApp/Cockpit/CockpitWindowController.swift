@@ -306,6 +306,9 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         if let pane, let view = views.values.first(where: { $0.paneID == pane }) {
             return view
         }
+        // A call that names a project which is not open goes nowhere: landing
+        // in whatever is on screen would put one project's page in another.
+        if let pane { throw ToolError("the project this call came from (\(pane)) is not open in Vitra") }
         guard projects.indices.contains(selected), let view = views[projects[selected].path] else {
             throw ToolError("Vitra has no project open")
         }
@@ -560,7 +563,9 @@ extension CockpitWindowController: ToolHost {
     /// The project a call came from — the one on screen for a call that names
     /// none — without bringing it forward.
     private func locate(_ pane: String?) throws -> (index: Int, view: ProjectView) {
-        let index = pane.flatMap { id in projects.firstIndex { views[$0.path]?.paneID == id } } ?? selected
+        let named = pane.flatMap { id in projects.firstIndex { views[$0.path]?.paneID == id } }
+        if let pane, named == nil { throw ToolError("the project this call came from (\(pane)) is not open in Vitra") }
+        let index = named ?? selected
         guard projects.indices.contains(index), let view = views[projects[index].path] else {
             throw ToolError("Vitra has no project open")
         }
