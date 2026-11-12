@@ -101,3 +101,38 @@ struct BrowserChromeTests {
     #expect(page.contains("&lt;script&gt;alert(1)&lt;/script&gt;"))
     #expect(page.contains("A &quot;conexão&quot; foi &lt;recusada&gt; &amp; pronto"))
 }
+
+/// A page an agent works in must never learn that nobody is looking: sites
+/// pause videos and stop timers on blur and on being hidden.
+@MainActor
+@Test func aPageAlwaysBelievesItIsVisibleAndInFocus() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-focus-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let page = folder.appendingPathComponent("page.html")
+    try """
+    <html><body><h1 id="state">nada</h1><h2 id="events">quieto</h2><script>
+    const note = () => { document.getElementById('events').textContent = 'pausou'; };
+    window.addEventListener('blur', note);
+    window.onblur = note;
+    document.addEventListener('visibilitychange', note);
+    setInterval(() => { document.getElementById('state').textContent = document.hasFocus() + ' ' + document.visibilityState + ' ' + document.hidden; }, 50);
+    </script></body></html>
+    """.write(to: page, atomically: true, encoding: .utf8)
+
+    // A window that is not key, with the browser then taken out of it: as
+    // unfocused and as hidden as a page gets.
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+    let browser = BrowserView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    window.contentView = browser
+    window.orderBack(nil)
+    defer { window.orderOut(nil); browser.prepareForRemoval() }
+    try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+        browser.load(page) { done.resume(with: $0) }
+    }
+    _ = try await browser.evaluate("window.dispatchEvent(new Event('blur')); document.dispatchEvent(new Event('visibilitychange')); return 1")
+    try await Task.sleep(nanoseconds: 300_000_000)
+    let listing = try await browser.snapshot()
+    #expect(listing.contains("\"true visible false\""))
+    #expect(listing.contains("\"quieto\""))
+}

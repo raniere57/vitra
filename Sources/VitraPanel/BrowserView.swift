@@ -480,6 +480,12 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
             forMainFrameOnly: true,
             in: .page
         ))
+        controller.addUserScript(WKUserScript(
+            source: BrowserScripts.alwaysAttentive,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false,
+            in: .page
+        ))
         controller.add(self, contentWorld: Self.world, name: "vitraFrame")
         controller.addUserScript(WKUserScript(
             source: BrowserScripts.frameHello,

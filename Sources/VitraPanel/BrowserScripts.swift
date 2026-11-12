@@ -61,6 +61,35 @@ enum BrowserScripts {
     }
     """
 
+    /// Makes a page believe it is always looked at and always in focus.
+    ///
+    /// An agent works in a page while the user reads something else: the
+    /// window loses the keyboard, the panel shows another tab, the project
+    /// leaves the screen. Sites notice — `blur`, `visibilitychange`,
+    /// `document.hasFocus()` — and pause videos, stop timers, log people
+    /// out. Run before any of the page's own scripts, in every frame, this
+    /// answers "visible and focused" and lets none of those events through.
+    static let alwaysAttentive = """
+    (() => {
+      const define = (target, name, value) => {
+        try { Object.defineProperty(target, name, { configurable: true, get: () => value }); } catch (error) {}
+      };
+      define(Document.prototype, 'visibilityState', 'visible');
+      define(Document.prototype, 'webkitVisibilityState', 'visible');
+      define(Document.prototype, 'hidden', false);
+      define(Document.prototype, 'webkitHidden', false);
+      try { Document.prototype.hasFocus = function () { return true; }; } catch (error) {}
+      const swallow = (event) => { event.stopImmediatePropagation(); };
+      for (const name of ['visibilitychange', 'webkitvisibilitychange', 'blur', 'focusout', 'pagehide', 'freeze']) {
+        // focusout of a field is the page's own business; only the window's
+        // and the document's losing focus is swallowed.
+        window.addEventListener(name, (event) => {
+          if (event.target === window || event.target === document) swallow(event);
+        }, true);
+      }
+    })();
+    """
+
     /// What the panel shows in place of a page that did not load.
     static func failurePage(address: String, reason: String) -> String {
         func escaped(_ text: String) -> String {
