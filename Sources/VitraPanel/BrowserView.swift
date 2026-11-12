@@ -24,6 +24,17 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     public var onPageChanged: ((_ title: String, _ url: String) -> Void)?
 
     private var webView: WKWebView?
+    private lazy var chrome: BrowserChrome = {
+        let chrome = BrowserChrome(host: self)
+        chrome.onNote = { [weak self] line in self?.note(line) }
+        return chrome
+    }()
+    /// The page's inner frames that said hello, for the tools that must
+    /// reach into them: a video player, a payment form, an embedded app.
+    private var frames: [WKFrameInfo] = []
+    /// Frames as last listed by `snapshot`: "f1", "f2", … to each frame.
+    private var listedFrames: [String: WKFrameInfo] = [:]
+    private static let frameLimit = 8
     private var observations: [NSKeyValueObservation] = []
     /// A combo box, for the history it comes with: the list under the arrow,
     /// and completion from that list as an address is typed.
@@ -167,11 +178,13 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     // MARK: - Automation
 
     /// Runs `script` in the isolated world and returns whatever it returns.
-    public func evaluate(_ script: String) async throws -> Any? {
+    public func evaluate(_ script: String, in frame: WKFrameInfo? = nil) async throws -> Any? {
         guard let webView else { throw ToolFailure("the browser is not open") }
         do {
             return try await webView.callAsyncJavaScript(
                 script,
+                arguments: [:],
+                in: frame,
                 contentWorld: Self.world
             )
         } catch {
@@ -203,6 +216,7 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         var lines = ["url: \(url)", "title: \(title)", ""]
         lines.append(contentsOf: elements)
         if elements.isEmpty { lines.append("(no visible interactive elements)") }
+        lines += await frameListings()
         if truncated {
             lines.append("")
             lines.append("Stopped at \(Self.snapshotLimit) elements; the page has more.")
@@ -210,9 +224,42 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         return lines.joined(separator: "\n")
     }
 
+    /// What can be seen and used inside the page's frames, each under its
+    /// own heading and with refs of its own ("f1e3"): the page's script
+    /// cannot reach into a frame from another site, but the browser can.
+    private func frameListings() async -> [String] {
+        listedFrames = [:]
+        var lines: [String] = []
+        var seen: Set<String> = []
+        // Newest first: a frame that reloaded said hello again.
+        for frame in frames.reversed() where listedFrames.count < Self.frameLimit {
+            guard let raw = try? await evaluate(BrowserScripts.snapshot(limit: Self.snapshotLimit), in: frame),
+                  let json = raw as? String, let data = json.data(using: .utf8),
+                  let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let document = parsed["document"] as? String, seen.insert(document).inserted,
+                  let elements = parsed["elements"] as? [String], !elements.isEmpty
+            else { continue }
+            let name = "f\(listedFrames.count + 1)"
+            listedFrames[name] = frame
+            lines += ["", "frame \(name): \(parsed["url"] as? String ?? "")"]
+            lines += elements.map { BrowserScripts.prefixing(ref: name, in: $0) }
+        }
+        return lines
+    }
+
+    /// "f2e7" is e7 of the frame listed as f2; anything else is the page's.
+    private func target(of ref: String) throws -> (ref: String, frame: WKFrameInfo?) {
+        guard let split = BrowserScripts.frameAndRef(ref) else { return (ref, nil) }
+        guard let frame = listedFrames[split.frame] else {
+            throw ToolFailure("\(ref) is in a frame that is no longer listed. Take a new snapshot and use the new ref.")
+        }
+        return (split.ref, frame)
+    }
+
     public func click(ref: String) async throws -> String {
         let from = currentURL
-        let result = try await outcome(of: BrowserScripts.click(ref: ref), ref: ref)
+        let target = try target(of: ref)
+        let result = try await outcome(of: BrowserScripts.click(ref: target.ref), ref: ref, in: target.frame)
         let role = result["role"] as? String ?? "element"
         let label = result["label"] as? String ?? ""
         let what = label.isEmpty ? "clicked \(ref) (\(role))" : "clicked \(ref) (\(role) \"\(label)\")"
@@ -221,7 +268,8 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
 
     public func type(ref: String, text: String, submit: Bool) async throws -> String {
         let from = currentURL
-        _ = try await outcome(of: BrowserScripts.type(ref: ref, text: text, submit: submit), ref: ref)
+        let target = try target(of: ref)
+        _ = try await outcome(of: BrowserScripts.type(ref: target.ref, text: text, submit: submit), ref: ref, in: target.frame)
         let what = submit ? "typed into \(ref) and submitted" : "typed into \(ref)"
         // Typing without submitting cannot navigate, so it is not waited on.
         guard submit else { return what }
@@ -235,8 +283,8 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     }
 
     /// Runs a script that answers `{ok: …}` and turns a dead ref into a clear error.
-    private func outcome(of script: String, ref: String) async throws -> [String: Any] {
-        let raw = try await evaluate(script)
+    private func outcome(of script: String, ref: String, in frame: WKFrameInfo? = nil) async throws -> [String: Any] {
+        let raw = try await evaluate(script, in: frame)
         guard let json = raw as? String,
               let data = json.data(using: .utf8),
               let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -287,6 +335,10 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         web.navigationDelegate = nil
         web.configuration.userContentController.removeAllUserScripts()
         web.configuration.userContentController.removeScriptMessageHandler(forName: "vitraConsole")
+        web.configuration.userContentController.removeScriptMessageHandler(forName: "vitraFrame", contentWorld: Self.world)
+        web.uiDelegate = nil
+        frames = []
+        listedFrames = [:]
         observations.forEach { $0.invalidate() }
         observations.removeAll()
         web.removeFromSuperview()
@@ -338,14 +390,55 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     // MARK: - WKScriptMessageHandler
 
     public func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "vitraFrame" {
+            guard !message.frameInfo.isMainFrame else { return }
+            frames.append(message.frameInfo)
+            if frames.count > Self.frameLimit * 4 { frames.removeFirst(frames.count - Self.frameLimit * 4) }
+            return
+        }
         guard message.name == "vitraConsole",
               let body = message.body as? [String: Any],
               let level = body["level"] as? String,
               let text = body["text"] as? String
         else { return }
 
-        console.append("[\(level)] \(text)")
+        note("[\(level)] \(text)")
+    }
+
+    private func note(_ line: String) {
+        console.append(line)
         if console.count > Self.consoleLimit { console.removeFirst(console.count - Self.consoleLimit) }
+    }
+
+    // MARK: - Navigation policy
+
+    /// A new document in the main frame: its frames are new ones too.
+    public func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        frames = []
+        listedFrames = [:]
+    }
+
+    /// What the page cannot show — a zip, a spreadsheet, anything sent as
+    /// an attachment — is a download.
+    public func webView(
+        _ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void
+    ) {
+        let disposition = (navigationResponse.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
+        let isAttachment = disposition.lowercased().hasPrefix("attachment")
+        decisionHandler(navigationResponse.canShowMIMEType && !isAttachment ? .allow : .download)
+    }
+
+    public func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        chrome.adopt(download)
+        // The navigation it began as is over: nothing more will load.
+        progress.stopAnimation(nil)
+        progress.isHidden = true
+        finishLoads(with: .success(()))
+    }
+
+    public func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        chrome.adopt(download)
     }
 
     // MARK: - Chrome
@@ -358,6 +451,10 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         // a throwaway. The file preview view stays non-persistent — it shows
         // local files, not sites anyone logs into.
         configuration.websiteDataStore = .default()
+        // A page may start its own video or sound, as in any browser the
+        // user has let it: the agents drive pages that play things.
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
 
         let controller = configuration.userContentController
         controller.add(self, contentWorld: .page, name: "vitraConsole")
@@ -366,6 +463,13 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true,
             in: .page
+        ))
+        controller.add(self, contentWorld: Self.world, name: "vitraFrame")
+        controller.addUserScript(WKUserScript(
+            source: BrowserScripts.frameHello,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: false,
+            in: Self.world
         ))
         controller.addUserScript(WKUserScript(
             source: BrowserScripts.registry,
@@ -376,6 +480,9 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
 
         let web = WKWebView(frame: .zero, configuration: configuration)
         web.navigationDelegate = self
+        web.uiDelegate = chrome
+        web.isInspectable = true
+        web.allowsBackForwardNavigationGestures = true
         web.translatesAutoresizingMaskIntoConstraints = false
         // The web view paints its own background. Left transparent, a page that
         // sets none — most local pages a developer opens — would put its black

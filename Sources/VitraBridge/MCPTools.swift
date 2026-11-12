@@ -23,14 +23,14 @@ public enum MCPTools {
         ),
         tool(
             "browser_snapshot",
-            "List the interactive and text-bearing elements of the current page, each with a ref to use with browser_click and browser_type. Invisible elements are left out. Take a fresh snapshot after anything that changes the page.",
+            "List the interactive and text-bearing elements of the current page, each with a ref to use with browser_click and browser_type. Invisible elements are left out. Elements inside the page's frames (an embedded player, a payment form) are listed under each frame with refs like f1e3, which click and type take as well. Take a fresh snapshot after anything that changes the page.",
             properties: ["tab": otherTab],
             required: []
         ),
         tool(
             "browser_click",
             "Click the element with the given ref from the most recent snapshot. If the click navigates, this waits for the new page and reports where it landed.",
-            properties: ["ref": string("Element ref from browser_snapshot, such as e12.")],
+            properties: ["ref": string("Element ref from browser_snapshot, such as e12, or f1e3 for one inside a frame.")],
             required: ["ref"]
         ),
         tool(

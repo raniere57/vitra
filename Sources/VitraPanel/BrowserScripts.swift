@@ -11,6 +11,7 @@ enum BrowserScripts {
     if (!window.__vitra) {
       window.__vitra = {
         next: 1,
+        document: Math.random().toString(36).slice(2),
         toRef: new WeakMap(),
         byRef: new Map(),
         ref(element) {
@@ -60,6 +61,28 @@ enum BrowserScripts {
     }
     """
 
+    /// Every inner frame says hello once it has loaded, which is how the
+    /// browser gets a handle to run the tools inside it.
+    static let frameHello = """
+    if (window !== window.top) {
+      try { window.webkit.messageHandlers.vitraFrame.postMessage('hello'); } catch (error) {}
+    }
+    """
+
+    /// "- e7 button …" → "- f2e7 button …": the element's ref, under its frame's name.
+    static func prefixing(ref frame: String, in line: String) -> String {
+        guard line.hasPrefix("- e") else { return line }
+        return "- " + frame + line.dropFirst(2)
+    }
+
+    /// "f2e7" → ("f2", "e7"); nil for a ref of the page itself.
+    static func frameAndRef(_ ref: String) -> (frame: String, ref: String)? {
+        guard ref.hasPrefix("f"), let split = ref.dropFirst().firstIndex(of: "e"),
+              ref[ref.index(after: ref.startIndex) ..< split].allSatisfy(\.isNumber), split > ref.index(after: ref.startIndex)
+        else { return nil }
+        return (String(ref[..<split]), String(ref[split...]))
+    }
+
     /// A compact listing of what a person could see and use on the page.
     static func snapshot(limit: Int) -> String {
         """
@@ -89,6 +112,7 @@ enum BrowserScripts {
 
         return JSON.stringify({
           url: location.href,
+          document: vitra.document,
           title: document.title,
           truncated: truncated,
           elements: lines,
