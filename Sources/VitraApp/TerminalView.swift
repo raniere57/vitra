@@ -376,9 +376,35 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         setNeedsRender()
     }
 
+    /// Draws a running program's tool calls and their output quieter, so
+    /// what it says stands out. On for the maestro's terminal; off with
+    /// `defaults write dev.vitra.Vitra dimToolOutput -bool false`.
+    var quietsToolBlocks = false {
+        didSet {
+            guard quietsToolBlocks != oldValue else { return }
+            updateQuietRows()
+            setNeedsRender()
+        }
+    }
+
+    private static let isQuietingAllowed = UserDefaults.standard.object(forKey: "dimToolOutput") as? Bool ?? true
+
+    private func updateQuietRows() {
+        guard quietsToolBlocks, Self.isQuietingAllowed, session.isRunningProgram, !snapshot.isAlternateScreen else {
+            if !snapshot.rowDim.isEmpty { snapshot.rowDim = [] }
+            return
+        }
+        let columns = min(Int(snapshot.columns), ToolBlockDimming.prefixLength)
+        let rows = (0 ..< Int(snapshot.rows)).map { row in
+            (0 ..< columns).map { snapshot.text(of: snapshot[$0, row]) ?? " " }.joined()
+        }
+        snapshot.rowDim = ToolBlockDimming.levels(rows: rows).map(\.rawValue)
+    }
+
     @objc private func renderFrame() {
         if session.updateSnapshot(snapshot) {
             needsRedraw = true
+            updateQuietRows()
             // Cursor blink is a property of the program, and can turn on or off
             // without the window changing; the timer follows that, not the clock.
             updateBlinkTimer()
@@ -1275,7 +1301,10 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// The screen is read fresh: a project in a tab nobody is looking at is
     /// not drawn, and its last picture may be old.
     func typedInput() -> String? {
-        if session.updateSnapshot(snapshot) { setNeedsRender() }
+        if session.updateSnapshot(snapshot) {
+            updateQuietRows()
+            setNeedsRender()
+        }
         guard session.isRunningProgram, snapshot.rows > 0, snapshot.scroll.isAtBottom, snapshot.cursor != nil else { return nil }
         guard let input = inputSpan() else { return "" }
         var typed = ""

@@ -1032,6 +1032,7 @@ final class ProjectView: NSView {
         try? view.apply(kit.config)
         view.offersClose = false
         view.focusTint = CockpitStyle.accent
+        view.quietsToolBlocks = true
         view.pathBase = URL(fileURLWithPath: project.path, isDirectory: true)
         view.onOpenLink = { [weak self] url, external in self?.openTerminalLink(url, external: external) }
         return (view, hosted)
