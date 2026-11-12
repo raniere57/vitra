@@ -71,8 +71,8 @@ final class ReadingTextView: NSTextView {
     /// The text view sets the I-beam over all of itself, the button included:
     /// over the button the pointer is a hand.
     private func isOverReply(_ event: NSEvent) -> Bool {
-        guard let reply else { return false }
-        return reply.frame.contains(convert(event.locationInWindow, from: nil))
+        guard let reply, let host = reply.superview else { return false }
+        return reply.frame.contains(host.convert(event.locationInWindow, from: nil))
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -120,12 +120,19 @@ final class ReadingTextView: NSTextView {
         button.layer?.cornerRadius = 7
         button.sizeToFit()
         let size = NSSize(width: button.frame.width + 16, height: 24)
-        // Over the selection when there is room in the view, else under it.
-        let above = rect.minY - size.height - 4
-        let y = above >= 0 ? above : min(rect.maxY + 4, max(bounds.height - size.height, 0))
-        let x = min(max(rect.minX, 0), max(bounds.width - size.width, 0))
+        // In the window, not in this view: a line or two of text has no room
+        // of its own, and the button would sit on the words it is about.
+        guard let host = window?.contentView else { return }
+        let selection = convert(rect, to: host)
+        let gap: CGFloat = 5
+        // Over the selection; under it when that would leave the window.
+        var y = host.isFlipped ? selection.minY - size.height - gap : selection.maxY + gap
+        if y < 0 || y + size.height > host.bounds.height {
+            y = host.isFlipped ? selection.maxY + gap : selection.minY - size.height - gap
+        }
+        let x = min(max(selection.minX, 0), max(host.bounds.width - size.width, 0))
         button.frame = NSRect(origin: NSPoint(x: x, y: y), size: size)
-        addSubview(button)
+        host.addSubview(button)
         reply = button
     }
 
@@ -143,7 +150,16 @@ final class ReadingTextView: NSTextView {
     }
 
     /// Scrolling belongs to the list; a text view in a row never scrolls.
-    override func scrollWheel(with event: NSEvent) { nextResponder?.scrollWheel(with: event) }
+    override func scrollWheel(with event: NSEvent) {
+        // The button floats in the window: scrolled, it would stay behind.
+        hideReply()
+        nextResponder?.scrollWheel(with: event)
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        hideReply()
+    }
 
     // MARK: - Measuring
 

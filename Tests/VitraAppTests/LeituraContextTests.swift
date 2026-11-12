@@ -86,8 +86,10 @@ struct LeituraQueueTests {
 @Suite("Leitura: replying to a passage")
 struct LeituraReplyTests {
     @Test func aSelectionOffersToReplyAndAnEmptyOneDoesNot() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300), styleMask: [.titled], backing: .buffered, defer: true)
         let view = ReadingTextView()
-        view.frame = NSRect(x: 0, y: 0, width: 400, height: 60)
+        view.frame = NSRect(x: 20, y: 120, width: 400, height: 22)
+        window.contentView?.addSubview(view)
         view.show(ReadingStyle.plain("uma frase para responder"))
         view.selectionSettled()
         #expect(view.reply == nil)
@@ -95,7 +97,9 @@ struct LeituraReplyTests {
         view.setSelectedRange(NSRange(location: 4, length: 5))
         view.selectionSettled()
         let button = try! #require(view.reply)
-        #expect(view.bounds.contains(button.frame))
+        // One line of text has no room for it: it floats clear of the words.
+        #expect(!button.frame.intersects(view.frame))
+        #expect(window.contentView!.bounds.contains(button.frame))
 
         // Another text in the same (reused) view: the offer was the old one's.
         view.show(ReadingStyle.plain("outro texto"))
