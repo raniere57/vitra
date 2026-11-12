@@ -627,3 +627,48 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(try JSONDecoder().decode(MaestroModel.self, from: old) == MaestroModel(name: "Fable 5.2", effort: "high"))
     #expect(try JSONDecoder().decode(MaestroModel.self, from: old).session == nil)
 }
+
+// MARK: Sleeping and closed projects
+
+@Test func aSleepingProjectAndTheClosedOnesSurviveASave() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-sleep-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: file) }
+    var asleep = CockpitProject(path: "/a", session: UUID().uuidString.lowercased())
+    asleep.isAsleep = true
+    let closed = CockpitProject(path: "/c", session: UUID().uuidString.lowercased(), mode: .solo)
+    let state = CockpitState(projects: [asleep, CockpitProject(path: "/b")], selected: 1, closed: [closed])
+    try state.save(to: file)
+    let loaded = CockpitState.load(from: file)
+    #expect(loaded.projects.first?.isAsleep == true)
+    #expect(loaded.projects.first?.session == asleep.session)
+    #expect(loaded.closed == [closed])
+}
+
+@Test func aFileSavedBeforeSleepAndClosedExistedStillLoads() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-old-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: file) }
+    try Data(#"{"projects":[{"path":"/a"}],"selected":0}"#.utf8).write(to: file)
+    let loaded = CockpitState.load(from: file)
+    #expect(loaded.projects.map(\.path) == ["/a"])
+    #expect(loaded.projects.first?.isAsleep == false)
+    #expect(loaded.closed == nil)
+}
+
+@Test func closedProjectsAreRememberedNewestFirstEachOnceAndAwake() {
+    var a = CockpitProject(path: "/a")
+    a.isAsleep = true
+    var closed = CockpitProjects.remembering(a, in: [])
+    closed = CockpitProjects.remembering(CockpitProject(path: "/b"), in: closed)
+    closed = CockpitProjects.remembering(a, in: closed)
+    #expect(closed.map(\.path) == ["/a", "/b"])
+    #expect(closed.allSatisfy { !$0.isAsleep })
+    let many = (0..<12).reduce([CockpitProject]()) { CockpitProjects.remembering(CockpitProject(path: "/p\($1)"), in: $0) }
+    #expect(many.count == CockpitProjects.closedLimit)
+    #expect(many.first?.path == "/p11")
+}
+
+@Test func afterASleepTheNearestRunningProjectIsShown() {
+    #expect(CockpitProjects.nearestAwake(to: 1, awake: [true, true, false]) == 0)
+    #expect(CockpitProjects.nearestAwake(to: 0, awake: [true, false, true]) == 2)
+    #expect(CockpitProjects.nearestAwake(to: 0, awake: [true, false]) == nil)
+}

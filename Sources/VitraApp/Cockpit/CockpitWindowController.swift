@@ -21,6 +21,9 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     private lazy var welcome = WelcomeView(target: self, action: #selector(openProject(_:)))
 
     private var projects: [CockpitProject]
+    /// Closed lately, newest first: what the "+" offers back.
+    private var closed: [CockpitProject]
+    private lazy var sleeping = SleepingView(target: self, action: #selector(wakeProject(_:)))
     private var views: [String: ProjectView] = [:]
     private var selected = 0
     private var runs: [Run] = []
@@ -44,6 +47,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         let saved = CockpitState.load(from: store)
         projects = saved.projects
         selected = saved.selected
+        closed = (saved.closed ?? []).filter { closed in !saved.projects.contains { $0.path == closed.path } }
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
@@ -76,6 +80,12 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         tabBar.onSelect = { [weak self] in self?.select($0) }
         tabBar.onClose = { [weak self] in self?.close(at: $0) }
         tabBar.onAdd = { [weak self] in self?.openProject(nil) }
+        tabBar.onReopen = { [weak self] in self?.open($0) }
+        tabBar.onSleep = { [weak self] in self?.sleep(at: $0) }
+        tabBar.onReveal = { [weak self] index in
+            guard let self, self.projects.indices.contains(index) else { return }
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: self.projects[index].path)])
+        }
         feed.onChange = { [weak self] runs in self?.show(runs) }
         alerts.onOpen = { [weak self] path in
             guard let self, let index = projects.firstIndex(where: { $0.path == path }) else { return }
@@ -92,7 +102,8 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             object: window
         )
         watchUsage()
-        select(selected)
+        // A project left asleep stays asleep through a relaunch.
+        select(selected, waking: false)
     }
 
     @available(*, unavailable)
@@ -108,11 +119,56 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         panel.prompt = "Abrir projeto"
         panel.message = "Escolha a pasta do projeto. O maestro trabalha a partir dela."
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        open(url.path)
+    }
 
-        projects = CockpitProjects.adding(url.path, to: projects)
+    /// Opens the project at `path`, as it was when it was closed if it is
+    /// remembered: the same conversation, mode and panel.
+    private func open(_ path: String) {
+        let opened = CockpitProject(path: path, isReading: true)
+        if let index = closed.firstIndex(where: { $0.path == opened.path }) {
+            let remembered = closed.remove(at: index)
+            if !projects.contains(where: { $0.path == remembered.path }) { projects.append(remembered) }
+        } else {
+            projects = CockpitProjects.adding(path, to: projects)
+        }
         save()
-        let opened = CockpitProject(path: url.path, isReading: true)
         select(projects.firstIndex { $0.path == opened.path } ?? projects.count - 1)
+    }
+
+    /// Puts the project on screen to sleep, or the one a tab's menu named.
+    @objc func sleepProject(_ sender: Any?) { sleep(at: selected) }
+
+    @objc func wakeProject(_ sender: Any?) { select(selected) }
+
+    /// Ends everything the project runs — maestro, shells, pages — and keeps
+    /// its tab: a click on it starts the maestro again in the same conversation.
+    private func sleep(at index: Int) {
+        guard projects.indices.contains(index) else { return }
+        if projects[index].isAsleep {
+            select(index)
+            return
+        }
+        if views[projects[index].path]?.isBusy == true {
+            let alert = NSAlert()
+            alert.messageText = "Suspender \(projects[index].name)?"
+            alert.informativeText = "O maestro deste projeto ainda está rodando. Suspender o encerra; a conversa fica guardada e volta ao clicar na aba. Workers já delegados continuam."
+            alert.addButton(withTitle: "Suspender projeto")
+            alert.addButton(withTitle: "Cancelar")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        projects[index].isAsleep = true
+        let path = projects[index].path
+        views.removeValue(forKey: path)?.shutDown(endingSessions: true)
+        attention[path] = nil
+        guard index == selected else {
+            save()
+            refresh()
+            return
+        }
+        // Somewhere already running, if there is one; nothing is woken for it.
+        let awake = projects.map { views[$0.path] != nil }
+        select(CockpitProjects.nearestAwake(to: index, awake: awake) ?? index, waking: false)
     }
 
     /// Closes the page or file open beside the project on screen; with none
@@ -180,7 +236,8 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     private func step(by offset: Int) {
         guard projects.count > 1 else { return }
-        select((selected + offset + projects.count) % projects.count)
+        // Passing by a sleeping project does not wake it.
+        select((selected + offset + projects.count) % projects.count, waking: false)
     }
 
     private func close(at index: Int) {
@@ -196,13 +253,14 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         let project = projects.remove(at: index)
+        closed = CockpitProjects.remembering(project, in: closed)
         // The one place a project's shells really end; quitting only lets go.
         views.removeValue(forKey: project.path)?.shutDown(endingSessions: true)
         save()
         select(min(selected > index ? selected - 1 : selected, projects.count - 1))
     }
 
-    private func select(_ index: Int) {
+    private func select(_ index: Int, waking: Bool = true) {
         selected = max(index, 0)
         stage.subviews.forEach { $0.removeFromSuperview() }
         views.values.forEach { $0.setShown(false) }
@@ -211,6 +269,16 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             stage.addFilling(welcome)
             refresh()
             return
+        }
+        if projects[selected].isAsleep {
+            guard waking else {
+                save()
+                sleeping.show(projects[selected].name)
+                stage.addFilling(sleeping)
+                refresh()
+                return
+            }
+            projects[selected].isAsleep = false
         }
         // The maestro's conversation is given its id before the maestro starts
         // and written down at once, so it is there to resume even if the app
@@ -268,7 +336,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     private func save() {
         do {
-            try CockpitState(projects: projects, selected: selected).save(to: store)
+            try CockpitState(projects: projects, selected: selected, closed: closed).save(to: store)
         } catch {
             // The tabs still work for this launch; they just will not be
             // remembered, and the user should know why.
@@ -327,6 +395,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         let now = Date()
         let usage = MaestroStatus.load()
         tabBar.show(tabs(now: now), selected: selected)
+        tabBar.show(recent: closed.map(\.path))
         tabBar.show(chips: ProviderChips.derive(runs: runs, usage: usage, now: now))
         tabBar.show(costToday: WorkerBoard.totals(runs, since: Calendar.current.startOfDay(for: now)).cost)
         // Only the project on screen is redrawn; the others catch up when shown.
@@ -352,7 +421,9 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
                 callsForYou: record?.state == .needsPermission,
                 maestroWorking: record?.state == .working,
                 finishedUnseen: AttentionPolicy.isUnseen(record, seen: seenAt[$0.path], now: now),
-                queued: views[$0.path]?.promptQueue.count ?? 0
+                queued: views[$0.path]?.promptQueue.count ?? 0,
+                isAsleep: $0.isAsleep,
+                path: $0.path
             )
         }
     }
@@ -442,7 +513,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     private func watchUsage() {
         let folder = Maestro.supportDirectory
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let descriptor = open(folder.path, O_EVTONLY)
+        let descriptor = Darwin.open(folder.path, O_EVTONLY)
         guard descriptor >= 0 else { return }
         let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: .write, queue: .main)
         source.setEventHandler { [weak self] in self?.usageWrote() }
@@ -522,6 +593,10 @@ extension CockpitWindowController: NSMenuItemValidation {
         switch item.action {
         case #selector(openProject(_:)), #selector(closeProject(_:)), #selector(showShortcuts(_:)):
             return true
+        case #selector(sleepProject(_:)):
+            let asleep = projects.indices.contains(selected) && projects[selected].isAsleep
+            item.title = asleep ? "Retomar projeto" : "Suspender projeto"
+            return projects.indices.contains(selected)
         case #selector(showProject(_:)):
             return projects.indices.contains(item.tag)
         case #selector(nextProject(_:)), #selector(previousProject(_:)):

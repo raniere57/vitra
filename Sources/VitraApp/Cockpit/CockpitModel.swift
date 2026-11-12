@@ -30,6 +30,10 @@ struct CockpitProject: Codable, Equatable {
     /// read, instead of the terminal (⌘L). Kept per project, like the panel.
     var isReading: Bool
 
+    /// Put to sleep by the user: its tab stays, its maestro, shells and pages
+    /// are ended, and nothing of it runs until the tab is clicked again.
+    var isAsleep = false
+
     init(path: String, session: String? = nil, mode: MaestroMode = .orchestrator, sidePanelHidden: Bool = false, isReading: Bool = false) {
         // One spelling per directory, so a trailing slash never makes a
         // second tab for the same place.
@@ -40,7 +44,7 @@ struct CockpitProject: Codable, Equatable {
         self.isReading = isReading
     }
 
-    private enum CodingKeys: String, CodingKey { case path, session, mode, sidePanelHidden, isReading }
+    private enum CodingKeys: String, CodingKey { case path, session, mode, sidePanelHidden, isReading, isAsleep }
 
     /// Files saved before the mode existed, or with one this build does not
     /// know, open in the orchestrator mode.
@@ -53,6 +57,7 @@ struct CockpitProject: Codable, Equatable {
             sidePanelHidden: (try? container.decodeIfPresent(Bool.self, forKey: .sidePanelHidden)) ?? false,
             isReading: (try? container.decodeIfPresent(Bool.self, forKey: .isReading)) ?? true
         )
+        isAsleep = (try? container.decodeIfPresent(Bool.self, forKey: .isAsleep)) ?? false
     }
 
     var name: String { URL(fileURLWithPath: path).lastPathComponent }
@@ -74,6 +79,23 @@ enum CockpitProjects {
         let project = CockpitProject(path: path, isReading: true)
         return projects.contains { $0.path == project.path } ? projects : projects + [project]
     }
+
+    /// How many closed projects are remembered for reopening.
+    static let closedLimit = 8
+
+    /// `closed` with `project` put first: the newest closed is the first
+    /// offered, each folder once.
+    static func remembering(_ project: CockpitProject, in closed: [CockpitProject]) -> [CockpitProject] {
+        var project = project
+        project.isAsleep = false
+        return Array(([project] + closed.filter { $0.path != project.path }).prefix(closedLimit))
+    }
+
+    /// The tab to show after the one at `index` went to sleep: the nearest
+    /// that is `awake`, or nil when none is.
+    static func nearestAwake(to index: Int, awake: [Bool]) -> Int? {
+        awake.indices.filter { awake[$0] && $0 != index }.min { abs($0 - index) < abs($1 - index) }
+    }
 }
 
 /// What the cockpit remembers between launches: the tabs, which one was in
@@ -82,6 +104,9 @@ enum CockpitProjects {
 struct CockpitState: Codable, Equatable {
     var projects: [CockpitProject] = []
     var selected = 0
+    /// Projects closed lately, newest first, each with its conversation: the
+    /// "+" offers them back as they were. Absent in files saved before it.
+    var closed: [CockpitProject]?
 
     static var defaultURL: URL { Vitra.supportDirectory.appendingPathComponent("cockpit.json") }
 
@@ -129,7 +154,7 @@ struct CockpitState: Codable, Equatable {
             return isUUID ? project : CockpitProject(path: project.path, mode: project.mode, sidePanelHidden: project.sidePanelHidden, isReading: project.isReading)
         }
         let last = max(projects.count - 1, 0)
-        return CockpitState(projects: projects, selected: min(max(selected, 0), last))
+        return CockpitState(projects: projects, selected: min(max(selected, 0), last), closed: closed)
     }
 }
 

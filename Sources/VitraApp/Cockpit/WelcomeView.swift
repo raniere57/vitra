@@ -168,3 +168,44 @@ private final class PrimaryButton: NSButton {
         addCursorRect(bounds, cursor: .pointingHand)
     }
 }
+
+/// What the stage shows for a project put to sleep: its name, what that
+/// means, and the one thing to do.
+final class SleepingView: NSView {
+    private let title = NSTextField.label("", font: CockpitStyle.ui(20, .semibold), color: CockpitStyle.text)
+
+    init(target: AnyObject?, action: Selector) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = CockpitStyle.ground.cgColor
+
+        let moon = NSImageView()
+        moon.image = NSImage(systemSymbolName: "moon.zzz", accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 34, weight: .light))
+        moon.contentTintColor = CockpitStyle.muted
+        let note = NSTextField.label(
+            "Nada deste projeto está rodando. A conversa do maestro está guardada e volta de onde parou.",
+            font: CockpitStyle.ui(13), color: CockpitStyle.muted
+        )
+        note.alignment = .center
+        let wake = PrimaryButton(title: "Retomar projeto", keys: "", target: target, action: action)
+
+        let column = NSStackView(views: [moon, title, note, wake])
+        column.orientation = .vertical
+        column.alignment = .centerX
+        column.spacing = CockpitStyle.Space.lg
+        column.setCustomSpacing(CockpitStyle.Space.md, after: title)
+        column.setCustomSpacing(CockpitStyle.Space.xxl, after: note)
+        column.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(column)
+        NSLayoutConstraint.activate([
+            column.centerXAnchor.constraint(equalTo: centerXAnchor),
+            column.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -40),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    func show(_ name: String) { title.stringValue = "\(name) está suspenso" }
+}

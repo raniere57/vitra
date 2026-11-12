@@ -19,11 +19,20 @@ final class CockpitTabBar: NSView {
         /// Prompts in the project's Fila: "+3" after the worker count, the
         /// first thing the bar gives up when tight.
         var queued = 0
+        /// Put to sleep: nothing of it runs until the tab is clicked.
+        var isAsleep = false
+        /// The project's folder, for the tooltip.
+        var path = ""
     }
 
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
     var onAdd: (() -> Void)?
+    /// A project closed lately, picked from the "+": its folder.
+    var onReopen: ((String) -> Void)?
+    var onSleep: ((Int) -> Void)?
+    var onReveal: ((Int) -> Void)?
+    private var recent: [String] = []
 
     private let tabs = NSStackView()
     private let add = NSButton(title: "", target: nil, action: nil)
@@ -57,6 +66,8 @@ final class CockpitTabBar: NSView {
             let view = TabView(tab, isSelected: index == selected)
             view.onClick = { [weak self] in self?.onSelect?(index) }
             view.onClose = { [weak self] in self?.onClose?(index) }
+            view.onSleep = { [weak self] in self?.onSleep?(index) }
+            view.onReveal = { [weak self] in self?.onReveal?(index) }
             self.tabs.addArrangedSubview(view)
         }
         self.tabs.addArrangedSubview(add)
@@ -97,7 +108,41 @@ final class CockpitTabBar: NSView {
         if chipRow.isHidden != hides { chipRow.isHidden = hides }
     }
 
-    @objc private func addProject(_ sender: Any?) { onAdd?() }
+    /// The folders of the projects closed lately, newest first.
+    func show(recent: [String]) { self.recent = recent }
+
+    /// With projects closed lately, the "+" offers them back before the
+    /// folder picker; with none it goes straight to the picker.
+    @objc private func addProject(_ sender: Any?) {
+        guard !recent.isEmpty else {
+            onAdd?()
+            return
+        }
+        let menu = NSMenu()
+        let header = NSMenuItem(title: "Reabrir de onde parou", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        for path in recent {
+            let item = NSMenuItem(title: URL(fileURLWithPath: path).lastPathComponent, action: #selector(reopen(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = path
+            item.toolTip = (path as NSString).abbreviatingWithTildeInPath
+            item.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil)
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let pick = NSMenuItem(title: "Escolher pasta…", action: #selector(pickFolder(_:)), keyEquivalent: "")
+        pick.target = self
+        pick.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        menu.addItem(pick)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: add.bounds.maxY + CockpitStyle.Space.xs), in: add)
+    }
+
+    @objc private func reopen(_ sender: NSMenuItem) {
+        if let path = sender.representedObject as? String { onReopen?(path) }
+    }
+
+    @objc private func pickFolder(_ sender: Any?) { onAdd?() }
 
     private func build() {
         add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
@@ -140,8 +185,11 @@ private final class TabView: NSView {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     var onClick: (() -> Void)?
     var onClose: (() -> Void)?
+    var onSleep: (() -> Void)?
+    var onReveal: (() -> Void)?
 
     private let isSelected: Bool
+    private let closeButton = NSButton(title: "", target: nil, action: nil)
     private var isHovered = false
     private var pulsingDot: NSView?
 
@@ -159,7 +207,15 @@ private final class TabView: NSView {
         )
         name.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         var views: [NSView] = [name]
-        if tab.running > 0 || tab.callsForYou || tab.maestroWorking || tab.finishedUnseen {
+        if tab.isAsleep {
+            // Asleep says so before anything else: a moon, and the name faded.
+            name.textColor = CockpitStyle.muted.withAlphaComponent(0.6)
+            let moon = NSImageView()
+            moon.image = NSImage(systemSymbolName: "moon.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 9, weight: .regular))
+            moon.contentTintColor = CockpitStyle.muted.withAlphaComponent(0.6)
+            views = [moon, name]
+        } else if tab.running > 0 || tab.callsForYou || tab.maestroWorking || tab.finishedUnseen {
             // One meaning per look: steady amber is work going on; pulsing
             // amber is a permission asked; pulsing green is a turn that ended
             // and has not been seen. A project that is idle and seen has no dot.
@@ -191,17 +247,50 @@ private final class TabView: NSView {
             widthAnchor.constraint(lessThanOrEqualToConstant: 220),
         ])
 
-        let close = NSMenuItem(title: "Fechar projeto", action: #selector(closeProject(_:)), keyEquivalent: "")
-        close.target = self
+        // The x a tab shows under the pointer, over its trailing edge.
+        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 8, weight: .semibold))
+        closeButton.isBordered = false
+        closeButton.contentTintColor = CockpitStyle.muted
+        closeButton.target = self
+        closeButton.action = #selector(closeProject(_:))
+        closeButton.toolTip = "Fechar projeto"
+        closeButton.setAccessibilityLabel("Fechar \(tab.name)")
+        closeButton.wantsLayer = true
+        closeButton.layer?.cornerRadius = 8
+        closeButton.isHidden = true
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(closeButton)
+        NSLayoutConstraint.activate([
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CockpitStyle.Space.xs),
+            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 16),
+            closeButton.heightAnchor.constraint(equalToConstant: 16),
+        ])
+
         menu = NSMenu()
-        menu?.addItem(close)
+        let items: [(String, String, Selector)] = [
+            (tab.isAsleep ? "Retomar projeto" : "Suspender projeto", tab.isAsleep ? "play" : "moon", #selector(sleepProject(_:))),
+            ("Mostrar no Finder", "folder", #selector(revealProject(_:))),
+            ("Fechar projeto", "xmark", #selector(closeProject(_:))),
+        ]
+        for (index, (title, symbol, action)) in items.enumerated() {
+            if index == items.count - 1 { menu?.addItem(.separator()) }
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            menu?.addItem(item)
+        }
+        let folder = (tab.path as NSString).abbreviatingWithTildeInPath
+        toolTip = tab.isAsleep ? "\(folder) · suspenso, clique para retomar" : folder
 
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         let running = tab.running > 0 ? ", \(tab.running) rodando" : ""
+        let asleep = tab.isAsleep ? ", suspenso" : ""
         let waiting = tab.callsForYou ? ", pede permissão" : (tab.finishedUnseen ? ", terminou e aguarda você" : (tab.maestroWorking ? ", trabalhando" : ""))
         let queued = tab.queued > 0 ? ", \(tab.queued) na fila" : ""
-        setAccessibilityLabel(tab.name + running + waiting + queued)
+        setAccessibilityLabel(tab.name + asleep + running + waiting + queued)
         hasQueue = tab.queued > 0
         paint()
     }
@@ -279,10 +368,15 @@ private final class TabView: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     @objc private func closeProject(_ sender: Any?) { onClose?() }
+    @objc private func sleepProject(_ sender: Any?) { onSleep?() }
+    @objc private func revealProject(_ sender: Any?) { onReveal?() }
 
     private func paint() {
         let fill = isSelected ? CockpitStyle.tab : (isHovered ? CockpitStyle.raised : .clear)
         layer?.backgroundColor = fill.cgColor
+        // The x sits on the tab's own colour, so the name ends under it cleanly.
+        closeButton.isHidden = !isHovered
+        closeButton.layer?.backgroundColor = (isSelected ? CockpitStyle.tab : CockpitStyle.raised).cgColor
         layer?.borderWidth = isSelected ? 1 : 0
         layer?.borderColor = CockpitStyle.controlLine.cgColor
     }

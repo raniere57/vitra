@@ -217,6 +217,7 @@ enum UISnapshot {
                   queued: project.promptQueue.count),
             .init(name: "hapto", running: 0, finishedUnseen: AttentionPolicy.isCalling(attention["hapto"], now: fixtures.now)),
             .init(name: "docs", running: 0),
+            .init(name: "farol", running: 0, isAsleep: true),
         ], selected: 0)
         bar.show(chips: ProviderChips.derive(runs: fixtures.chipRuns(), usage: fixtures.subscription, now: fixtures.now))
         bar.show(costToday: WorkerBoard.totals(runs, since: Calendar.current.startOfDay(for: fixtures.now)).cost)
