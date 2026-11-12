@@ -17,6 +17,10 @@ struct TranscriptChunk: Equatable, Sendable {
     private(set) var leadingImageSources: [String] = []
     /// A command's answer met before any command here.
     private(set) var leadingCommandOutput: String?
+    /// Prompts typed mid-turn that the maestro has not taken yet.
+    private(set) var queued: [UserMessage] = []
+    /// Prompts taken here whose enqueue is in an older stretch.
+    private(set) var leadingUnqueues: [String?] = []
     private(set) var firstTime: Date?
     private(set) var lastTime: Date?
 
@@ -102,7 +106,18 @@ struct TranscriptChunk: Equatable, Sendable {
             append(.divider(ReadingDivider(id: id, time: time, kind: .compacted)), at: time, allowsPause: false)
         case let .turnDuration(id, time, seconds):
             append(.worked(Worked(id: id, time: time, seconds: seconds)), at: time, allowsPause: false)
+        case let .queued(id, time, text):
+            queued.append(UserMessage(id: id, time: time, text: text, isQueued: true))
+        case let .unqueued(text):
+            if !unqueue(text) { leadingUnqueues.append(text) }
         }
+    }
+
+    /// Takes a waiting prompt out: the one saying `text`, else the oldest.
+    private mutating func unqueue(_ text: String?) -> Bool {
+        guard !queued.isEmpty else { return false }
+        queued.remove(at: text.flatMap { text in queued.firstIndex { $0.text == text } } ?? 0)
+        return true
     }
 
     private mutating func append(_ item: TranscriptItem, at time: Date?, allowsPause: Bool = true) {
@@ -169,6 +184,10 @@ struct TranscriptChunk: Equatable, Sendable {
         if let output = newer.leadingCommandOutput, !result.attachOutput(output), result.leadingCommandOutput == nil {
             result.leadingCommandOutput = output
         }
+        for text in newer.leadingUnqueues where !result.unqueue(text) {
+            result.leadingUnqueues.append(text)
+        }
+        result.queued += newer.queued
         // Thoughts that open the newer stretch: in the older one's run of
         // calls if it ends with one, else pending for the next run.
         var pending = result.pendingThought

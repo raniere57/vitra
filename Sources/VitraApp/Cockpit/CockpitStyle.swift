@@ -35,19 +35,23 @@ extension NSView {
 
     /// A small rounded plate holding `views` in a row: one fact of a header,
     /// set apart from its neighbours instead of run together with them.
-    static func pill(_ views: [NSView]) -> NSView {
+    /// `flat`: the same row with no plate under it, for facts that sit in a
+    /// line of their own kind and need no box each.
+    static func pill(_ views: [NSView], flat: Bool = false) -> NSView {
         let row = NSStackView(views: views)
         row.spacing = CockpitStyle.Space.sm
         row.translatesAutoresizingMaskIntoConstraints = false
         let pill = filled(CockpitStyle.raised, cornerRadius: CockpitStyle.Radius.control)
-        pill.layer?.borderWidth = 1
+        pill.layer?.borderWidth = flat ? 0 : 1
         pill.layer?.borderColor = CockpitStyle.raisedLine.cgColor
+        if flat { pill.layer?.backgroundColor = nil }
+        let side = flat ? CockpitStyle.Space.xs : CockpitStyle.Space.md
         pill.addSubview(row)
         NSLayoutConstraint.activate([
             row.topAnchor.constraint(equalTo: pill.topAnchor, constant: CockpitStyle.Space.xs),
             row.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -CockpitStyle.Space.xs),
-            row.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: CockpitStyle.Space.md),
-            row.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -CockpitStyle.Space.md),
+            row.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: side),
+            row.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -side),
         ])
         return pill
     }

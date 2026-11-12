@@ -124,6 +124,10 @@ final class UserRowView: LeituraRowView {
         guard case let .item(.user(message)) = row else { return }
         let time = Self.time(message.time)
         let title = NSMutableAttributedString(string: "VOCÊ", attributes: [.font: CockpitStyle.micro, .foregroundColor: CockpitStyle.accent, .kern: 0.6])
+        if message.isQueued {
+            title.append(NSAttributedString(string: "  ·  na fila", attributes: [.font: CockpitStyle.meta, .foregroundColor: CockpitStyle.muted]))
+        }
+        alphaValue = message.isQueued ? 0.62 : 1
         if !time.isEmpty {
             title.append(NSAttributedString(string: "  ·  " + time, attributes: [.font: CockpitStyle.meta, .foregroundColor: ReadingStyle.faint]))
         }
@@ -147,8 +151,11 @@ final class UserRowView: LeituraRowView {
         let column = ReadingStyle.column(in: bounds.width)
         let inner = Self.innerWidth(message, column: column.width)
         let blockHeight = bounds.height - Self.top - Self.bottom
-        block.frame = NSRect(x: column.x, y: Self.top, width: inner + 2 * Self.padH, height: blockHeight)
-        let x = column.x + Self.padH
+        // What the user said sits at the right of the column, as in any
+        // conversation: at a glance, right is you and left is the maestro.
+        let blockX = column.x + column.width - (inner + 2 * Self.padH)
+        block.frame = NSRect(x: blockX, y: Self.top, width: inner + 2 * Self.padH, height: blockHeight)
+        let x = blockX + Self.padH
         var y = Self.top + Self.padV
         label.frame = NSRect(x: x, y: y, width: inner, height: Self.header)
         y += Self.header + Self.headerGap
@@ -308,6 +315,10 @@ final class ThumbnailView: NSView {
     /// From the saved file when there is one, else from the transcript's bytes.
     nonisolated static func load(_ ref: ImageRef) -> NSImage? {
         if let path = ref.path, let image = NSImage(contentsOfFile: path) { return image }
+        // A file that is no image (a log, a zip) shows as its icon.
+        if let path = ref.path, ref.base64 == nil, FileManager.default.fileExists(atPath: path) {
+            return NSWorkspace.shared.icon(forFile: path)
+        }
         if let base64 = ref.base64, let data = Data(base64Encoded: base64) { return NSImage(data: data) }
         return nil
     }

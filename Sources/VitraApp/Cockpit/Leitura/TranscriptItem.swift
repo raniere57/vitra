@@ -50,6 +50,8 @@ struct UserMessage: Equatable, Sendable {
     var time: Date?
     var text: String
     var images: [ImageRef] = []
+    /// Typed while the maestro worked and not read by it yet.
+    var isQueued = false
 }
 
 /// A pasted image: the file Claude Code saved it to when the log says so,
@@ -58,6 +60,26 @@ struct ImageRef: Equatable, Sendable {
     var path: String?
     var base64: String?
     var mediaType: String?
+
+    /// A file to open the image from: the one Claude Code saved, else the
+    /// log's bytes written once to the temporary folder.
+    func fileURL() -> URL? {
+        if let path, FileManager.default.fileExists(atPath: path) { return URL(fileURLWithPath: path) }
+        guard let base64, let data = Data(base64Encoded: base64) else { return nil }
+        // FNV-1a over the bytes' head and their count: the same image, the same file.
+        let hash = data.prefix(8192).reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
+        let kind = mediaType?.split(separator: "/").last.map(String.init) ?? "png"
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-leitura", isDirectory: true)
+        let url = folder.appendingPathComponent("imagem-\(String(hash, radix: 36))-\(data.count).\(kind)")
+        if FileManager.default.fileExists(atPath: url.path) { return url }
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
+    }
 }
 
 /// A piece of the maestro's reply in its own words, as Markdown. Consecutive

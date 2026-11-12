@@ -36,6 +36,7 @@ final class LeituraView: NSView {
     private var reader: TranscriptReader?
     private var session: String?
     private var items: [TranscriptItem] = []
+    private var queued: [UserMessage] = []
     private var hasOlder = false
     private var isLoadingOlder = false
     private var isMissing = false
@@ -97,8 +98,9 @@ final class LeituraView: NSView {
         list.onBottomChange = { [weak self] atBottom in if atBottom { self?.pill.isHidden = true } }
         list.onNearTop = { [weak self] in self?.loadOlder() }
         list.context.openImage = { [weak self] image in
-            if let path = image.path { self?.onOpenLink?(URL(fileURLWithPath: path)) }
+            if let url = image.fileURL() { self?.onOpenLink?(url) }
         }
+        composer.onOpenAttachment = { [weak self] path in self?.onOpenLink?(URL(fileURLWithPath: path)) }
         composer.onHeightChange = { [weak self] in self?.fitComposer() }
         composer.onEscape = { [weak self] in self?.focusList() }
         composer.onSend = { [weak self] text in
@@ -157,6 +159,7 @@ final class LeituraView: NSView {
         session = current
         reader?.follow(false)
         items = []
+        queued = []
         hasOlder = false
         hasLanded = false
         guard let current else {
@@ -177,6 +180,7 @@ final class LeituraView: NSView {
         hasOlder = update.hasOlder
         showMissing(update.isMissing && update.items.isEmpty)
         items = update.items
+        queued = update.queued
         refresh()
     }
 
@@ -198,7 +202,8 @@ final class LeituraView: NSView {
             if case let .activity(activity)? = items.last { current = activity.running?.summary }
             rows.append(.live(LiveState(since: since, current: current)))
         }
-        return rows
+        // What waits for the maestro comes last: it is read after the turn.
+        return rows + queued.map { .item(.user($0)) }
     }
 
     private func loadOlder() {
@@ -251,8 +256,9 @@ final class LeituraView: NSView {
     // MARK: - For the snapshot tool
 
     /// Shows `items` as if read from a transcript, with no file and no reader.
-    func showForSnapshot(_ items: [TranscriptItem], attention state: AttentionState?, since: Date?, missing: Bool = false) {
+    func showForSnapshot(_ items: [TranscriptItem], queued: [UserMessage] = [], attention state: AttentionState?, since: Date?, missing: Bool = false) {
         self.items = items
+        self.queued = queued
         isVisible = true
         showMissing(missing)
         attention = state

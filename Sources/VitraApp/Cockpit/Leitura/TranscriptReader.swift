@@ -16,6 +16,8 @@ import os
 final class TranscriptReader: @unchecked Sendable {
     struct Update: Sendable, Equatable {
         var items: [TranscriptItem]
+        /// Prompts waiting in Claude Code's queue, oldest first.
+        var queued: [UserMessage] = []
         /// There is more of the conversation before the first item.
         var hasOlder: Bool
         /// The file is not there (yet): the session never wrote it.
@@ -200,7 +202,7 @@ final class TranscriptReader: @unchecked Sendable {
     }
 
     private func publish() {
-        let update = Update(items: chunk.items, hasOlder: start > 0, isMissing: fileSize() == nil)
+        let update = Update(items: chunk.items, queued: chunk.queued, hasOlder: start > 0, isMissing: fileSize() == nil)
         let onUpdate = onUpdate
         DispatchQueue.main.async { MainActor.assumeIsolated { onUpdate(update) } }
     }

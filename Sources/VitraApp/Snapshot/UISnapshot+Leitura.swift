@@ -42,7 +42,7 @@ extension UISnapshot {
             freezeClock(project.leitura, at: context.fixtures.now)
             project.isReading = true
             project.applyReading()
-            project.leitura.showForSnapshot(items, attention: state, since: since)
+            project.leitura.showForSnapshot(items, queued: [UserMessage(id: "q1", time: Date(), text: "e depois confere o cursor nos botões", isQueued: true)], attention: state, since: since)
             project.leitura.list.context.open(activity: "a2")
             if let draft { project.leitura.composer.message = draft }
             project.pulseSwitch(state == .needsPermission)

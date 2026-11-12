@@ -159,13 +159,13 @@ final class ProjectView: NSView {
     }()
     private(set) var terminal: TerminalView?
     private let usage = NSTextField.label(font: CockpitStyle.meta, color: CockpitStyle.muted)
-    private lazy var usagePill = NSView.pill([usage])
+    private lazy var usagePill = NSView.pill([usage], flat: true)
     private let attention = NSTextField.label(font: CockpitStyle.label, color: CockpitStyle.accent)
     private lazy var attentionPill = NSView.pill([attention])
-    private let model = NSTextField.label("claude", font: CockpitStyle.label, color: CockpitStyle.accent)
+    private let model = NSTextField.label("claude", font: CockpitStyle.meta, color: CockpitStyle.text)
     private let effort = NSTextField.label(font: CockpitStyle.meta, color: CockpitStyle.muted)
-    private let session = NSTextField.label(font: CockpitStyle.label, color: CockpitStyle.text)
-    private lazy var sessionPill = NSView.pill([session])
+    private let session = NSTextField.label(font: CockpitStyle.meta, color: CockpitStyle.muted)
+    private lazy var sessionPill = NSView.pill([session], flat: true)
     private let branch = NSTextField.label(font: CockpitStyle.meta, color: CockpitStyle.code)
     private lazy var branchPill: NSView = {
         let icon = NSImageView(image: NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "branch") ?? NSImage())
@@ -173,9 +173,8 @@ final class ProjectView: NSView {
         icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
         icon.widthAnchor.constraint(equalToConstant: CockpitStyle.iconSize).isActive = true
         icon.heightAnchor.constraint(equalToConstant: CockpitStyle.iconSize).isActive = true
-        return NSView.pill([icon, branch])
+        return NSView.pill([icon, branch], flat: true)
     }()
-    private lazy var titleLabel = NSTextField.label(mode.title, font: CockpitStyle.title, color: CockpitStyle.text)
     /// Whether the maestro delegates or works alone; persisted by the window.
     private(set) var mode: MaestroMode
     /// The maestro was cut off mid-turn when the app last went away: its
@@ -190,11 +189,14 @@ final class ProjectView: NSView {
         let control = NSSegmentedControl(labels: ["Orquestrador", "Solo"], trackingMode: .selectOne, target: self, action: #selector(modeChosen(_:)))
         control.controlSize = .small
         control.font = CockpitStyle.meta
+        // Quiet: the mode is a setting, changed rarely. The accent is kept
+        // for the Terminal · Leitura switch beside it, used all the time.
+        control.selectedSegmentBezelColor = CockpitStyle.raisedLine
         control.selectedSegment = mode == .solo ? 1 : 0
         control.toolTip = "Orquestrador delega a workers; Solo trabalha sozinho, sem as ferramentas de agentes"
         return control
     }()
-    private lazy var modelPill = NSView.pill([model, effort])
+    private lazy var modelPill = NSView.pill([model, effort], flat: true)
     /// The maestro's session name, when it has told one; what the header can
     /// hide is decided by `fitHeader`.
     private var sessionName: String?
@@ -325,7 +327,6 @@ final class ProjectView: NSView {
         // window its first segment is abbreviated.
         modeControl.setLabel(fit.abbreviatesMode ? "Orq." : "Orquestrador", forSegment: 0)
         showReadingSwitch(compact: fit.compactsReading)
-        titleLabel.isHidden = !fit.showsTitle
         usagePill.isHidden = !fit.showsUsage
         sessionPill.isHidden = !fit.showsSession
         place.isHidden = !fit.showsPlace
@@ -336,7 +337,7 @@ final class ProjectView: NSView {
     /// What each plate of the header takes, as `HeaderFit` reads it.
     var headerWidths: HeaderFit.Widths {
         HeaderFit.Widths(
-            title: titleLabel.fittingSize.width,
+            title: 0,
             modeFull: modeWidths.full,
             modeShort: modeWidths.short,
             readingFull: readingWidths.full,
@@ -546,12 +547,31 @@ final class ProjectView: NSView {
         if hidden, (window?.firstResponder as? NSView)?.isDescendant(of: side) == true { focusTerminal() }
     }
 
+    /// The narrow panel's width. In Leitura the conversation is a column of
+    /// fixed measure, so the room it leaves at its sides goes to the panel
+    /// instead of lying empty; in the terminal the panel keeps its own width.
+    private var narrowSideWidth: CGFloat {
+        guard isReading, bounds.width > 0 else { return CockpitStyle.workersWidth }
+        let reading = ReadingStyle.maxColumn + 2 * Self.readingMargin
+        return max(CockpitStyle.workersWidth, min(bounds.width - reading, bounds.width * Self.wideShare))
+    }
+
+    /// The room kept at each side of the reading column.
+    private static let readingMargin: CGFloat = 36
+
+    /// Follows the window: the reading column's leftover changes with it.
+    override func layout() {
+        if let narrow = sideNarrow, narrow.constant != narrowSideWidth { narrow.constant = narrowSideWidth }
+        super.layout()
+    }
+
     /// One of the panel's three widths: none, narrow for the lists, half the
     /// window for a page or a file.
     private func applySideWidth() {
         let isWide = tabs.selected.isWide != isWidthFlipped
         // Off before on: two held at once cannot be satisfied.
         [sideNarrow, sideWide, sideCollapsed].forEach { $0?.isActive = false }
+        sideNarrow?.constant = narrowSideWidth
         (isSideHidden ? sideCollapsed : (isWide ? sideWide : sideNarrow))?.isActive = true
         side.isHidden = isSideHidden
         divider.isHidden = isSideHidden
@@ -1095,7 +1115,6 @@ final class ProjectView: NSView {
     private func apply(_ chosen: MaestroMode) {
         mode = chosen
         modeControl.selectedSegment = chosen == .solo ? 1 : 0
-        titleLabel.stringValue = chosen.title
         onModeChange?(chosen)
         fitHeader()
     }
@@ -1140,7 +1159,6 @@ final class ProjectView: NSView {
     // MARK: - Layout
 
     private func build() {
-        let title = titleLabel
         // Each fact on a plate of its own: which model and how hard it is
         // thinking, how much of the week is spent, and on the far side where
         // the project is and on which branch.
@@ -1149,7 +1167,7 @@ final class ProjectView: NSView {
         usagePill.isHidden = true
         attentionPill.isHidden = true
         attentionPill.toolTip = "O maestro parou e espera por você"
-        for view in [title, usage, attention, model, effort, branch, modelPill, usagePill, attentionPill, branchPill] as [NSView] {
+        for view in [usage, attention, model, effort, branch, modelPill, usagePill, attentionPill, branchPill] as [NSView] {
             view.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
         // What gives way, in this order: the path (head-truncated, lowest
@@ -1170,10 +1188,12 @@ final class ProjectView: NSView {
         updatePill.onUpdate = { [weak self] in self?.updateMaestro(asking: true) }
         updatePill.onCancel = { [weak self] in self?.cancelArmedUpdate() }
         readingSwitch.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let header = MaestroHeader(views: [title, modeControl, readingSwitch, modelPill, attentionPill, updatePill, usagePill, sessionPill, NSView(), place, branchPill])
+        // Left to right: what you switch, then what is true now (model, week,
+        // session — one quiet line, no box each), then what needs you, which
+        // alone is boxed. The mode switch names the mode: no title repeats it.
+        let header = MaestroHeader(views: [modeControl, readingSwitch, modelPill, usagePill, sessionPill, attentionPill, updatePill, NSView(), place, branchPill])
         self.header = header
         header.spacing = CockpitStyle.Space.md
-        header.setCustomSpacing(CockpitStyle.Space.lg, after: title)
         // The header never widens its pane: it would push the side panel off
         // the window. It clips for the instant before `fitHeader`, told the
         // real width, hides what does not fit.

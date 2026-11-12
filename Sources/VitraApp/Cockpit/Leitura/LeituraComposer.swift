@@ -15,10 +15,14 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     var onQueue: ((String) -> Void)?
     var onEscape: (() -> Void)?
     var onHeightChange: (() -> Void)?
+    /// A pasted image or file was clicked: its path, to open in the preview.
+    var onOpenAttachment: ((String) -> Void)?
 
     static let verticalPad: CGFloat = 12
     static let fieldPad: CGFloat = 10
     static let maxLines = 8
+    static let attachment: CGFloat = 56
+    static let attachmentGap: CGFloat = 8
 
     private let field = NSView.filled(CockpitStyle.raised, cornerRadius: 12)
     private let scroll = NSScrollView()
@@ -28,6 +32,9 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     private let queue = NSButton()
     private let status = NSTextField.label(font: CockpitStyle.caption, color: CockpitStyle.dangerText)
     private(set) var isWorking = false
+    /// What was pasted and is still named in the text, with its preview.
+    private var attachments: [(path: String, view: ThumbnailView)] = []
+    private var attachmentsHeight: CGFloat { attachments.isEmpty ? 0 : Self.attachment + Self.attachmentGap }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -37,6 +44,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         field.layer?.borderWidth = 1
         field.layer?.borderColor = CockpitStyle.controlLine.cgColor
         text.delegate = self
+        text.onAttach = { [weak self] paths in self?.attach(paths) }
         text.font = ReadingStyle.body
         text.textColor = ReadingStyle.text
         text.insertionPointColor = CockpitStyle.accent
@@ -106,6 +114,28 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         }
     }
 
+    // MARK: - Pasted images and files
+
+    private func attach(_ paths: [String]) {
+        for path in paths where !attachments.contains(where: { $0.path == path }) {
+            let view = ThumbnailView(image: ImageRef(path: path))
+            view.onClick = { [weak self] in self?.onOpenAttachment?(path) }
+            addSubview(view)
+            attachments.append((path, view))
+        }
+    }
+
+    /// A preview lives while its path is in the text: delete the path and
+    /// the preview goes with it.
+    private func dropMissingAttachments() {
+        let string = text.string
+        attachments.removeAll { attachment in
+            let isGone = !string.contains(ShellQuoting.quote(attachment.path))
+            if isGone { attachment.view.removeFromSuperview() }
+            return isGone
+        }
+    }
+
     // MARK: - Size
 
     private var lineHeight: CGFloat { ceil(ReadingStyle.body.ascender - ReadingStyle.body.descender + ReadingStyle.body.leading) + 1 }
@@ -125,7 +155,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     func preferredHeight(width: CGFloat) -> CGFloat {
         let column = ReadingStyle.column(in: width).width
         let problem: CGFloat = status.isHidden ? 0 : 18
-        return Self.verticalPad + Self.fieldPad + textHeight(width: column - 2 * Self.fieldPad) + 8 + 26 + Self.fieldPad + problem + Self.verticalPad
+        return Self.verticalPad + Self.fieldPad + attachmentsHeight + textHeight(width: column - 2 * Self.fieldPad) + 8 + 26 + Self.fieldPad + problem + Self.verticalPad
     }
 
     override func layout() {
@@ -136,7 +166,14 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         let problem: CGFloat = status.isHidden ? 0 : 18
         let fieldHeight = bounds.height - 2 * Self.verticalPad - problem
         field.frame = NSRect(x: column.x, y: Self.verticalPad, width: column.width, height: fieldHeight)
-        scroll.frame = NSRect(x: column.x + Self.fieldPad, y: Self.verticalPad + Self.fieldPad, width: inner, height: textHeight)
+        var thumbX = column.x + Self.fieldPad
+        for attachment in attachments {
+            let width = Self.attachment * ThumbnailView.aspect
+            attachment.view.frame = NSRect(x: thumbX, y: Self.verticalPad + Self.fieldPad, width: width, height: Self.attachment)
+            attachment.view.isHidden = thumbX + width > field.frame.maxX - Self.fieldPad
+            thumbX += width + Self.attachmentGap
+        }
+        scroll.frame = NSRect(x: column.x + Self.fieldPad, y: Self.verticalPad + Self.fieldPad + attachmentsHeight, width: inner, height: textHeight)
         text.frame.size.width = inner
         placeholder.frame = NSRect(x: scroll.frame.minX, y: scroll.frame.minY - 1, width: inner, height: lineHeight)
         placeholder.isHidden = !text.string.isEmpty
@@ -156,6 +193,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         if !status.isHidden { showProblem(nil) }
+        dropMissingAttachments()
         placeholder.isHidden = !text.string.isEmpty
         needsLayout = true
         onHeightChange?()
@@ -198,12 +236,17 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
 /// it does in the terminal (`PasteboardAttachments`); anything else pastes as
 /// plain text.
 final class ComposerTextView: NSTextView {
+    /// The paths a paste just put in the text.
+    var onAttach: (([String]) -> Void)?
+
     override func paste(_ sender: Any?) {
         let found = PasteboardAttachments.read(from: .general, store: AttachmentStore())
         guard !found.isEmpty else {
             pasteAsPlainText(sender)
             return
         }
+        // Before the text changes: the previews are checked against it.
+        onAttach?(found.map(\.path))
         insertText(ShellQuoting.join(found.map(\.path)) + " ", replacementRange: selectedRange())
     }
 }

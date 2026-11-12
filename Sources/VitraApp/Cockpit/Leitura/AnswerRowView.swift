@@ -7,7 +7,9 @@ import AppKit
 /// Markdown as it was written.
 final class AnswerRowView: LeituraRowView {
     static let top: CGFloat = 12
-    static let bottom: CGFloat = 10
+    /// Room under the answer for "copiar resposta": on its own line, so it
+    /// never lies over the text it copies.
+    static let bottom: CGFloat = 30
     static let segmentGap: CGFloat = 14
 
     private var texts: [ReadingTextView] = []
@@ -94,7 +96,7 @@ final class AnswerRowView: LeituraRowView {
         }
         copy.sizeToFit()
         let width = copy.frame.width + 12
-        copy.frame = NSRect(x: column.x + column.width - width, y: max(Self.top - 10, 0), width: width, height: 20)
+        copy.frame = NSRect(x: column.x - 4, y: bounds.height - 24, width: width, height: 20)
     }
 
     override func refreshHighlights() {

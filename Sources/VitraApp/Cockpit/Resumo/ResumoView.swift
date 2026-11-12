@@ -697,6 +697,7 @@ private final class Sparkline: NSView {
 /// One trabalho: its title, time and cost, its outcome and chain; opened, each
 /// step with who did it, why, what it cost and what came of it.
 private final class TrabalhoRowView: NSView {
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     var onClick: (() -> Void)?
     private(set) var trabalhoID: String?
     var showsSeparator = true { didSet { separator.isHidden = !showsSeparator } }

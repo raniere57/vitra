@@ -83,7 +83,9 @@ struct HeaderFit: Equatable {
     /// The width these choices take: the plates, the gaps between those
     /// shown, the spacer, and the path and session at their minimum.
     func needs(_ widths: Widths) -> CGFloat {
-        var plates: [CGFloat] = showsTitle ? [widths.title] : []
+        // A header with no title (zero) has neither its plate nor its gap.
+        let hasTitle = showsTitle && widths.title > 0
+        var plates: [CGFloat] = hasTitle ? [widths.title] : []
         plates.append(abbreviatesMode ? widths.modeShort : widths.modeFull)
         if widths.readingFull > 0 { plates.append(compactsReading ? widths.readingCompact : widths.readingFull) }
         plates.append(widths.model)
@@ -94,7 +96,7 @@ struct HeaderFit: Equatable {
         plates.append(0) // the spacer
         if showsPlace { plates.append(Self.placeMinWidth) }
         if showsBranch, let branch = widths.branch { plates.append(branch) }
-        let gaps = CGFloat(plates.count - 1) * Self.gap + (showsTitle ? Self.titleGap - Self.gap : 0)
+        let gaps = CGFloat(plates.count - 1) * Self.gap + (hasTitle ? Self.titleGap - Self.gap : 0)
         return 2 * Self.inset + plates.reduce(0, +) + gaps
     }
 }

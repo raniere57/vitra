@@ -649,6 +649,7 @@ private final class QueueRow: NSTableCellView, NSTextFieldDelegate {
 /// The collapsed drawer: "fila · 3", "pausada" in amber when held, and for
 /// a moment after a send what went.
 private final class QueuePill: NSView {
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     var onClick: (() -> Void)?
     private let label = NSTextField.label(font: CockpitStyle.label, color: CockpitStyle.text)
     private let paused = NSTextField.label("pausada", font: CockpitStyle.label, color: CockpitStyle.accent)

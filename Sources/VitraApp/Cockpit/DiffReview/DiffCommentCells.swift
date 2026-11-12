@@ -36,6 +36,7 @@ enum CommentPlate {
 /// A saved comment under its line: its text, which reopens it for editing
 /// when clicked, and an × that removes it.
 final class DiffNoteCell: NSView {
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     static let identifier = NSUserInterfaceItemIdentifier("diff.note")
 
     var onEdit: (() -> Void)?

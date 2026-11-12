@@ -188,6 +188,7 @@ final class WorkersPanel: NSView {
 /// One worker: a dot for its state, what it is doing, and its numbers.
 /// Clicking it opens the worker's answer underneath.
 final class WorkerRowView: NSView {
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     var onClick: (() -> Void)?
     var onReview: ((Delivery) -> Void)? {
         get { actions.onReview }

@@ -137,6 +137,7 @@ final class CockpitTabBar: NSView {
 
 /// One project's tab: its name, and a lit dot with a count while workers run.
 private final class TabView: NSView {
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     var onClick: (() -> Void)?
     var onClose: (() -> Void)?
 
@@ -315,6 +316,7 @@ private final class TabView: NSView {
 /// A provider fact on a small plate: amber when notable, red when nearly out,
 /// muted for a CLI that has hit its limit.
 private final class ChipView: NSView {
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     init(_ chip: ProviderChip) {
         super.init(frame: .zero)
         wantsLayer = true

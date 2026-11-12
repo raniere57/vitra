@@ -101,6 +101,8 @@ extension ProjectView {
             leitura.setVisible(false)
         }
         pulseSwitch(isReading && Attention.load(for: project.path)?.state == .needsPermission)
+        // The panel takes the room the reading column does not use.
+        needsLayout = true
     }
 
     /// Whether Leitura was ever made; asking `leitura` itself would make it.

@@ -43,8 +43,18 @@ final class LeituraContext {
     private(set) var openCalls: Set<String> = []
     private(set) var fullOutputs: Set<String> = []
 
-    func toggleActivity(_ id: String) { flip(id, in: &openActivities, row: id) }
-    func toggleCall(_ id: String, in row: String) { flip(id, in: &openCalls, row: row) }
+    // The set is changed first and the list told after: telling it from
+    // inside the change makes the table ask for the row's height, which reads
+    // the very set being written — an overlapping access, and Swift aborts.
+    func toggleActivity(_ id: String) {
+        Self.flip(id, in: &openActivities)
+        rowChanged?(id)
+    }
+
+    func toggleCall(_ id: String, in row: String) {
+        Self.flip(id, in: &openCalls)
+        rowChanged?(row)
+    }
     func showFullOutput(_ id: String, in row: String) {
         fullOutputs.insert(id)
         rowChanged?(row)
@@ -54,9 +64,8 @@ final class LeituraContext {
     func isOpen(call id: String) -> Bool { openCalls.contains(id) }
     func showsFull(call id: String) -> Bool { fullOutputs.contains(id) }
 
-    private func flip(_ id: String, in set: inout Set<String>, row: String) {
+    private static func flip(_ id: String, in set: inout Set<String>) {
         if set.contains(id) { set.remove(id) } else { set.insert(id) }
-        rowChanged?(row)
     }
 
     /// For the snapshot tool: rows shown opened.

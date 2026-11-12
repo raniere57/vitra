@@ -26,6 +26,11 @@ enum TranscriptLine {
         case toolResult(ToolResult)
         case compacted(id: String, time: Date?)
         case turnDuration(id: String, time: Date?, seconds: TimeInterval)
+        /// A prompt typed while the maestro worked, waiting for its turn.
+        case queued(id: String, time: Date?, text: String)
+        /// A waiting prompt left the queue: the one with this text, or the
+        /// oldest when nil. It comes back as a user entry when it was read.
+        case unqueued(text: String?)
     }
 
     /// How much of a tool's output is kept: enough for "mostrar tudo" to be
@@ -73,6 +78,8 @@ enum TranscriptLine {
             return systemEvents(entry, id: id, time: time)
         case "attachment":
             return queuedEvents(entry, id: id, time: time)
+        case "queue-operation":
+            return queueOperation(entry, time: time)
         default:
             return []
         }
@@ -165,6 +172,25 @@ enum TranscriptLine {
         let text = blocks.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined(separator: "\n")
         let images = blocks.compactMap { $0["type"] as? String == "image" ? image($0) : nil }
         return images.map { .userImage(id: id, time: time, $0) } + textEvents(text, id: id, time: time)
+    }
+
+    /// Claude Code's own queue: "enqueue" when a prompt is typed mid-turn,
+    /// "dequeue" or "remove" when it is taken. Background tasks use the same
+    /// queue for their notices, which are not the user's words.
+    private static func queueOperation(_ entry: [String: Any], time: Date?) -> [Event] {
+        let content = entry["content"] as? String
+        if content?.hasPrefix("<task-notification>") == true { return [] }
+        let text = content.map(UserText.clean)
+        switch entry["operation"] as? String {
+        case "enqueue":
+            guard let text, !text.isEmpty else { return [] }
+            let stamp = entry["timestamp"] as? String ?? ""
+            return [.queued(id: "queued-\(stamp)-\(text.utf8.count)", time: time, text: text)]
+        case "dequeue", "remove", "popAll":
+            return [.unqueued(text: text)]
+        default:
+            return []
+        }
     }
 
     // MARK: - What a user's text means
