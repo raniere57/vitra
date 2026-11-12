@@ -82,6 +82,12 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         tabBar.onAdd = { [weak self] in self?.openProject(nil) }
         tabBar.onReopen = { [weak self] in self?.open($0) }
         tabBar.onSleep = { [weak self] in self?.sleep(at: $0) }
+        tabBar.onMove = { [weak self] from, to in
+            guard let self else { return }
+            (self.projects, self.selected) = CockpitProjects.moving(self.projects, from: from, to: to, selected: self.selected)
+            self.save()
+            self.refresh()
+        }
         tabBar.onReveal = { [weak self] index in
             guard let self, self.projects.indices.contains(index) else { return }
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: self.projects[index].path)])

@@ -672,3 +672,14 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(CockpitProjects.nearestAwake(to: 0, awake: [true, false, true]) == 2)
     #expect(CockpitProjects.nearestAwake(to: 0, awake: [true, false]) == nil)
 }
+
+@Test func aDraggedTabMovesAndTheProjectInFrontStaysInFront() {
+    let projects = ["/a", "/b", "/c"].map { CockpitProject(path: $0) }
+    let moved = CockpitProjects.moving(projects, from: 0, to: 2, selected: 0)
+    #expect(moved.projects.map(\.path) == ["/b", "/c", "/a"])
+    #expect(moved.selected == 2)
+    let other = CockpitProjects.moving(projects, from: 2, to: 0, selected: 1)
+    #expect(other.projects.map(\.path) == ["/c", "/a", "/b"])
+    #expect(other.selected == 2)
+    #expect(CockpitProjects.moving(projects, from: 1, to: 1, selected: 0).projects == projects)
+}

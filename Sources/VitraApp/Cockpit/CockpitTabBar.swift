@@ -32,7 +32,11 @@ final class CockpitTabBar: NSView {
     var onReopen: ((String) -> Void)?
     var onSleep: ((Int) -> Void)?
     var onReveal: ((Int) -> Void)?
+    /// A tab dragged to another place: from which index to which.
+    var onMove: ((Int, Int) -> Void)?
     private var recent: [String] = []
+    /// Where a dragged tab would land.
+    private let dropMark = NSView.filled(CockpitStyle.accent, cornerRadius: 1)
 
     private let tabs = NSStackView()
     private let add = NSButton(title: "", target: nil, action: nil)
@@ -63,7 +67,9 @@ final class CockpitTabBar: NSView {
 
         self.tabs.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for (index, tab) in tabs.enumerated() {
-            let view = TabView(tab, isSelected: index == selected)
+            let view = TabView(tab, isSelected: index == selected, number: index + 1)
+            view.onDrag = { [weak self] point in self?.dragged(index, to: point) }
+            view.onDrop = { [weak self] point in self?.dropped(index, at: point) }
             view.onClick = { [weak self] in self?.onSelect?(index) }
             view.onClose = { [weak self] in self?.onClose?(index) }
             view.onSleep = { [weak self] in self?.onSleep?(index) }
@@ -106,6 +112,33 @@ final class CockpitTabBar: NSView {
         let needed = CockpitStyle.trafficLightInset + tabsBare + (showsQueue ? queueWidth : 0) + CockpitStyle.inset + chips + spend
         let hides = shownChips.isEmpty || needed > bounds.width
         if chipRow.isHidden != hides { chipRow.isHidden = hides }
+    }
+
+    // MARK: Reordering
+
+    /// Where the tab at `index` lands when let go at `point` (window
+    /// coordinates): before the first tab whose middle is past the pointer.
+    private func slot(for index: Int, at point: NSPoint) -> Int {
+        let x = tabs.convert(point, from: nil).x
+        let others = tabs.arrangedSubviews.compactMap { $0 as? TabView }.enumerated().filter { $0.offset != index }
+        return others.filter { $0.element.frame.midX < x }.count
+    }
+
+    private func dragged(_ index: Int, to point: NSPoint) {
+        let views = tabs.arrangedSubviews.compactMap { $0 as? TabView }
+        let target = slot(for: index, at: point)
+        let others = views.enumerated().filter { $0.offset != index }.map(\.element)
+        guard !others.isEmpty else { return }
+        let edge = target < others.count ? others[target].frame.minX - CockpitStyle.Space.xs / 2 : others[others.count - 1].frame.maxX + CockpitStyle.Space.xs / 2
+        let x = convert(NSPoint(x: edge, y: 0), from: tabs).x
+        dropMark.frame = NSRect(x: x - 1, y: (bounds.height - 18) / 2, width: 2, height: 18)
+        dropMark.isHidden = target == index
+    }
+
+    private func dropped(_ index: Int, at point: NSPoint) {
+        dropMark.isHidden = true
+        let target = slot(for: index, at: point)
+        if target != index { onMove?(index, target) }
     }
 
     /// The folders of the projects closed lately, newest first.
@@ -162,6 +195,9 @@ final class CockpitTabBar: NSView {
         spend.spacing = CockpitStyle.Space.md
         spend.setCustomSpacing(CockpitStyle.Space.lg, after: chipRow)
         let rule = NSView.rule(CockpitStyle.line)
+        dropMark.isHidden = true
+        dropMark.translatesAutoresizingMaskIntoConstraints = true
+        addSubview(dropMark)
         for view in [tabs, spend, rule] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -187,13 +223,23 @@ private final class TabView: NSView {
     var onClose: (() -> Void)?
     var onSleep: (() -> Void)?
     var onReveal: (() -> Void)?
+    /// The tab is being dragged, and where the pointer is in the window.
+    var onDrag: ((NSPoint) -> Void)?
+    var onDrop: ((NSPoint) -> Void)?
+    private var pressedAt: NSPoint?
+    private var isDragging = false
+    /// How far the pointer travels before a press is a drag, not a click.
+    private static let dragSlop: CGFloat = 6
+    /// Room kept at the selected tab's end for its x, so the x never sits on
+    /// the name and showing it never moves anything.
+    private static let closeSlot: CGFloat = 18
 
     private let isSelected: Bool
     private let closeButton = NSButton(title: "", target: nil, action: nil)
     private var isHovered = false
     private var pulsingDot: NSView?
 
-    init(_ tab: CockpitTabBar.Tab, isSelected: Bool) {
+    init(_ tab: CockpitTabBar.Tab, isSelected: Bool, number: Int = 0) {
         self.isSelected = isSelected
         super.init(frame: .zero)
         wantsLayer = true
@@ -242,12 +288,15 @@ private final class TabView: NSView {
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: CockpitStyle.rowHeight),
             row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CockpitStyle.Space.lg),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CockpitStyle.Space.lg),
+            row.trailingAnchor.constraint(
+                equalTo: trailingAnchor, constant: -(CockpitStyle.Space.lg + (isSelected ? Self.closeSlot : 0))
+            ),
             row.centerYAnchor.constraint(equalTo: centerYAnchor),
-            widthAnchor.constraint(lessThanOrEqualToConstant: 220),
+            widthAnchor.constraint(lessThanOrEqualToConstant: 240),
         ])
 
-        // The x a tab shows under the pointer, over its trailing edge.
+        // Only the tab in front has an x, in room of its own: a click meant to
+        // open another project can never land on a close.
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 8, weight: .semibold))
         closeButton.isBordered = false
@@ -262,7 +311,7 @@ private final class TabView: NSView {
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(closeButton)
         NSLayoutConstraint.activate([
-            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CockpitStyle.Space.xs),
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CockpitStyle.Space.md),
             closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             closeButton.widthAnchor.constraint(equalToConstant: 16),
             closeButton.heightAnchor.constraint(equalToConstant: 16),
@@ -282,7 +331,8 @@ private final class TabView: NSView {
             menu?.addItem(item)
         }
         let folder = (tab.path as NSString).abbreviatingWithTildeInPath
-        toolTip = tab.isAsleep ? "\(folder) · suspenso, clique para retomar" : folder
+        let chord = (1...9).contains(number) ? " · ⌘\(number)" : ""
+        toolTip = (tab.isAsleep ? "\(folder) · suspenso, clique para retomar" : folder) + chord
 
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
@@ -375,14 +425,41 @@ private final class TabView: NSView {
         let fill = isSelected ? CockpitStyle.tab : (isHovered ? CockpitStyle.raised : .clear)
         layer?.backgroundColor = fill.cgColor
         // The x sits on the tab's own colour, so the name ends under it cleanly.
-        closeButton.isHidden = !isHovered
-        closeButton.layer?.backgroundColor = (isSelected ? CockpitStyle.tab : CockpitStyle.raised).cgColor
+        closeButton.isHidden = !isSelected
+        closeButton.alphaValue = isHovered ? 1 : 0.45
         layer?.borderWidth = isSelected ? 1 : 0
         layer?.borderColor = CockpitStyle.controlLine.cgColor
     }
 
+    override func mouseDown(with event: NSEvent) {
+        pressedAt = event.locationInWindow
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let pressedAt else { return }
+        if !isDragging, abs(event.locationInWindow.x - pressedAt.x) > Self.dragSlop {
+            isDragging = true
+            alphaValue = 0.5
+        }
+        if isDragging { onDrag?(event.locationInWindow) }
+    }
+
     override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
+        defer {
+            pressedAt = nil
+            isDragging = false
+            alphaValue = 1
+        }
+        if isDragging {
+            onDrop?(event.locationInWindow)
+        } else if bounds.contains(convert(event.locationInWindow, from: nil)) {
+            onClick?()
+        }
+    }
+
+    /// The middle button closes, as in a browser.
+    override func otherMouseUp(with event: NSEvent) {
+        if event.buttonNumber == 2, bounds.contains(convert(event.locationInWindow, from: nil)) { onClose?() }
     }
 
     override func accessibilityPerformPress() -> Bool {

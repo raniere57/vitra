@@ -80,6 +80,17 @@ enum CockpitProjects {
         return projects.contains { $0.path == project.path } ? projects : projects + [project]
     }
 
+    /// `projects` with the one at `from` moved to sit at `to`, and where the
+    /// project that was at `selected` is afterwards.
+    static func moving(_ projects: [CockpitProject], from: Int, to: Int, selected: Int) -> (projects: [CockpitProject], selected: Int) {
+        guard projects.indices.contains(from), from != to else { return (projects, selected) }
+        var moved = projects
+        let project = moved.remove(at: from)
+        moved.insert(project, at: min(max(to, 0), moved.count))
+        let front = projects.indices.contains(selected) ? projects[selected].path : nil
+        return (moved, moved.firstIndex { $0.path == front } ?? selected)
+    }
+
     /// How many closed projects are remembered for reopening.
     static let closedLimit = 8
 
