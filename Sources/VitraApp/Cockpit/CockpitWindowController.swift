@@ -77,7 +77,9 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
 
         build()
-        tabBar.onSelect = { [weak self] in self?.select($0) }
+        // A click on a sleeping tab only shows it: waking is asked for, on
+        // its page or in the tab's menu, never the price of a stray click.
+        tabBar.onSelect = { [weak self] in self?.select($0, waking: false) }
         tabBar.onClose = { [weak self] in self?.close(at: $0) }
         tabBar.onAdd = { [weak self] in self?.openProject(nil) }
         tabBar.onReopen = { [weak self] in self?.open($0) }
@@ -237,7 +239,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     /// Shows the project the menu item's tag names, counting from zero.
     @objc func showProject(_ sender: NSMenuItem) {
-        if projects.indices.contains(sender.tag) { select(sender.tag) }
+        if projects.indices.contains(sender.tag) { select(sender.tag, waking: false) }
     }
 
     private func step(by offset: Int) {

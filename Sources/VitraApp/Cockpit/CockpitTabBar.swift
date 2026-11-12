@@ -332,7 +332,7 @@ private final class TabView: NSView {
         }
         let folder = (tab.path as NSString).abbreviatingWithTildeInPath
         let chord = (1...9).contains(number) ? " · ⌘\(number)" : ""
-        toolTip = (tab.isAsleep ? "\(folder) · suspenso, clique para retomar" : folder) + chord
+        toolTip = (tab.isAsleep ? "\(folder) · suspenso" : folder) + chord
 
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
