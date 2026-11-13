@@ -83,6 +83,7 @@ public enum Harness: String, Codable, Sendable, CaseIterable, Identifiable {
         directory: String?,
         in sessions: [AgentSession]
     ) -> AgentSession? {
+        let sessions = sessions.filter { $0.harness == self }
         switch self {
         case .claudeCode:
             return ClaudeSessionStore.matching(title: title, directory: directory, in: sessions)

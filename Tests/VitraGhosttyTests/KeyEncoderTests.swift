@@ -84,3 +84,20 @@ private let keyHome: UInt16 = 0x73
     // Cmd is the app's own modifier: Cmd-C must reach the menu, not the shell.
     #expect(try encoded(keyCode: keyC, modifiers: .command, unshifted: 0x63) == "")
 }
+
+/// What "enviar agora" sends: Claude Code's Ctrl+Return, as the terminal
+/// encodes it in each keyboard mode the program may have asked for.
+@Test func controlReturnIsToldApartFromReturnOnceTheProgramAsksForIt() throws {
+    let plain = try encoded(keyCode: keyReturn, modifiers: .control, text: "\r", unshifted: 13)
+    let kitty = try encoded(keyCode: keyReturn, modifiers: .control, text: "\r", unshifted: 13, after: "\u{1b}[>1u")
+    let other = try encoded(keyCode: keyReturn, modifiers: .control, text: "\r", unshifted: 13, after: "\u{1b}[>4;2m")
+    let chordX = try encoded(keyCode: 7, modifiers: .control, text: "\u{18}", unshifted: 120)
+    let chordXKitty = try encoded(keyCode: 7, modifiers: .control, text: "\u{18}", unshifted: 120, after: "\u{1b}[>1u")
+    #expect(plain == "\u{1b}[27;5;13~")
+    #expect(other == "\u{1b}[27;5;13~")
+    // The chord's keys change shape too: sent as raw control bytes they are
+    // not what a program in the Kitty protocol is listening for.
+    #expect(chordX == "\u{18}")
+    #expect(chordXKitty == "\u{1b}[120;5u")
+    #expect(kitty == "\u{1b}[13;5u")
+}

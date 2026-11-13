@@ -14,6 +14,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD="$ROOT/.build/release"
 APP="$ROOT/dist/Vitra.app"
 VERSION="0.1.2"
+# A build number of its own each time: macOS caches an app's Dock icon by
+# identifier and version, and a build that once shipped without its icon
+# would keep the blank one for as long as the version stayed the same.
+BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -55,10 +59,18 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key>      <string>Vitra</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>$VERSION</string>
-    <key>CFBundleVersion</key>         <string>$VERSION</string>
+    <key>CFBundleVersion</key>         <string>$BUILD_NUMBER</string>
     <key>CFBundleIconFile</key>        <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
     <key>NSHighResolutionCapable</key> <true/>
+    <!-- The panel is a browser: it opens plain-http pages too (a dev server,
+         a router, an intranet box by its address). Web content only; the
+         app's own requests stay under App Transport Security. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+      <key>NSAllowsArbitraryLoadsInWebContent</key> <true/>
+      <key>NSAllowsLocalNetworking</key>            <true/>
+    </dict>
     <key>NSSupportsAutomaticTermination</key> <false/>
     <key>NSSupportsSuddenTermination</key>    <false/>
     <!-- Viewer of last resort: this is what lets "vitra open" hand any file to
@@ -79,10 +91,19 @@ PLIST
 
 [[ -f "$ROOT/dist/AppIcon.icns" ]] && cp "$ROOT/dist/AppIcon.icns" "$APP/Contents/Resources/"
 
-# Ad-hoc signature. Without any signature at all, macOS refuses to launch an
-# arm64 binary outright rather than merely warning about it.
-log "signing ad-hoc"
-codesign --force --deep --sign - "$APP" 2>&1 | grep -v "replacing existing signature" || true
+# Signed with the "Vitra Dev" certificate when the keychain has one, so the
+# app keeps the same identity from build to build and macOS keeps the
+# permissions it was given (Screen Recording above all). Ad-hoc otherwise:
+# without any signature at all, macOS refuses to launch an arm64 binary
+# outright rather than merely warning about it.
+IDENTITY="${VITRA_SIGN_IDENTITY:-Vitra Dev}"
+if security find-certificate -c "$IDENTITY" >/dev/null 2>&1 \
+  && codesign --force --deep --sign "$IDENTITY" "$APP" 2>/dev/null; then
+  log "signed as $IDENTITY"
+else
+  log "signing ad-hoc"
+  codesign --force --deep --sign - "$APP" 2>&1 | grep -v "replacing existing signature" || true
+fi
 
 log "built $APP ($(du -sh "$APP" | cut -f1))"
 

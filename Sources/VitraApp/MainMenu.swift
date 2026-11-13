@@ -33,6 +33,8 @@ enum MainMenu {
         let fileMenu = NSMenu(title: "File")
         fileMenu.addItem(withTitle: "New Window", action: #selector(AppDelegate.newWindow(_:)), keyEquivalent: "n")
         fileMenu.addItem(withTitle: "New Tab", action: #selector(AppDelegate.newWindowForTab(_:)), keyEquivalent: key("new_tab", keybindings))
+        let reopen = fileMenu.addItem(withTitle: "Reopen Closed Pane", action: #selector(AppDelegate.reopenClosedPane(_:)), keyEquivalent: "t")
+        reopen.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Split Right", action: #selector(AppDelegate.splitHorizontally(_:)), keyEquivalent: key("split_right", keybindings))
         let splitDown = fileMenu.addItem(withTitle: "Split Down", action: #selector(AppDelegate.splitVertically(_:)), keyEquivalent: key("split_right", keybindings))
@@ -105,6 +107,7 @@ enum MainMenu {
 
         let editMenuItem = NSMenuItem()
         let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a")

@@ -1,0 +1,5 @@
+# vendor/ is git-ignored, so a fresh worktree has no libghostty-vt and its
+# headers and cannot build. Link the vendored library and copy the generated
+# headers from the main checkout, where scripts/vendor-ghostty-vt.sh put them.
+link vendor/ghostty-vt
+copy Sources/CGhosttyVT/include/ghostty

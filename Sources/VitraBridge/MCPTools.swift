@@ -7,7 +7,8 @@ import Foundation
 /// the agent's MCP client would fail to start whenever Vitra happens to be
 /// closed.
 public enum MCPTools {
-    public static let all: [JSONValue] = [
+    /// The tools that act on the window: they are forwarded to the running app.
+    public static let panel: [JSONValue] = [
         tool(
             "preview_file",
             "Show a file in Vitra's side panel: images, PDFs, HTML, SVG, and text or source files. The panel opens if it is closed.",
@@ -16,20 +17,20 @@ public enum MCPTools {
         ),
         tool(
             "browser_open",
-            "Open a URL in Vitra's browser panel and wait for it to finish loading. Returns the final URL and page title.",
+            "Open a URL in your own tab of Vitra's browser and wait for it to finish loading. Returns the final URL and page title. Every agent has a tab of its own: what you open, click and type never disturbs another agent's page, nor theirs yours. A tab left untouched for 30 minutes is closed.",
             properties: ["url": string("URL to open. http, https, and file URLs are accepted.")],
             required: ["url"]
         ),
         tool(
             "browser_snapshot",
-            "List the interactive and text-bearing elements of the current page, each with a ref to use with browser_click and browser_type. Invisible elements are left out. Take a fresh snapshot after anything that changes the page.",
-            properties: [:],
+            "List the interactive and text-bearing elements of the current page, each with a ref to use with browser_click and browser_type. Invisible elements are left out. Elements inside the page's frames (an embedded player, a payment form) are listed under each frame with refs like f1e3, which click and type take as well. Take a fresh snapshot after anything that changes the page.",
+            properties: ["tab": otherTab],
             required: []
         ),
         tool(
             "browser_click",
             "Click the element with the given ref from the most recent snapshot. If the click navigates, this waits for the new page and reports where it landed.",
-            properties: ["ref": string("Element ref from browser_snapshot, such as e12.")],
+            properties: ["ref": string("Element ref from browser_snapshot, such as e12, or f1e3 for one inside a frame.")],
             required: ["ref"]
         ),
         tool(
@@ -63,24 +64,71 @@ public enum MCPTools {
         tool(
             "browser_screenshot",
             "Save a PNG of the current page to ~/.vitra/screenshots and return its path. Read the file to look at it.",
-            properties: [:],
+            properties: ["tab": otherTab],
             required: []
         ),
         tool(
             "browser_console",
             "Return recent console messages from the page, oldest first.",
-            properties: ["clear": ["type": "boolean", "description": "Empty the buffer after reading. Defaults to false."]],
+            properties: [
+                "clear": ["type": "boolean", "description": "Empty the buffer after reading. Defaults to false."],
+                "tab": otherTab,
+            ],
+            required: []
+        ),
+        tool(
+            "screen_capture",
+            "Save a PNG of the frontmost window of an app to ~/.vitra/screenshots and return its path; read the file to look at it. Names the app to shoot — \"Safari\", \"Simulator\", in any case — and with no app named, the whole main display. The window of that app that is on top is the one shot; panels and overlays are passed by. The first use asks the user for Screen Recording permission, which macOS only gives to a Vitra started after the permission was granted: ask the user to reopen it and try again.",
+            properties: ["app": string("Application whose window to capture, such as \"Safari\" or \"Simulator\". Leave it out for the whole screen.")],
+            required: []
+        ),
+        tool(
+            "terminal_read",
+            "Read the project's shared terminal: a shell in Vitra's Terminal tab that the user types in too. Returns its last lines, prompts, commands and output as they appear on screen. Use it when the user refers to something they ran or saw there. It runs nothing.",
+            properties: ["lines": ["type": "integer", "description": "How many trailing lines to return. Defaults to 80, at most 1000."]],
+            required: []
+        ),
+        tool(
+            "terminal_run",
+            "Type one command into the project's shared terminal and return what it printed. The user sees it run and can take over. For what the user should watch or will want to keep using — a dev server, a long build, a log being followed; for everything else use your own shell. Fails if a program is already running there. Only the maestro can use it: a worker reads the terminal but does not type in it.",
+            properties: [
+                "command": string("The command line to type, one line."),
+                "timeout_seconds": ["type": "integer", "description": "How long to wait for it to finish before returning what there is. Defaults to 60, at most 600. A command still running stays running."],
+            ],
+            required: ["command"]
+        ),
+        tool(
+            "browser_tabs",
+            "List the browser's tabs in this project: each one's id, whose it is, its page title and URL, and which is yours. Any agent may look at any tab — pass a tab's id as `tab` to browser_snapshot, browser_screenshot or browser_console — but only its owner can navigate, click or type in it.",
+            properties: [:],
             required: []
         ),
     ]
 
+    /// Looking is open to all; driving is not. Only the tools that read take this.
+    private static let otherTab: JSONValue = [
+        "type": "string",
+        "description": "Id of another agent's tab to look at, from browser_tabs. Leave out for your own tab.",
+    ]
+
+    /// The most a worker is served — an editing worker's set: the panel's
+    /// tools less the one that types in the shared terminal, which would be a
+    /// way round the list of commands the maestro allowed it. Read-only
+    /// workers and auditors get less; see `WorkerToolTier`.
+    public static let worker: [JSONValue] = worker(.editor)
+
+    /// A maestro working alone: the panel, the shared terminal and the notes, no agents.
+    public static let solo: [JSONValue] = panel + MemoryTools.all
+
+    public static let all: [JSONValue] = panel + AgentTools.all + MemoryTools.all
+
     public static let names: [String] = all.compactMap { $0["name"]?.stringValue }
 
-    private static func string(_ description: String) -> JSONValue {
+    static func string(_ description: String) -> JSONValue {
         ["type": "string", "description": .string(description)]
     }
 
-    private static func tool(
+    static func tool(
         _ name: String,
         _ description: String,
         properties: [String: JSONValue],

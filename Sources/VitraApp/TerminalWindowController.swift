@@ -18,6 +18,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     /// Panes still alive in this window, in creation order.
     private var panes: [TerminalView] = []
+    private weak var lastFocusedPane: TerminalView?
 
     /// Holds the split tree of panes. Everything about splitting happens inside
     /// this view, so opening the preview panel never disturbs the pane
@@ -858,7 +859,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
             self.refreshDirectory()
         }
         session.onBell = { NSSound.beep() }
-        pane.onFocused = { [weak self] in self?.refreshDirectory() }
+        pane.onFocused = { [weak self, weak pane] in
+            self?.lastFocusedPane = pane
+            self?.refreshDirectory()
+        }
         pane.onOpenLink = { [weak self] url, external in self?.open(url, external: external) }
         pane.onClose = { [weak self, weak pane] in
             guard let pane else { return }
@@ -935,6 +939,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
 
     var focusedPane: TerminalView? {
         if let responder = window?.firstResponder as? TerminalView { return responder }
+        if let lastFocusedPane, panes.contains(where: { $0 === lastFocusedPane }) { return lastFocusedPane }
         return panes.last
     }
 
@@ -1499,6 +1504,19 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSSp
     func closeFocusedPane() {
         guard let pane = focusedPane else { return }
         pane.session.terminate()
+    }
+
+    func focusedPaneLayout() -> Layout.Pane? {
+        guard let pane = focusedPane,
+              case let .pane(saved) = node(of: pane, sessions: Harness.allCases.flatMap { $0.recent().sessions })
+        else { return nil }
+        return saved
+    }
+
+    func reopen(_ saved: Layout.Pane) -> Bool {
+        guard let pane = splitFocusedPane(vertical: true, in: saved.directory) else { return false }
+        resume(saved, in: pane)
+        return true
     }
 
     // MARK: - Configuration

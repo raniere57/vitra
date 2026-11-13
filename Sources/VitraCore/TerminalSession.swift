@@ -28,7 +28,7 @@ public final class TerminalSession: @unchecked Sendable {
     public var onCommandStarted: (@Sendable () -> Void)?
     public var onExit: (@Sendable (Int32?) -> Void)?
 
-    private let pty: PTY
+    private let pty: any TerminalBackend
     private let queue: DispatchQueue
     private var redrawPending = false
 
@@ -39,7 +39,7 @@ public final class TerminalSession: @unchecked Sendable {
     private var selectionAnchor: GridPosition?
     private var selectionMode: SelectionMode = .cell
 
-    public init(
+    public convenience init(
         core: TerminalCore,
         executable: String = ShellEnvironment.loginShell(),
         arguments: [String] = ["-l"],
@@ -47,19 +47,30 @@ public final class TerminalSession: @unchecked Sendable {
         size: TerminalSize,
         workingDirectory: String? = nil
     ) throws {
-        self.core = core
-        self.size = size
-        self.queue = DispatchQueue(label: "dev.vitra.session", qos: .userInteractive)
-        self.pty = try PTY(
+        let pty = try PTY(
             executable: executable,
             arguments: arguments,
             environment: environment,
             size: size,
             workingDirectory: workingDirectory
         )
+        self.init(core: core, backend: pty, size: size)
+    }
+
+    /// A terminal over a child that already has somewhere to live — the
+    /// pty-host, for a terminal that must outlive the app.
+    public init(core: TerminalCore, backend: any TerminalBackend, size: TerminalSize) {
+        self.core = core
+        self.size = size
+        self.queue = DispatchQueue(label: "dev.vitra.session", qos: .userInteractive)
+        self.pty = backend
 
         core.onWritePTY = { [pty] bytes in
             // Query responses; the terminal is answering a program's probe.
+            // Not while replaying: those probes came from a program asking a
+            // terminal that has since gone, and the answers would arrive at
+            // the program now as if typed.
+            guard !pty.isReplaying else { return }
             try? pty.write(bytes)
         }
         core.onTitleChanged = { [weak self] title in
@@ -67,10 +78,9 @@ public final class TerminalSession: @unchecked Sendable {
             DispatchQueue.main.async { handler(title) }
         }
         core.onBell = { [weak self] in
-            guard let handler = self?.onBell else { return }
+            guard let self, !self.pty.isReplaying, let handler = self.onBell else { return }
             DispatchQueue.main.async { handler() }
         }
-
     }
 
     /// Where the foreground job is running, or the shell if nothing is.
@@ -227,6 +237,12 @@ public final class TerminalSession: @unchecked Sendable {
         }
     }
 
+    /// Everything on the terminal as plain text, scrollback included. Read on
+    /// the session's own queue: the screen is being written to there.
+    public func screenText() -> String {
+        queue.sync { core.screenText() }
+    }
+
     /// The selected text, read synchronously because the clipboard needs it now.
     public func selectedText() -> String? {
         queue.sync { core.selectedText() }
@@ -286,6 +302,8 @@ public final class TerminalSession: @unchecked Sendable {
     /// Paths are resolved against the foreground job's working directory, so a
     /// program can ask for a file by the name it just wrote.
     private func scanForPreviewRequests(_ bytes: UnsafeRawBufferPointer) {
+        // A replay is history: the files it asked for were shown back then.
+        guard !pty.isReplaying else { return }
         guard onPreviewRequest != nil || onCommandFinished != nil || onCommandStarted != nil else { return }
         oscScanner.scan(bytes) { [weak self] payload in
             guard let self else { return }
@@ -326,6 +344,12 @@ public final class TerminalSession: @unchecked Sendable {
 
     public func terminate() {
         pty.terminate()
+    }
+
+    /// Lets go of the child without ending it, when it lives somewhere that
+    /// outlives this process; otherwise the same as `terminate`.
+    public func detach() {
+        pty.detach()
     }
 
     private func handleExit() {

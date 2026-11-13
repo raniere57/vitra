@@ -1,0 +1,748 @@
+import AppKit
+import Foundation
+import Testing
+@testable import VitraApp
+import VitraCore
+@testable import VitraOrchestrator
+
+private let start = Date(timeIntervalSince1970: 1_000_000)
+
+private func run(
+    _ id: String = "0123abcd",
+    cli: WorkerCLI = .opencode,
+    model: String = "opencode/deepseek-v4.1-flash-free",
+    prompt: String = "Map the login flow.\nDetails follow.",
+    directory: String = "/work/vitra",
+    access: WorkerAccess = .read,
+    label: String? = nil,
+    state: Run.State = .running,
+    seconds: TimeInterval = 38,
+    output: WorkerOutput? = nil
+) -> Run {
+    Run(
+        id: id,
+        spec: WorkerSpec(cli: cli, model: model, prompt: prompt, directory: directory, access: access, label: label),
+        state: state,
+        pid: 4242,
+        started: start,
+        ended: state == .running ? nil : start.addingTimeInterval(seconds),
+        output: output,
+        errorTail: nil
+    )
+}
+
+private let now = start.addingTimeInterval(38)
+
+// A fixed offset, so the clock times in these tests do not depend on the machine.
+private let zone = TimeZone(secondsFromGMT: -3 * 3600)!
+
+/// A moment in `zone`, so a test can say when something happened in local time.
+private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int) -> Date {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = zone
+    return calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
+}
+
+// MARK: - Which runs belong to a project
+
+@Test func aProjectShowsTheRunsInItsDirectoryAndBelowIt() {
+    let project = CockpitProject(path: "/work/vitra")
+    let runs = [
+        run("aaaaaaaa", directory: "/work/vitra"),
+        run("bbbbbbbb", directory: "/work/vitra/.claude/worktrees/fix-login"),
+        run("cccccccc", directory: "/work/vitra-site"),
+        run("dddddddd", directory: "/work"),
+    ]
+    #expect(WorkerBoard.runs(runs, in: project).map(\.id) == ["aaaaaaaa", "bbbbbbbb"])
+}
+
+@Test func aWorkerBelongsToTheProjectWhoseMaestroSpawnedItWhereverItRuns() {
+    // A maestro often sends a worker to a git worktree kept somewhere else
+    // entirely. It is still that project's worker, and that project's panel
+    // is where the user looks for it.
+    let project = CockpitProject(path: "/work/hapto")
+    let elsewhere = Run(
+        id: "aaaaaaaa",
+        spec: WorkerSpec(cli: .claude, model: "sonnet", prompt: "x", directory: "/private/tmp/scratch/f3", effort: "high", project: "/work/hapto"),
+        state: .running, pid: 1, started: start, ended: nil, output: nil, errorTail: nil
+    )
+    let another = Run(
+        id: "bbbbbbbb",
+        // Runs inside this project's folder, but another project's maestro sent it.
+        spec: WorkerSpec(cli: .claude, model: "haiku", prompt: "x", directory: "/work/hapto/sub", effort: "low", project: "/work/site"),
+        state: .running, pid: 1, started: start, ended: nil, output: nil, errorTail: nil
+    )
+    #expect(WorkerBoard.runs([elsewhere, another], in: project).map(\.id) == ["aaaaaaaa"])
+    #expect(WorkerBoard.runs([elsewhere, another], in: CockpitProject(path: "/work/site")).map(\.id) == ["bbbbbbbb"])
+}
+
+@Test func aProjectIsNamedAfterItsFolder() {
+    #expect(CockpitProject(path: "/Users/x/Dev/megalink-site").name == "megalink-site")
+    #expect(CockpitProject(path: "/Users/x/Dev/megalink-site/").name == "megalink-site")
+}
+
+// MARK: - Rows
+
+@Test func aRunningWorkerSaysWhatItMayDoInsteadOfWhatItCost() {
+    let row = WorkerBoard.row(run(access: .edit, label: "Corrigir validação"), now: now)
+    #expect(row.title == "Corrigir validação")
+    #expect(row.kind == .running)
+    #expect(row.stateText == "rodando")
+    #expect(row.meta == "deepseek-v4.1-flash-free · 10:46 · 38s · edita")
+    #expect(WorkerBoard.row(run(), now: now, timeZone: zone).meta == "deepseek-v4.1-flash-free · 10:46 · 38s · só leitura")
+}
+
+@Test func aWorkersEffortIsPartOfItsNameOnTheRow() {
+    let spec = WorkerSpec(cli: .claude, model: "haiku", prompt: "x", directory: "/work/vitra", effort: "low")
+    let haiku = Run(id: "0123abcd", spec: spec, state: .running, pid: 1, started: start, ended: nil, output: nil, errorTail: nil)
+    #expect(WorkerBoard.row(haiku, now: now, timeZone: zone).meta == "haiku (low) · 10:46 · 38s · só leitura")
+}
+
+@Test func aWorkerRowSaysWhoChoseItAndWhy() {
+    func meta(_ pick: PickReason?, picked: Bool = true, retryOf: String? = nil) -> String {
+        var worker = run()
+        worker.wasPicked = picked
+        worker.pick = pick
+        worker.retryOf = retryOf
+        return WorkerBoard.row(worker, now: now, timeZone: zone).meta
+    }
+    #expect(meta(PickReason(code: .lineup, text: "1st in your lineup for hard pieces", position: 1))
+        == "deepseek-v4.1-flash-free · 10:46 · 38s · só leitura · Vitra · 1º da sua escalação")
+    #expect(meta(PickReason(code: .lineup, text: "3rd", position: 3)).hasSuffix(" · Vitra · 3º da sua escalação"))
+    #expect(meta(PickReason(code: .learning, text: "learning turn")).hasSuffix(" · Vitra · vez de teste"))
+    #expect(meta(PickReason(code: .lineup, text: "2nd", position: 2, passed: "opus", cause: .quota))
+        .hasSuffix(" · Vitra · opus sem cota"))
+    #expect(meta(PickReason(code: .lineup, text: "2nd", position: 2, passed: "opus", cause: .slow)).hasSuffix(" · Vitra · opus lento"))
+    #expect(meta(PickReason(code: .record, text: "x")).hasSuffix(" · Vitra · fora da escalação, pelo histórico"))
+    #expect(meta(PickReason(code: .learning, text: "x"), retryOf: "aaaaaaaa").hasSuffix(" · Vitra, após falha · vez de teste"))
+    // Picked before reasons were kept, and named by hand.
+    #expect(meta(nil) == "deepseek-v4.1-flash-free · 10:46 · 38s · só leitura · Vitra")
+    #expect(meta(nil, picked: false) == "deepseek-v4.1-flash-free · 10:46 · 38s · só leitura")
+}
+
+@Test func theEscalacaoShowsEachTiersRecordAndItsDemotions() {
+    let opus = ModelCatalog.Offer(cli: .claude, model: "opus", effort: "low")
+    let sonnet = ModelCatalog.Offer(cli: .claude, model: "sonnet", effort: "high")
+    func rated(_ worker: ModelCatalog.Offer, _ score: Int, seconds: TimeInterval, _ difficulty: Difficulty) -> Run {
+        Run(
+            id: "0123abcd",
+            spec: WorkerSpec(cli: worker.cli, model: worker.model, prompt: "x", directory: "/w", kind: .implement,
+                             effort: worker.effort, difficulty: difficulty),
+            state: .finished(exitCode: 0), pid: 1, started: start, ended: start.addingTimeInterval(seconds),
+            output: WorkerOutput(text: "ok", isError: false, costUSD: 0), errorTail: nil,
+            rating: Rating(score: score, note: nil, rated: start)
+        )
+    }
+    let history = [rated(opus, 3, seconds: 60, .hard), rated(opus, 3, seconds: 80, .hard), rated(opus, 5, seconds: 10, .normal)]
+    let rows = LineupBoard.rows([opus, sonnet], difficulty: .hard, history: history)
+    #expect(rows.map(\.name) == ["opus (low)", "sonnet (high)"])
+    #expect(rows[0].score == "3.0")
+    #expect(rows[0].time == "1m 10s")
+    #expect(rows[0].demotion == "rebaixado: nota 3.7")
+    #expect(rows[1] == LineupRow(worker: sonnet, name: "sonnet (high)", score: "—", time: "—", demotion: nil))
+
+    #expect(LineupBoard.moved([opus, sonnet], from: 0, to: 2) == [sonnet, opus])
+    #expect(LineupBoard.moved([opus, sonnet], from: 1, to: 0) == [sonnet, opus])
+    #expect(LineupBoard.moved([opus, sonnet], from: 0, to: 1) == [opus, sonnet])
+    #expect(LineupBoard.addable([opus, sonnet], to: [opus]) == [sonnet])
+}
+
+@Test func aPickReasonSurvivesInTheRunRecord() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-pick-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fake = root.appendingPathComponent("fake-claude")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    try "#!/bin/sh\ncat >/dev/null\n".write(to: fake, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+    let executables = Executables(paths: [.claude: fake.path])
+    let reason = PickReason(code: .lineup, text: "2nd in your lineup: opus (low) is out of quota", position: 2, passed: "opus", cause: .quota)
+    let id = try Orchestrator(root: root.appendingPathComponent("runs"), executables: executables).spawn(
+        WorkerSpec(cli: .claude, model: "haiku", prompt: "go", directory: root.path, effort: "low"),
+        link: Orchestrator.SpawnLink(pick: reason)
+    )
+    // A fresh orchestrator, as after a restart, reads it back.
+    let read = try Orchestrator(root: root.appendingPathComponent("runs"), executables: executables).status(id)
+    #expect(read.pick == reason)
+    #expect(read.wasPicked)
+}
+
+@Test func aWorkersStartShowsTheClockWhenItStartedToday() {
+    #expect(WorkerBoard.startedText(at(2026, 11, 10, 10, 42), now: at(2026, 11, 10, 15, 0), timeZone: zone) == "10:42")
+}
+
+@Test func aWorkersStartShowsDayAndMonthWhenItStartedAnotherDayOfTheYear() {
+    #expect(WorkerBoard.startedText(at(2026, 11, 9, 22, 54), now: at(2026, 11, 10, 15, 0), timeZone: zone) == "09/11 22:54")
+}
+
+@Test func aWorkersStartShowsTheYearWhenItStartedInAnotherYear() {
+    #expect(WorkerBoard.startedText(at(2025, 11, 9, 22, 54), now: at(2026, 11, 10, 15, 0), timeZone: zone) == "09/11/2025 22:54")
+}
+
+@Test func aWorkerWithNoLabelIsTitledByTheFirstLineOfItsPrompt() {
+    #expect(WorkerBoard.row(run(), now: now).title == "Map the login flow.")
+    let long = String(repeating: "palavra ", count: 30)
+    let title = WorkerBoard.row(run(prompt: long), now: now).title
+    #expect(title.count == 60)
+    #expect(title.hasSuffix("…"))
+}
+
+@Test func aFinishedWorkerShowsTimeCostAndTokens() {
+    let output = WorkerOutput(text: "Done.\nSecond line.", isError: false, costUSD: 0.0234, inputTokens: 22_900, outputTokens: 186)
+    let row = WorkerBoard.row(run(state: .finished(exitCode: 0), seconds: 4, output: output), now: now, timeZone: zone)
+    #expect(row.kind == .done)
+    #expect(row.stateText == "pronto")
+    #expect(row.meta == "deepseek-v4.1-flash-free · 10:46 · 4s · $0.02 · 23k tokens")
+    #expect(row.detail == "Done.\nSecond line.")
+}
+
+@Test func aRatedDeliveryShowsItsScoreBesideItsState() {
+    let output = WorkerOutput(text: "Done.", isError: false)
+    var rated = run(state: .finished(exitCode: 0), seconds: 4, output: output)
+    rated.rating = Rating(score: 4, note: "left a TODO", rated: start)
+    #expect(WorkerBoard.row(rated, now: now).stateText == "pronto · 4/5")
+    #expect(WorkerBoard.row(run(state: .finished(exitCode: 0), seconds: 4, output: output), now: now).stateText == "pronto")
+
+    // It ran and finished, but the maestro judged it not what was asked: on
+    // the row that reads as a failure, which is what it was.
+    rated.rating = Rating(score: 2, note: "wrong file", rated: start)
+    let row = WorkerBoard.row(rated, now: now, timeZone: zone)
+    #expect(row.stateText == "insatisfatório · 2/5")
+    #expect(row.kind == .failed)
+    #expect(row.meta == "deepseek-v4.1-flash-free · 10:46 · 4s · wrong file")
+}
+
+@Test func aFailedWorkerShowsWhyOnItsMetaLine() {
+    let output = WorkerOutput(text: "Failed to authenticate: OAuth session expired and could not be refreshed\nmore", isError: true)
+    let failed = run(cli: .claude, model: "haiku", state: .finished(exitCode: 1), seconds: 2, output: output)
+    let row = WorkerBoard.row(failed, now: now, timeZone: zone)
+    #expect(row.kind == .failed)
+    #expect(row.stateText == "falhou")
+    // Cut at 68 characters: the row is one line wide.
+    #expect(row.meta == "haiku · 10:46 · 2s · Failed to authenticate: OAuth session expired and could not be refr…")
+}
+
+@Test func cancelledAndLostWorkersAreNamedAsSuch() {
+    #expect(WorkerBoard.row(run(state: .cancelled, seconds: 9), now: now).stateText == "cancelado")
+    #expect(WorkerBoard.row(run(state: .cancelled, seconds: 9), now: now).kind == .stopped)
+    #expect(WorkerBoard.row(run(state: .lost), now: now).stateText == "perdido")
+    #expect(WorkerBoard.row(run(state: .lost), now: now).kind == .failed)
+}
+
+@Test func durationsAndTokenCountsAreShortEnoughToScan() {
+    #expect(WorkerBoard.duration(4.4) == "4s")
+    #expect(WorkerBoard.duration(125) == "2m 05s")
+    #expect(WorkerBoard.duration(3725) == "1h 02m")
+    #expect(WorkerBoard.tokens(850) == "850 tokens")
+    #expect(WorkerBoard.tokens(23_086) == "23k tokens")
+    #expect(WorkerBoard.tokens(1_240_000) == "1.2M tokens")
+    #expect(WorkerBoard.money(0) == "$0.00")
+    #expect(WorkerBoard.money(0.416) == "$0.42")
+}
+
+// MARK: - Totals
+
+@Test func theHeaderCountsWorkersByState() {
+    let done = WorkerOutput(text: "ok", isError: false)
+    let failed = WorkerOutput(text: "no", isError: true)
+    let runs = [
+        run("aaaaaaaa"), run("bbbbbbbb"),
+        run("cccccccc", state: .finished(exitCode: 0), output: done),
+        run("dddddddd", state: .finished(exitCode: 1), output: failed),
+    ]
+    #expect(WorkerBoard.summary(runs, now: now) == "2 rodando · 1 pronto · 1 falhou")
+    #expect(WorkerBoard.summary([run("cccccccc", state: .finished(exitCode: 0), output: done)], now: now) == "1 pronto")
+    #expect(WorkerBoard.summary([], now: now) == "nenhum ainda")
+    #expect(WorkerBoard.runningCount(runs) == 2)
+}
+
+@Test func costIsSummedOnlyFromTheGivenMoment() {
+    let old = Run(
+        id: "eeeeeeee",
+        spec: WorkerSpec(cli: .claude, model: "haiku", prompt: "x", directory: "/work/vitra"),
+        state: .finished(exitCode: 0), pid: 1,
+        started: start.addingTimeInterval(-90_000), ended: start.addingTimeInterval(-89_000),
+        output: WorkerOutput(text: "", isError: false, costUSD: 5, inputTokens: 1000, outputTokens: 0),
+        errorTail: nil
+    )
+    let today = run(state: .finished(exitCode: 0), output: WorkerOutput(text: "", isError: false, costUSD: 0.25, inputTokens: 50_000, outputTokens: 8_000))
+    let totals = WorkerBoard.totals([old, today, run("ffffffff")], since: start.addingTimeInterval(-3600))
+    #expect(totals.cost == 0.25)
+    #expect(totals.tokens == 58_000)
+}
+
+// MARK: - What is remembered between launches
+
+@Test func theCockpitReopensWithTheSameTabsTheSameOneInFrontAndEachMaestrosConversation() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("cockpit-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: file) }
+
+    #expect(CockpitState.load(from: file) == CockpitState())
+
+    var state = CockpitState()
+    state.projects = CockpitProjects.adding("/work/vitra", to: state.projects)
+    state.projects = CockpitProjects.adding("/work/site/", to: state.projects)
+    state.projects = CockpitProjects.adding("/work/vitra/", to: state.projects)
+    #expect(state.projects.map(\.path) == ["/work/vitra", "/work/site"])
+
+    state.projects[1].session = "0f3c1a52-9d2e-4b7a-8c11-5e6f7a8b9c0d"
+    state.selected = 1
+    try state.save(to: file)
+
+    let reopened = CockpitState.load(from: file)
+    #expect(reopened == state)
+    #expect(reopened.selected == 1)
+    #expect(reopened.projects[1].session == "0f3c1a52-9d2e-4b7a-8c11-5e6f7a8b9c0d")
+    // Adding a project that is already open keeps what is known about it.
+    #expect(CockpitProjects.adding("/work/site", to: reopened.projects) == reopened.projects)
+}
+
+@Test func aListSavedByAnEarlierVersionStillOpens() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("cockpit-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: file) }
+    // The first cockpit wrote a bare array of paths.
+    try #"[{"path":"/work/vitra"},{"path":"/work/site"}]"#.write(to: file, atomically: true, encoding: .utf8)
+
+    let state = CockpitState.load(from: file)
+    #expect(state.projects.map(\.path) == ["/work/vitra", "/work/site"])
+    #expect(state.selected == 0)
+    #expect(state.projects.allSatisfy { $0.session == nil })
+}
+
+@Test func aDamagedStateCostsTheTabsNeverTheLaunch() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("cockpit-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: file) }
+    try "not json".write(to: file, atomically: true, encoding: .utf8)
+    #expect(CockpitState.load(from: file) == CockpitState())
+
+    // A tab index pointing past the tabs, and a session that is not an id:
+    // the one is brought back in range, the other is forgotten. The session
+    // ends up on a command line and must be nothing but a UUID.
+    try #"{"projects":[{"path":"/work/vitra","session":"x; rm -rf ~"}],"selected":7}"#
+        .write(to: file, atomically: true, encoding: .utf8)
+    let state = CockpitState.load(from: file)
+    #expect(state.selected == 0)
+    // A project saved before Leitura existed opens in it, as a new one does.
+    #expect(state.projects == [CockpitProject(path: "/work/vitra", isReading: true)])
+}
+
+// MARK: - The maestro
+
+@Test func aMaestroWithAConversationOnDiskResumesItAndOneWithoutStartsItUnderThatId() throws {
+    let conversations = FileManager.default.temporaryDirectory.appendingPathComponent("claude-projects-\(UUID().uuidString)")
+    let project = conversations.appendingPathComponent("-work-vitra")
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: conversations) }
+    let talked = "0f3c1a52-9d2e-4b7a-8c11-5e6f7a8b9c0d"
+    let silent = "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+    try "{}".write(to: project.appendingPathComponent(talked + ".jsonl"), atomically: true, encoding: .utf8)
+
+    // Resuming an id claude never wrote down is an error at its prompt, so the
+    // id is only resumed once there is a conversation behind it.
+    #expect(Maestro.conversation(talked, in: conversations) == .resume(talked))
+    #expect(Maestro.conversation(silent, in: conversations) == .new(silent))
+    #expect(Maestro.conversation(silent, in: conversations.appendingPathComponent("missing")) == .new(silent))
+}
+
+@Test func theMaestrosMCPConfigCarriesItsRole() throws {
+    // Without the role the helper serves a worker's tool set to the maestro.
+    let config = try #require(try JSONSerialization.jsonObject(with: Data(Maestro.mcpConfig(binary: "/Apps/Vitra").utf8)) as? [String: Any])
+    let vitra = try #require((config["mcpServers"] as? [String: Any])?["vitra"] as? [String: Any])
+
+    #expect(vitra["command"] as? String == "/Apps/Vitra")
+    #expect((vitra["env"] as? [String: String])?["VITRA_ROLE"] == "maestro")
+}
+
+@Test func theMaestroIsBriefedOnTheSharedNotes() {
+    // Workers are shown the notes automatically; the maestro must know to add to them.
+    #expect(Maestro.brief.contains("memory_add"))
+    #expect(Maestro.brief.contains("shared notes"))
+}
+
+@Test func soloIsLaunchedWithoutTheBriefAndWithTheSoloRole() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("maestro \(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let id = "0f3c1a52-9d2e-4b7a-8c11-5e6f7a8b9c0d"
+    let line = try Maestro.install(binary: "/b/Vitra", claude: "claude", conversation: .resume(id), mode: .solo, in: directory)
+    #expect(line == "claude --resume '\(id)' --mcp-config '\(directory.path)/mcp-solo.json' --settings '\(directory.path)/settings.json' --append-system-prompt-file '\(directory.path)/solo.md'\n")
+    #expect(!line.contains("brief.md"))
+    let solo = try String(contentsOf: directory.appendingPathComponent("solo.md"), encoding: .utf8)
+    #expect(solo.contains("do the work yourself"))
+    #expect(!solo.contains("agent_"))
+    let config = try String(contentsOf: directory.appendingPathComponent("mcp-solo.json"), encoding: .utf8)
+    #expect(config.contains(#""VITRA_ROLE":"solo""#))
+    // The orchestrator's files are not touched by a solo launch.
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("brief.md").path))
+}
+
+@Test func theModeIsRememberedPerProjectAndDefaultsToOrchestrator() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("cockpit-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: file) }
+    #expect(CockpitProject(path: "/a").mode == .orchestrator)
+    // A file from before the mode existed.
+    try Data(#"{"projects":[{"path":"/a","session":"not-a-uuid"}],"selected":0}"#.utf8).write(to: file)
+    #expect(CockpitState.load(from: file).projects[0].mode == .orchestrator)
+
+    let state = CockpitState(projects: [CockpitProject(path: "/a", mode: .solo), CockpitProject(path: "/b")], selected: 0)
+    try state.save(to: file)
+    let reopened = CockpitState.load(from: file)
+    #expect(reopened.projects.map(\.mode) == [.solo, .orchestrator])
+    #expect(MaestroMode.solo.title == "Solo")
+    #expect(MaestroMode.orchestrator.title == "Maestro")
+}
+
+@Test func theMaestroIsLaunchedWithVitrasToolsItsBriefAndItsConversation() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("maestro \(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let binary = "/Apps/My Vitra.app/Contents/MacOS/Vitra"
+    let id = "0f3c1a52-9d2e-4b7a-8c11-5e6f7a8b9c0d"
+    let files = "--mcp-config '\(directory.path)/mcp.json' --settings '\(directory.path)/settings.json' --append-system-prompt-file '\(directory.path)/brief.md'\n"
+
+    // Short enough to read: the JSON and the brief are in files, not typed out.
+    let fresh = try Maestro.install(binary: binary, claude: "claude --model opus", conversation: .new(id), in: directory)
+    #expect(fresh == "claude --model opus --session-id '\(id)' " + files)
+    let resumed = try Maestro.install(binary: binary, claude: "claude --model opus", conversation: .resume(id), in: directory)
+    #expect(resumed == "claude --model opus --resume '\(id)' " + files)
+
+    // The config names this very binary, spaces in its path and all.
+    let config = try Data(contentsOf: directory.appendingPathComponent("mcp.json"))
+    let parsed = try #require(try JSONSerialization.jsonObject(with: config) as? [String: [String: [String: Any]]])
+    #expect(parsed["mcpServers"]?["vitra"]?["command"] as? String == binary)
+    #expect(parsed["mcpServers"]?["vitra"]?["args"] as? [String] == ["mcp"])
+
+    let brief = try String(contentsOf: directory.appendingPathComponent("brief.md"), encoding: .utf8)
+    // Delegation is the rule, with the exceptions named rather than left to
+    // the maestro's sense of what counts as small.
+    #expect(brief.contains("Do the small things yourself"))
+    // Vitra picks the worker; the maestro tags the kind and passes commands.
+    #expect(brief.contains("Vitra picks the worker from the user's lineup"))
+    // It never tells the maestro to name a worker or a model.
+    #expect(!brief.contains("cli and model"))
+    #expect(!brief.contains("agent_models"))
+    #expect(!brief.contains("Name a worker"))
+    #expect(brief.contains("commands"))
+    #expect(!brief.contains("override"))
+    #expect(!brief.contains("call agent_scores"))
+    // A deploy is mostly waiting, and may be handed to a worker and rated;
+    // what cannot be undone in production stays with the maestro.
+    #expect(brief.contains("A deploy is a worker's job too"))
+    #expect(brief.contains("undone in production"))
+    #expect(brief.contains("just answer it"))
+    // What a failure is, and what to do about each kind of it.
+    #expect(brief.contains("did not do what was asked"))
+    #expect(brief.contains("another provider"))
+    // The audit gate: another provider reads the change first, and the
+    // maestro's own review starts from its verdict.
+    #expect(brief.contains("forty lines or more is audited"))
+    #expect(brief.contains("rate the auditor"))
+    #expect(brief.contains("agent_spawn"))
+    #expect(brief.contains("agent_wait"))
+
+    // The maestro is never reachable from outside this machine, whatever the
+    // user's own Claude settings say about other sessions.
+    let settings = try #require(
+        try JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("settings.json"))) as? [String: Any]
+    )
+    #expect(settings["remoteControlAtStartup"] as? Bool == false)
+    // The maestro's status line goes through Vitra, which reads the usage
+    // figures off it on the way to the user's own.
+    #expect(settings["statusLine"] as? [String: String] == [
+        "type": "command",
+        "command": "'/Apps/My Vitra.app/Contents/MacOS/Vitra' maestro-status",
+    ])
+
+    // And claude tells Vitra, through this very binary, which conversation the
+    // maestro is in every time that changes.
+    let hooks = try #require(settings["hooks"] as? [String: [[String: [[String: String]]]]])
+    #expect(hooks["SessionStart"]?.first?["hooks"]?.first == [
+        "type": "command",
+        "command": "'/Apps/My Vitra.app/Contents/MacOS/Vitra' maestro-session",
+    ])
+}
+
+@Test func theCockpitFollowsTheConversationTheMaestroIsActuallyIn() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("sessions-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let started = "0f3c1a52-9d2e-4b7a-8c11-5e6f7a8b9c0d"
+    let resumed = "32f5150d-53d4-4a1c-93ad-bc218b3e0a29"
+    let hook = { (session: String, cwd: String) in
+        Data(#"{"session_id":"\#(session)","cwd":"\#(cwd)","hook_event_name":"SessionStart","source":"resume"}"#.utf8)
+    }
+
+    #expect(Maestro.rememberedSession(for: "/work/hapto", in: directory) == nil)
+
+    // The maestro starts under the id the cockpit gave it…
+    Maestro.recordSession(hookInput: hook(started, "/work/hapto"), project: "/work/hapto", in: directory)
+    #expect(Maestro.rememberedSession(for: "/work/hapto", in: directory) == started)
+
+    // …and then the user picks another conversation with /resume. That one is
+    // where they are, and that one is what reopening must bring back.
+    Maestro.recordSession(hookInput: hook(resumed, "/work/hapto"), project: "/work/hapto", in: directory)
+    #expect(Maestro.rememberedSession(for: "/work/hapto", in: directory) == resumed)
+
+    // Each project keeps its own.
+    #expect(Maestro.rememberedSession(for: "/work/site", in: directory) == nil)
+    // With no project named, the folder claude is in stands for it.
+    Maestro.recordSession(hookInput: hook(started, "/work/site"), project: nil, in: directory)
+    #expect(Maestro.rememberedSession(for: "/work/site", in: directory) == started)
+
+    // Nothing that is not exactly a session id is ever remembered: it ends up
+    // on a command line.
+    Maestro.recordSession(hookInput: hook("x; rm -rf ~", "/work/hapto"), project: "/work/hapto", in: directory)
+    Maestro.recordSession(hookInput: Data("not json".utf8), project: "/work/hapto", in: directory)
+    Maestro.recordSession(hookInput: Data(), project: "/work/hapto", in: directory)
+    #expect(Maestro.rememberedSession(for: "/work/hapto", in: directory) == resumed)
+}
+
+// MARK: - The ranking and the side tabs
+
+@Test @MainActor func theTabsOfTheSideAreNamedAndOnlyAPageOrAFileTakesHalfTheWindow() {
+    #expect(SideTab.allCases.map(\.title) == ["Palco", "Workers", "Ranking", "Resumo", "Navegador", "Arquivos", "Git", "Terminal"])
+    #expect(SideTab.allCases.filter(\.isWide) == [.browser, .files, .terminal])
+    _ = NSApplication.shared
+    let tabs = SideTabs()
+    var chosen: [SideTab] = []
+    tabs.onSelect = { chosen.append($0) }
+    tabs.select(.git)
+    #expect(tabs.selected == .git)
+    // Selecting from code is not a click: nothing is reported back.
+    #expect(chosen.isEmpty)
+}
+
+// MARK: - Subscription usage
+
+@Test func theWeeklyUsageIsReadFromWhatClaudeHandsItsStatusLine() throws {
+    let input = Data(#"""
+    {"session_id":"x","model":{"display_name":"Fable 5.2"},
+     "rate_limits":{"five_hour":{"used_percentage":12.4,"resets_at":1794300000},"seven_day":{"used_percentage":43.6,"resets_at":1794800000}}}
+    """#.utf8)
+    let usage = try #require(MaestroStatus.usage(fromStatusInput: input, now: start))
+    #expect(usage.sevenDay == 43.6)
+    #expect(usage.fiveHour == 12.4)
+    #expect(usage.updated == start)
+
+    // Before the first reply of a session claude has no limits to report, and
+    // a status with none must not wipe the figure already on screen.
+    #expect(MaestroStatus.usage(fromStatusInput: Data(#"{"session_id":"x"}"#.utf8), now: start) == nil)
+    #expect(MaestroStatus.usage(fromStatusInput: Data("not json".utf8), now: start) == nil)
+}
+
+@Test func theUsageSurvivesBetweenTheStatusLineAndTheApp() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("usage-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: file) }
+    #expect(MaestroStatus.load(from: file) == nil)
+
+    let usage = SubscriptionUsage(sevenDay: 43.6, fiveHour: 12.4, updated: start)
+    MaestroStatus.save(usage, to: file)
+    #expect(MaestroStatus.load(from: file) == usage)
+}
+
+@Test func theBarShowsTheWeekRoundedAndWarnsAsItFills() {
+    let at = { (week: Double?) in SubscriptionUsage(sevenDay: week, fiveHour: nil, updated: start) }
+    #expect(MaestroStatus.label(at(43.6), now: start) == UsageLabel(text: "semana 44%", level: .calm))
+    #expect(MaestroStatus.label(at(75), now: start) == UsageLabel(text: "semana 75%", level: .warm))
+    #expect(MaestroStatus.label(at(92.2), now: start) == UsageLabel(text: "semana 92%", level: .hot))
+    #expect(MaestroStatus.label(at(nil), now: start) == nil)
+    #expect(MaestroStatus.label(nil, now: start) == nil)
+    // A figure from days ago is not the week's usage any more; better none.
+    #expect(MaestroStatus.label(at(43.6), now: start.addingTimeInterval(49 * 3600)) == nil)
+}
+
+@Test func theUsersOwnStatusLineStillRunsAndTheMaestrosNeverCallsItself() throws {
+    let settings = FileManager.default.temporaryDirectory.appendingPathComponent("settings-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: settings) }
+    let ours = "'/Apps/Vitra.app/Contents/MacOS/Vitra' maestro-status"
+
+    #expect(MaestroStatus.userStatusCommand(settings: settings, ours: ours) == nil)
+
+    try #"{"statusLine":{"type":"command","command":"bash \"/x/caveman-statusline.sh\""}}"#
+        .write(to: settings, atomically: true, encoding: .utf8)
+    #expect(MaestroStatus.userStatusCommand(settings: settings, ours: ours) == #"bash "/x/caveman-statusline.sh""#)
+
+    // Should the user's settings ever name the maestro's own command, running
+    // it from itself would never end.
+    try #"{"statusLine":{"type":"command","command":"'/Apps/Vitra.app/Contents/MacOS/Vitra' maestro-status"}}"#
+        .write(to: settings, atomically: true, encoding: .utf8)
+    #expect(MaestroStatus.userStatusCommand(settings: settings, ours: ours) == nil)
+}
+
+@Test @MainActor func quittingTakesAHeldKeyNotATap() {
+    let began = Date(timeIntervalSince1970: 100)
+    #expect(!QuitHold.isLongEnough(from: began, to: began.addingTimeInterval(0.2)))
+    #expect(QuitHold.isLongEnough(from: began, to: began.addingTimeInterval(QuitHold.holdFor)))
+}
+
+@Test func theMaestrosModelAndEffortAreReadFromItsStatusLineAndKeptPerProject() throws {
+    let input = Data(#"{"model":{"id":"claude-fable-5-2","display_name":"Fable 5.2"},"cwd":"/work/hapto"}"#.utf8)
+    // The effort is not always in what claude sends; the user's setting stands in.
+    #expect(MaestroStatus.model(fromStatusInput: input, fallbackEffort: "high") == MaestroModel(name: "Fable 5.2", effort: "high"))
+    let withEffort = Data(#"{"model":{"display_name":"Opus 5.5"},"effort":{"level":"xhigh"}}"#.utf8)
+    #expect(MaestroStatus.model(fromStatusInput: withEffort, fallbackEffort: "high") == MaestroModel(name: "Opus 5.5", effort: "xhigh"))
+    #expect(MaestroStatus.model(fromStatusInput: Data("{}".utf8), fallbackEffort: "high") == nil)
+
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("model-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    MaestroStatus.note(MaestroModel(name: "Fable 5.2", effort: "high"), for: "/work/hapto", in: directory)
+    #expect(MaestroStatus.model(for: "/work/hapto", in: directory) == MaestroModel(name: "Fable 5.2", effort: "high"))
+    #expect(MaestroStatus.model(for: "/work/site", in: directory) == nil)
+}
+
+@Test func aSessionsNameIsTheLastCustomTitleElseTheGeneratedOne() {
+    let custom = #"{"type":"custom-title","customTitle":"revisão do PR 61","sessionId":"s1"}"#
+    let generated = #"{"type":"agent-name","agentName":"quero revisar o PR","sessionId":"s1"}"#
+    let message = #"{"type":"assistant","message":{"content":"olá"}}"#
+
+    #expect(SessionName.name(inTail: Data(generated.utf8)) == "quero revisar o PR")
+    #expect(SessionName.name(inTail: Data(custom.utf8)) == "revisão do PR 61")
+    // Both present: the custom title wins whichever comes last.
+    #expect(SessionName.name(inTail: Data([generated, message, custom].joined(separator: "\n").utf8)) == "revisão do PR 61")
+    #expect(SessionName.name(inTail: Data([custom, generated].joined(separator: "\n").utf8)) == "revisão do PR 61")
+    #expect(SessionName.name(inTail: Data(message.utf8)) == nil)
+    #expect(SessionName.name(inTail: Data()) == nil)
+}
+
+@Test func aPartialFirstLineOfTheTailIsSkipped() {
+    let custom = #"{"type":"custom-title","customTitle":"revisão do PR 61","sessionId":"s1"}"#
+    // The tail was cut mid-line: the fragment is not JSON and must not be read.
+    let cut = #"{"type":"agent-name","agentName":"quero rev"#
+    let tail = [cut, #"{"type":"assistant"}"#, custom].joined(separator: "\n")
+    #expect(SessionName.name(inTail: Data(tail.utf8)) == "revisão do PR 61")
+    #expect(SessionName.name(inTail: Data(cut.utf8)) == nil)
+}
+
+@Test func aSessionsNameIsReadFromTheTranscriptFile() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("transcript-\(UUID().uuidString).jsonl")
+    defer { try? FileManager.default.removeItem(at: file) }
+    let filler = String(repeating: #"{"type":"assistant","message":"xxxxxxxxxxxxxxxxxxxxxxxx"}"# + "\n", count: 20_000)
+    let text = #"{"type":"agent-name","agentName":"antigo"}"# + "\n" + filler
+    try text.write(to: file, atomically: true, encoding: .utf8)
+    // The generated name is far back, past the tail: nothing is found.
+    #expect(SessionName.named(atTranscript: file.path) == nil)
+    let input = Data(#"{"model":{"display_name":"Fable 5.2"},"transcript_path":"\#(file.path)"}"#.utf8)
+    #expect(MaestroStatus.model(fromStatusInput: input, fallbackEffort: nil)?.session == nil)
+    try (text + #"{"type":"custom-title","customTitle":"PR 61"}"#).write(to: file, atomically: true, encoding: .utf8)
+    #expect(MaestroStatus.model(fromStatusInput: input, fallbackEffort: nil)?.session == "PR 61")
+}
+
+@Test func aModelNotedBeforeSessionsExistedStillDecodes() throws {
+    let old = Data(#"{"name":"Fable 5.2","effort":"high"}"#.utf8)
+    #expect(try JSONDecoder().decode(MaestroModel.self, from: old) == MaestroModel(name: "Fable 5.2", effort: "high"))
+    #expect(try JSONDecoder().decode(MaestroModel.self, from: old).session == nil)
+}
+
+// MARK: Sleeping and closed projects
+
+@Test func aSleepingProjectAndTheClosedOnesSurviveASave() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-sleep-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: file) }
+    var asleep = CockpitProject(path: "/a", session: UUID().uuidString.lowercased())
+    asleep.isAsleep = true
+    let closed = CockpitProject(path: "/c", session: UUID().uuidString.lowercased(), mode: .solo)
+    let state = CockpitState(projects: [asleep, CockpitProject(path: "/b")], selected: 1, closed: [closed])
+    try state.save(to: file)
+    let loaded = CockpitState.load(from: file)
+    #expect(loaded.projects.first?.isAsleep == true)
+    #expect(loaded.projects.first?.session == asleep.session)
+    #expect(loaded.closed == [closed])
+}
+
+@Test func aFileSavedBeforeSleepAndClosedExistedStillLoads() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-old-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: file) }
+    try Data(#"{"projects":[{"path":"/a"}],"selected":0}"#.utf8).write(to: file)
+    let loaded = CockpitState.load(from: file)
+    #expect(loaded.projects.map(\.path) == ["/a"])
+    #expect(loaded.projects.first?.isAsleep == false)
+    #expect(loaded.closed == nil)
+}
+
+@Test func closedProjectsAreRememberedNewestFirstEachOnceAndAwake() {
+    var a = CockpitProject(path: "/a")
+    a.isAsleep = true
+    var closed = CockpitProjects.remembering(a, in: [])
+    closed = CockpitProjects.remembering(CockpitProject(path: "/b"), in: closed)
+    closed = CockpitProjects.remembering(a, in: closed)
+    #expect(closed.map(\.path) == ["/a", "/b"])
+    #expect(closed.allSatisfy { !$0.isAsleep })
+    let many = (0..<12).reduce([CockpitProject]()) { CockpitProjects.remembering(CockpitProject(path: "/p\($1)"), in: $0) }
+    #expect(many.count == CockpitProjects.closedLimit)
+    #expect(many.first?.path == "/p11")
+}
+
+@Test func afterASleepTheNearestRunningProjectIsShown() {
+    #expect(CockpitProjects.nearestAwake(to: 1, awake: [true, true, false]) == 0)
+    #expect(CockpitProjects.nearestAwake(to: 0, awake: [true, false, true]) == 2)
+    #expect(CockpitProjects.nearestAwake(to: 0, awake: [true, false]) == nil)
+}
+
+@Test func aDraggedTabMovesAndTheProjectInFrontStaysInFront() {
+    let projects = ["/a", "/b", "/c"].map { CockpitProject(path: $0) }
+    let moved = CockpitProjects.moving(projects, from: 0, to: 2, selected: 0)
+    #expect(moved.projects.map(\.path) == ["/b", "/c", "/a"])
+    #expect(moved.selected == 2)
+    let other = CockpitProjects.moving(projects, from: 2, to: 0, selected: 1)
+    #expect(other.projects.map(\.path) == ["/c", "/a", "/b"])
+    #expect(other.selected == 2)
+    #expect(CockpitProjects.moving(projects, from: 1, to: 1, selected: 0).projects == projects)
+}
+
+// MARK: The maestro's CLI
+
+@Test func aProjectSavedBeforeTheChoiceHasClaudeAsItsMaestro() throws {
+    let old = try JSONDecoder().decode(CockpitProject.self, from: Data(#"{"path":"/a"}"#.utf8))
+    #expect(old.maestro == .claude)
+    var cursor = CockpitProject(path: "/b")
+    cursor.maestro = .cursor
+    let back = try JSONDecoder().decode(CockpitProject.self, from: JSONEncoder().encode(cursor))
+    #expect(back.maestro == .cursor)
+}
+
+@Test func aCursorProjectOpensInTheTerminalAndAClaudeOneInLeitura() {
+    let projects = CockpitProjects.adding("/a", maestro: .cursor, to: [])
+    #expect(projects.first?.maestro == .cursor)
+    #expect(projects.first?.isReading == false)
+    #expect(CockpitProjects.adding("/b", to: []).first?.isReading == true)
+}
+
+@Test func aCursorMaestroIsStartedWithItsRoleInItsOwnEnvironmentAndNeverForced() {
+    let chat = "bb434c0f-d6ac-4bf1-a6f8-4f5b7ed5b247"
+    let new = Maestro.cursorLaunchLine(chat: chat, isNew: true, mode: .orchestrator, brief: "/tmp/b r.md")
+    #expect(new == "VITRA_ROLE=maestro agent --approve-mcps --trust --resume \(ShellQuote.quote(chat)) \"$(cat \(ShellQuote.quote("/tmp/b r.md")))\"\n")
+    // Carried on: no brief again, only what tells it to go on.
+    let resumed = Maestro.cursorLaunchLine(chat: chat, isNew: false, mode: .solo, brief: "/tmp/b.md", prompt: "continue")
+    #expect(resumed == "VITRA_ROLE=solo agent --approve-mcps --trust --resume \(ShellQuote.quote(chat)) \(ShellQuote.quote("continue"))\n")
+    #expect(!new.contains("--force") && !new.contains("--yolo"))
+}
+
+@Test func onlyAUUIDIsTakenForACursorChatId() {
+    #expect(CursorChat.id(in: "warning\nBB434C0F-D6AC-4BF1-A6F8-4F5B7ED5B247\n") == "bb434c0f-d6ac-4bf1-a6f8-4f5b7ed5b247")
+    #expect(CursorChat.id(in: "not signed in") == nil)
+    #expect(CursorChat.id(in: "x; rm -rf /") == nil)
+    #expect(CursorChat.id(in: "") == nil)
+}
+
+// MARK: Several tabs on one folder
+
+@Test func aFolderAlreadyOpenGetsAnotherTabWithAKeyAndNameOfItsOwn() {
+    var projects = CockpitProjects.adding("/work/vitra", to: [])
+    projects = CockpitProjects.addingTab("/work/vitra/", maestro: .cursor, to: projects)
+    #expect(projects.map(\.path) == ["/work/vitra", "/work/vitra"])
+    #expect(projects.map(\.key) == ["/work/vitra", "/work/vitra#2"])
+    #expect(projects.map(\.name) == ["vitra", "vitra 2"])
+    #expect(projects[1].maestro == .cursor)
+    // A number held by a tab closed lately is not handed out again.
+    var closed = CockpitProject(path: "/work/vitra")
+    closed.slot = 3
+    let third = CockpitProjects.addingTab("/work/vitra", to: projects, taken: [closed])
+    #expect(third.last?.slot == 4)
+    // The first free number is taken, not the next after the highest.
+    #expect(CockpitProjects.addingTab("/work/vitra", to: [projects[1]]).last?.slot == 1)
+}
+
+@Test func aTabsNumberSurvivesASaveAndOldFilesAreTheFirstTab() throws {
+    var second = CockpitProject(path: "/a", session: UUID().uuidString.lowercased())
+    second.slot = 2
+    let back = try JSONDecoder().decode(CockpitProject.self, from: JSONEncoder().encode(second))
+    #expect(back.key == "/a#2")
+    let old = try JSONDecoder().decode(CockpitProject.self, from: Data(#"{"path":"/a"}"#.utf8))
+    #expect(old.key == "/a")
+}

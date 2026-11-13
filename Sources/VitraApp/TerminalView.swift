@@ -157,6 +157,21 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// the eyes rather than guessed and undone.
     private let dropShade = PassthroughView()
 
+    /// The matches of a find in the conversation, painted over the text.
+    private let findOverlay = PassthroughView()
+
+    /// What the find overlay paints, in screen rows (scrollback included).
+    /// Only the rows in the viewport are drawn, and redrawn as it scrolls.
+    var findHighlights: [FindHighlight] = [] {
+        didSet {
+            drawnFindKey = nil
+            setNeedsRender()
+        }
+    }
+
+    /// The viewport and size the overlay was last drawn for.
+    private var drawnFindKey: [Int]?
+
     /// Whether the pane is being drawn at all. See `setDrawingActive`.
     private var isDrawingActive = true
 
@@ -224,6 +239,9 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         dropShade.isHidden = true
         addSubview(dropShade)
 
+        findOverlay.wantsLayer = true
+        addSubview(findOverlay)
+
         focusBar.wantsLayer = true
         focusBar.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor
         focusBar.layer?.borderWidth = TerminalView.focusRingWidth
@@ -253,6 +271,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         runningTimer = nil
         blinkTimer?.cancel()
         blinkTimer = nil
+        cancelPathHover()
         stopDisplayLink()
     }
 
@@ -357,8 +376,45 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         setNeedsRender()
     }
 
+    /// Draws a running program's tool calls and their output quieter, so
+    /// what it says stands out. On for the maestro's terminal; off with
+    /// `defaults write dev.vitra.Vitra dimToolOutput -bool false`.
+    var quietsToolBlocks = false {
+        didSet {
+            guard quietsToolBlocks != oldValue else { return }
+            updateQuietRows()
+            setNeedsRender()
+        }
+    }
+
+    private static let isQuietingAllowed = UserDefaults.standard.object(forKey: "dimToolOutput") as? Bool ?? true
+
+    private func updateQuietRows() {
+        guard quietsToolBlocks, Self.isQuietingAllowed, session.isRunningProgram, !snapshot.isAlternateScreen else {
+            if !snapshot.rowDim.isEmpty { snapshot.rowDim = [] }
+            return
+        }
+        let columns = min(Int(snapshot.columns), ToolBlockDimming.prefixLength)
+        let rows = (0 ..< Int(snapshot.rows)).map { row in
+            (0 ..< columns).map { snapshot.text(of: snapshot[$0, row]) ?? " " }.joined()
+        }
+        var notices: Set<Int> = []
+        for (index, row) in rows.enumerated() {
+            guard let first = row.first, ToolBlockDimming.isBullet(first) else { continue }
+            let color = snapshot[0, index].foreground
+            if ToolBlockDimming.isNoticeColor(red: color.red, green: color.green, blue: color.blue) { notices.insert(index) }
+        }
+        snapshot.rowDim = ToolBlockDimming.levels(rows: rows, notices: notices).map(\.rawValue)
+    }
+
     @objc private func renderFrame() {
-        if session.updateSnapshot(snapshot) { needsRedraw = true }
+        if session.updateSnapshot(snapshot) {
+            needsRedraw = true
+            updateQuietRows()
+            // Cursor blink is a property of the program, and can turn on or off
+            // without the window changing; the timer follows that, not the clock.
+            updateBlinkTimer()
+        }
 
         guard needsRedraw else {
             // Nothing changed this tick, so stop asking for ticks.
@@ -410,6 +466,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         tabButton.frame = zoomButton.frame.offsetBy(dx: -(PaneCornerButton.size + 4), dy: 0)
         gripButton.frame = tabButton.frame.offsetBy(dx: -(PaneCornerButton.size + 4), dy: 0)
         scrollIndicator.update(snapshot.scroll)
+        updateFindOverlay()
         guard showsCommandBlocks else { return }
         blockGutter.frame = bounds
         blockGutter.update(
@@ -520,10 +577,12 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
             // A one-pixel drawable is the smallest a layer can be asked for, and
             // asking releases the pool it was holding.
             metalLayer?.drawableSize = CGSize(width: 1, height: 1)
+            updateBlinkTimer()
             return
         }
         becameVisible()
         startDisplayLink()
+        updateBlinkTimer()
     }
 
     /// Brings the pane back after it was hidden — by the panel taking the whole
@@ -599,6 +658,8 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// A link the user clicked: the flag is true when they held Command, which
     /// means their browser rather than the panel.
     var onOpenLink: ((URL, Bool) -> Void)?
+    /// Folder a relative path falls back to when the shell has not reported cwd.
+    var pathBase: URL?
 
     /// What this pane is called in the shell's environment (`VITRA_PANE`), so
     /// a tool call from an agent running in it finds its way back here.
@@ -617,27 +678,34 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         focusBar.isHidden = !(showsFocusIndicator && window?.firstResponder === self)
     }
 
-    /// Runs the blink timer only while the window has focus.
+    /// Runs the blink timer only while the cursor is actually blinking on a
+    /// visible, focused pane.
     ///
-    /// A background window with a blinking cursor would wake the CPU twice a
-    /// second forever, which is exactly the idle cost this design exists to avoid.
+    /// A background window — or a focused one whose program asked for a steady
+    /// cursor — would otherwise wake the CPU twice a second forever, which is
+    /// exactly the idle cost this design exists to avoid.
     func updateBlinkTimer() {
-        blinkTimer?.cancel()
-        blinkTimer = nil
-        cursorOn = true
-
-        guard window?.isKeyWindow == true else {
+        let shouldBlink = isDrawingActive
+            && window?.isKeyWindow == true
+            && snapshot.cursor?.isBlinking == true
+        guard shouldBlink else {
+            guard blinkTimer != nil else { return }
+            blinkTimer?.cancel()
+            blinkTimer = nil
+            cursorOn = true
             setNeedsRender()
             return
         }
+        guard blinkTimer == nil else { return }
 
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
         timer.setEventHandler { [weak self] in
             guard let self else { return }
-            // Only blink when the terminal asked for a blinking cursor; plenty of
-            // programs turn it off, and honouring that keeps the app idle.
-            guard self.snapshot.cursor?.isBlinking == true else { return }
+            guard self.snapshot.cursor?.isBlinking == true else {
+                self.updateBlinkTimer()
+                return
+            }
             self.cursorOn.toggle()
             self.setNeedsRender()
         }
@@ -666,28 +734,60 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
 
     /// The link under a mouse event, if the pointer is on one.
     private func link(for event: NSEvent) -> URL? {
-        let position = cell(for: event)
+        link(at: cell(for: event), allowingPathStat: true)
+    }
+
+    /// Web links are shape-only. Paths hit the disk, so hover waits ~80 ms.
+    private func link(at position: (column: UInt16, row: UInt16), allowingPathStat: Bool) -> URL? {
         let row = Int(position.row)
         guard row < Int(snapshot.rows) else { return nil }
+        let characters = rowCharacters(row)
+        if let url = TerminalLink.match(in: characters, at: Int(position.column), base: nil)?.url {
+            if !url.isFileURL { return url }
+            if allowingPathStat, FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        guard allowingPathStat else { return nil }
+        return pathLink(at: position)
+    }
 
-        // One character per column, blanks included, so what comes back is in
-        // the same coordinates the click arrived in.
+    private func pathLink(at position: (column: UInt16, row: UInt16)) -> URL? {
+        guard let base = session.currentDirectory ?? pathBase else { return nil }
+        let (rows, localRow) = wrappedRows(around: Int(position.row))
+        if let hit = TerminalPathLink.match(rows: rows, row: localRow, column: Int(position.column), base: base) {
+            return hit.url
+        }
+        // A path with spaces, word-wrapped by whoever printed it.
+        let row = Int(position.row), around = 4
+        let first = max(0, row - around), last = min(Int(snapshot.rows) - 1, row + around)
+        return TerminalPathLink.matchSpaced(
+            rows: (first ... last).map { rowCharacters($0) },
+            row: row - first,
+            column: Int(position.column)
+        )?.url
+    }
+
+    private func rowCharacters(_ row: Int) -> [Character] {
         var characters: [Character] = []
         characters.reserveCapacity(Int(snapshot.columns))
         for column in 0 ..< Int(snapshot.columns) {
             let cell = snapshot[column, row]
             characters.append(snapshot.text(of: cell)?.first ?? " ")
         }
-        let base = session.currentDirectory
-        guard let url = TerminalLink.match(in: characters, at: Int(position.column), base: base)?.url
-        else { return nil }
-        // A token shaped like a path is a link only when the file is there:
-        // the pointer turns into a hand for one stat, not for every word that
-        // happens to carry a dot.
-        if url.isFileURL {
-            return PreviewTarget.resolve(path: url.path) == nil ? nil : url
+        return characters
+    }
+
+    /// The clicked row plus the ones it soft-wraps with: a full last column
+    /// continues onto the next row with no newline.
+    private func wrappedRows(around row: Int) -> (rows: [[Character]], index: Int) {
+        func wraps(_ index: Int) -> Bool {
+            TerminalPathLink.isWrapped(rowCharacters(index))
         }
-        return url
+        var start = row
+        while start > 0, wraps(start - 1) { start -= 1 }
+        var end = row
+        while end < Int(snapshot.rows) - 1, wraps(end) { end += 1 }
+        let rows = (start ... end).map { rowCharacters($0) }
+        return (rows, row - start)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -894,12 +994,48 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// The corner buttons' own cursor over them, the pointing hand over a link,
     /// the I-beam everywhere else.
     override func mouseMoved(with event: NSEvent) {
+        // A tracking area fires through whatever lies over the terminal
+        // (Leitura, a sheet): there the cursor is that view's to choose.
+        guard let hit = window?.contentView?.hitTest(event.locationInWindow), hit.isDescendant(of: self) else { return }
         let point = convert(event.locationInWindow, from: nil)
         if let button = cornerButtons.first(where: { !$0.isHidden && $0.frame.contains(point) }) {
             button.cursor.set()
             return
         }
-        if link(for: event) != nil { NSCursor.pointingHand.set() } else { NSCursor.iBeam.set() }
+        updateLinkCursor(for: event)
+    }
+
+    /// Hand over a web link as soon as the cell changes. A path waits until
+    /// the pointer rests, so a sweep across the grid does not stat every word.
+    private func updateLinkCursor(for event: NSEvent) {
+        let position = cell(for: event)
+        if let last = lastHoverCell, last == position {
+            return
+        }
+        lastHoverCell = position
+        cancelPathHover()
+        if link(at: position, allowingPathStat: false) != nil {
+            NSCursor.pointingHand.set()
+            return
+        }
+        NSCursor.iBeam.set()
+        let timer = Timer(timeInterval: 0.08, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.pathHoverTimer = nil
+                guard let last = self.lastHoverCell, last == position,
+                      self.pathLink(at: position) != nil
+                else { return }
+                NSCursor.pointingHand.set()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pathHoverTimer = timer
+    }
+
+    private func cancelPathHover() {
+        pathHoverTimer?.invalidate()
+        pathHoverTimer = nil
     }
 
     private var cornerButtons: [PaneCornerButton] {
@@ -925,14 +1061,21 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         linkTracking = area
     }
 
+    /// Whether the pane offers to close itself from its corner. Off where the
+    /// pane is not the user's to close, such as the cockpit's maestro: a
+    /// button that does nothing is worse than no button.
+    var offersClose = true
+
     override func mouseEntered(with event: NSEvent) {
-        closeButton.isHidden = false
+        closeButton.isHidden = !offersClose
         zoomButton.isHidden = !canRearrange
         tabButton.isHidden = !canRearrange
         gripButton.isHidden = !canRearrange
     }
 
     override func mouseExited(with event: NSEvent) {
+        cancelPathHover()
+        lastHoverCell = nil
         NSCursor.arrow.set()
         closeButton.isHidden = true
         zoomButton.isHidden = true
@@ -1035,6 +1178,8 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// How far inside the edge a held drag starts pulling the viewport.
     private static let autoScrollMargin: CGFloat = 12
     private var linkTracking: NSTrackingArea?
+    private var pathHoverTimer: Timer?
+    private var lastHoverCell: (column: UInt16, row: UInt16)?
 
     // MARK: - Clipboard
 
@@ -1043,6 +1188,46 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+    }
+
+    /// Copies the selection and takes it out of the line being typed. A
+    /// terminal cannot delete what a program has already printed, so only
+    /// typed text goes: one stretch on the cursor's row, or the whole of an
+    /// input that runs over several rows. Anything else is just copied.
+    @objc func cut(_ sender: Any?) {
+        guard let text = session.selectedText(), !text.isEmpty else { return }
+        copy(sender)
+        defer { session.clearSelection() }
+        guard snapshot.scroll.isAtBottom, let cursor = snapshot.cursor else { return }
+
+        if let span = selectedSpan(), span.row == Int(cursor.row),
+           let edit = SelectionEdit.replacing(
+               selectionRow: span.row,
+               start: span.start,
+               end: span.end,
+               cursorRow: Int(cursor.row),
+               cursorColumn: Int(cursor.column)
+           ) {
+            apply(edit)
+            return
+        }
+
+        guard session.isRunningProgram, let input = inputSpan() else { return }
+        let rows = Int(input.firstRow) ... Int(input.lastRow)
+        let typed = rows.map { rowCells($0).joined() }.joined()
+        let squeezed = { (string: String) in string.filter { !$0.isWhitespace } }
+        // The marker is not typed text; with it gone, what was selected has to
+        // be the whole input for "cut" to mean "clear it".
+        guard squeezed(typed).hasSuffix(squeezed(text)), squeezed(text).count * 10 >= squeezed(typed).count * 9 else { return }
+        // To the end of the input, then back over all of it. A backspace too
+        // many does nothing at the start of an empty input.
+        for _ in Int(cursor.row) ..< Int(input.lastRow) {
+            session.send(KeyEvent(keyCode: Self.downArrowKeyCode))
+        }
+        session.send(text: "\u{05}")
+        for _ in 0 ..< typed.count {
+            session.send(KeyEvent(keyCode: Self.backspaceKeyCode))
+        }
     }
 
     @objc func paste(_ sender: Any?) {
@@ -1069,29 +1254,177 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         // Inside a program — Claude Code, above all — "all" is the line being
         // typed, not the transcript around it: that is what you select to
         // replace or clear it. In a plain shell the whole screen still wins.
-        if session.isRunningProgram, let line = inputLineSpan() {
-            session.beginSelection(column: line.start, row: line.row, clickCount: 1)
-            session.extendSelection(column: line.end, row: line.row)
+        if session.isRunningProgram, let input = inputSpan() {
+            session.beginSelection(column: input.start, row: input.firstRow, clickCount: 1)
+            session.extendSelection(column: input.end, row: input.lastRow)
             return
         }
         session.selectAll()
     }
 
-    /// The typed text on the cursor's row: first to last non-blank cell, less
-    /// a prompt marker in front (`❯`, `>`, `$` — one glyph and a space).
-    private func inputLineSpan() -> (row: UInt16, start: UInt16, end: UInt16)? {
+    /// The text being typed, every row of it: from just after the prompt
+    /// marker (`❯`, `>`, `$` — one glyph and a space) to the last non-blank
+    /// cell of the last row. A long prompt wraps, and "all" is all of it, not
+    /// the row the cursor happens to be on.
+    private func inputSpan() -> (firstRow: UInt16, start: UInt16, lastRow: UInt16, end: UInt16)? {
         guard snapshot.scroll.isAtBottom, let cursor = snapshot.cursor else { return nil }
         let row = Int(cursor.row)
-        let columns = Int(snapshot.columns)
-        guard row < Int(snapshot.rows), columns > 0 else { return nil }
-        let text = rowCells(row)
-        guard var start = text.firstIndex(where: { $0 != " " }),
-              let end = text.lastIndex(where: { $0 != " " })
+        let rows = Int(snapshot.rows)
+        guard row < rows, Int(snapshot.columns) > 0 else { return nil }
+
+        // A program draws its input between rules, or under what came before:
+        // a rule or an empty row ends it on either side.
+        func ends(_ candidate: Int) -> Bool {
+            let cells = rowCells(candidate)
+            guard cells.contains(where: { $0 != " " }) else { return true }
+            return cells.filter { $0 == "─" || $0 == "━" || $0 == "═" }.count >= 8
+        }
+
+        // Up to the row that carries the marker; the cursor's own row when no
+        // row above it does.
+        var first = row
+        var candidate = row
+        while candidate >= max(0, row - Self.longestInput), !ends(candidate) {
+            if markerColumn(of: candidate) != nil {
+                first = candidate
+                break
+            }
+            candidate -= 1
+        }
+        var last = row
+        while last + 1 < min(rows, row + Self.longestInput), !ends(last + 1) { last += 1 }
+
+        guard var start = rowCells(first).firstIndex(where: { $0 != " " }),
+              let end = rowCells(last).lastIndex(where: { $0 != " " })
         else { return nil }
-        if let marker = markerColumn(of: row) { start = marker + 2 }
-        // The marker was the whole line: nothing typed yet.
-        guard start <= end else { return nil }
-        return (UInt16(row), UInt16(start), UInt16(end))
+        if let marker = markerColumn(of: first) { start = marker + 2 }
+        // The marker was the whole input: nothing typed yet.
+        guard first < last || start <= end else { return nil }
+        return (UInt16(first), UInt16(start), UInt16(last), UInt16(end))
+    }
+
+    /// What the user has typed into the running program's input and not yet
+    /// sent: "" for an empty input, nil when that cannot be told — no program
+    /// holding the terminal, nothing drawn yet, or the view scrolled away
+    /// from the live edge. Faint cells are left out: Claude Code draws its
+    /// placeholder and its suggested next prompt dim, and neither is typing.
+    ///
+    /// The screen is read fresh: a project in a tab nobody is looking at is
+    /// not drawn, and its last picture may be old.
+    func typedInput() -> String? {
+        if session.updateSnapshot(snapshot) {
+            updateQuietRows()
+            setNeedsRender()
+        }
+        guard session.isRunningProgram, snapshot.rows > 0, snapshot.scroll.isAtBottom, snapshot.cursor != nil else { return nil }
+        guard let input = inputSpan() else { return "" }
+        var typed = ""
+        for row in Int(input.firstRow) ... Int(input.lastRow) {
+            let from = row == Int(input.firstRow) ? Int(input.start) : 0
+            let to = row == Int(input.lastRow) ? Int(input.end) : Int(snapshot.columns) - 1
+            guard from <= to else { continue }
+            for column in from ... to {
+                let cell = snapshot[column, row]
+                guard !isGhost(cell) else { continue }
+                typed += snapshot.text(of: cell) ?? " "
+            }
+        }
+        return typed.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// The prompt the program suggests next — Claude Code draws one dim in
+    /// its empty input once a turn ends, taken with Tab — or nil when there
+    /// is none, or something is typed there. Its opening hints ("Try …")
+    /// are not suggestions of what to say.
+    func suggestedInput() -> String? {
+        guard typedInput() == "", let input = inputSpan() else { return nil }
+        var words: [String] = []
+        for row in Int(input.firstRow) ... Int(input.lastRow) {
+            let from = row == Int(input.firstRow) ? Int(input.start) : 0
+            let to = row == Int(input.lastRow) ? Int(input.end) : Int(snapshot.columns) - 1
+            guard from <= to else { continue }
+            let line = (from ... to).map { column -> String in
+                let cell = snapshot[column, row]
+                return isGhost(cell) ? snapshot.text(of: cell) ?? " " : " "
+            }.joined()
+            words += line.split(separator: " ").map(String.init)
+        }
+        let suggestion = words.joined(separator: " ")
+        guard !suggestion.isEmpty, !suggestion.hasPrefix("Try \""), !suggestion.hasPrefix("Press ") else { return nil }
+        return suggestion
+    }
+
+    /// Text the program drew as a hint, not something typed: faint, or in a
+    /// grey well under the terminal's own text colour.
+    private func isGhost(_ cell: RenderCell) -> Bool {
+        if cell.flags.contains(.faint) { return true }
+        let color = cell.foreground, base = snapshot.defaultForeground
+        guard color != base else { return false }
+        let channels = [Int(color.red), Int(color.green), Int(color.blue)]
+        let isGrey = channels.max()! - channels.min()! < 24
+        let brightness = channels.reduce(0, +), baseBrightness = Int(base.red) + Int(base.green) + Int(base.blue)
+        return isGrey && brightness * 10 < baseBrightness * 7
+    }
+
+    /// How many rows away from the cursor an input is looked for.
+    private static let longestInput = 40
+
+    // MARK: - Find in the conversation
+
+    /// Where the viewport is in the scrollback, as last drawn.
+    var scrollPosition: ScrollPosition { snapshot.scroll }
+
+    /// Scrolls so `screenRow` is in view, a third of the way down, unless it
+    /// already is.
+    func reveal(screenRow: Int) {
+        let scroll = snapshot.scroll
+        let rows = max(Int(snapshot.rows), 1)
+        guard screenRow < scroll.offset || screenRow >= scroll.offset + rows else { return }
+        let target = max(0, min(screenRow - rows / 3, scroll.total - rows))
+        session.scroll(lines: target - scroll.offset)
+    }
+
+    /// Puts the viewport back where `position` had it: at the live edge if it
+    /// was there, since output may have moved the edge since.
+    func restoreScroll(to position: ScrollPosition) {
+        if position.isAtBottom {
+            session.scrollToBottom()
+        } else {
+            session.scroll(lines: position.offset - snapshot.scroll.offset)
+        }
+    }
+
+    /// Paints the matches that are in the viewport: the current one in the
+    /// accent, solid, the others in a wash of it.
+    private func updateFindOverlay() {
+        findOverlay.frame = bounds
+        let scroll = snapshot.scroll
+        let key = [scroll.offset, Int(snapshot.rows), Int(bounds.width), Int(bounds.height), findHighlights.count]
+        guard key != drawnFindKey else { return }
+        drawnFindKey = key
+        let cellWidth = renderer.metrics.cellWidth / scale
+        let cellHeight = renderer.metrics.cellHeight / scale
+        let visible = scroll.offset ..< scroll.offset + Int(snapshot.rows)
+        // ponytail: walks every match each time the viewport moves; a binary
+        // search on row if a conversation ever has six-figure match counts.
+        let layers: [CALayer] = findHighlights.filter { visible.contains($0.span.row) }.map { highlight in
+            let layer = CALayer()
+            let row = CGFloat(highlight.span.row - scroll.offset)
+            // The overlay is not flipped: its layers count y from the bottom.
+            layer.frame = CGRect(
+                x: padding + gutterWidth + CGFloat(highlight.span.columns.lowerBound) * cellWidth - 1,
+                y: bounds.height - padding - (row + 1) * cellHeight,
+                width: CGFloat(highlight.span.columns.count) * cellWidth + 2,
+                height: cellHeight
+            )
+            layer.cornerRadius = 3
+            let accent = CockpitStyle.accent
+            layer.backgroundColor = accent.withAlphaComponent(highlight.isCurrent ? 0.42 : 0.16).cgColor
+            layer.borderColor = accent.withAlphaComponent(highlight.isCurrent ? 1 : 0.35).cgColor
+            layer.borderWidth = 1
+            return layer
+        }
+        findOverlay.layer?.sublayers = layers
     }
 
     /// Clears the screen and the scrollback, the way Cmd-K does everywhere else
@@ -1103,10 +1436,12 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// Greys out Copy when there is nothing selected.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
-        case #selector(copy(_:)):
+        case #selector(copy(_:)), #selector(cut(_:)):
             return session.selectedText()?.isEmpty == false
         case #selector(paste(_:)):
-            return NSPasteboard.general.string(forType: .string) != nil
+            // Not only text: a screenshot is an image with no text beside it,
+            // and Paste greyed out for it would swallow Cmd-V in silence.
+            return PasteboardAttachments.canPaste(from: .general)
         default:
             return true
         }
@@ -1331,6 +1666,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// The backspace key, by keycode.
     private static let backspaceKeyCode: UInt16 = 0x33
     private static let leftArrowKeyCode: UInt16 = 0x7B
+    private static let downArrowKeyCode: UInt16 = 0x7D
     private static let rightArrowKeyCode: UInt16 = 0x7C
 
     /// The keystrokes that would delete the selection out of the program's own

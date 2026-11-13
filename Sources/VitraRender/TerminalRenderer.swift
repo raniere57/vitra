@@ -284,10 +284,20 @@ public final class TerminalRenderer {
 
         for row in 0 ..< Int(snapshot.rows) {
             let y = originY + Float(row) * cellHeight
+            let quiet = row < snapshot.rowDim.count ? Self.quietAmount(snapshot.rowDim[row]) : 0
             for column in 0 ..< Int(snapshot.columns) {
                 let cell = snapshot[column, row]
                 let x = originX + Float(column) * cellWidth
                 var (foreground, background) = resolvedColors(of: cell, in: snapshot)
+                // A quiet row fades toward the page; what is selected stays
+                // as it is, since it is being read.
+                if quiet > 0, !cell.flags.contains(.selected) {
+                    // What the program already drew faint is near the floor:
+                    // faded as much again it could not be read at all.
+                    let amount = cell.flags.contains(.faint) ? quiet / 3 : quiet
+                    foreground = foreground.mixed(with: defaultBackground, amount: amount)
+                    if background != defaultBackground { background = background.mixed(with: defaultBackground, amount: quiet) }
+                }
 
                 let isCursorCell = cursorIsBlock
                     && cursor?.column == UInt16(column)
@@ -323,6 +333,15 @@ public final class TerminalRenderer {
 
         if let cursor, !cursorIsBlock {
             appendThinCursor(cursor, cellWidth: cellWidth, cellHeight: cellHeight, padding: padding, gutter: gutter)
+        }
+    }
+
+    /// How far a quiet row fades: a call a little, its output more.
+    private static func quietAmount(_ level: UInt8) -> Float {
+        switch level {
+        case 1: 0.48
+        case 2: 0.68
+        default: 0
         }
     }
 
@@ -495,6 +514,12 @@ extension TerminalColor {
             blue: Double(blue) / 255,
             alpha: alpha
         )
+    }
+
+    /// This colour moved `amount` (0…1) of the way to `other`.
+    func mixed(with other: TerminalColor, amount: Float) -> TerminalColor {
+        func mix(_ from: UInt8, _ to: UInt8) -> UInt8 { UInt8((Float(from) + (Float(to) - Float(from)) * amount).rounded()) }
+        return TerminalColor(red: mix(red, other.red), green: mix(green, other.green), blue: mix(blue, other.blue))
     }
 
     /// SGR 2 (faint): half intensity, the conventional rendering.
