@@ -22,35 +22,61 @@ public enum ToolBlockDimming {
 
     private static let bullets: Set<Character> = ["⏺", "●"]
 
-    /// One level per row. The call being made now — the last one, with
-    /// nothing said after it — is left alone: it is what is being watched.
-    public static func levels(rows: [String]) -> [Level] {
+    /// One level per row. The call being made now is quiet like the rest:
+    /// its bullet blinks, and a block that brightened with it would flash.
+    ///
+    /// `notices` are the rows that open a notice from the harness, not the
+    /// maestro's words: told by the caller from the bullet's colour, which
+    /// the text alone does not carry. A notice runs until a blank row.
+    public static func levels(rows: [String], notices: Set<Int> = []) -> [Level] {
         var levels = Array(repeating: Level.none, count: rows.count)
         // The viewport may open in the middle of a block whose call scrolled
         // away: rows before the first one that starts at the margin are
         // output if they look like nothing else.
         var inBlock = opensInsideBlock(rows)
-        var lastCall: Int?
-        var saidAfterLastCall = false
+        var inNotice = false
         for (index, row) in rows.enumerated() {
-            if isCall(row) {
+            if notices.contains(index) {
+                levels[index] = .output
+                inNotice = true
+                inBlock = false
+            } else if inNotice, !isBlank(row), row.first == " " {
+                levels[index] = .output
+            } else if isDone(row) {
+                levels[index] = .output
+                inNotice = false
+                inBlock = false
+            } else if isCall(row) {
+                inNotice = false
                 levels[index] = .call
                 inBlock = true
-                lastCall = index
-                saidAfterLastCall = false
             } else if isBlank(row) {
+                inNotice = false
                 continue
             } else if inBlock, isOutput(row) {
                 levels[index] = .output
             } else {
                 inBlock = false
-                if let first = row.first, bullets.contains(first) { saidAfterLastCall = true }
+                inNotice = false
             }
         }
-        if let lastCall, !saidAfterLastCall {
-            for index in lastCall ..< rows.count { levels[index] = .none }
-        }
         return levels
+    }
+
+    public static func isBullet(_ character: Character) -> Bool { bullets.contains(character) }
+
+    /// A warning's yellow: red and green high, blue low. The maestro's own
+    /// bullet is the text colour, a call's is green or red.
+    public static func isNoticeColor(red: UInt8, green: UInt8, blue: UInt8) -> Bool {
+        red > 150 && green > 120 && blue < 130 && Int(red) - Int(blue) > 70 && Int(red) + 40 >= Int(green)
+    }
+
+    /// "✻ Worked for 3m 44s · done 3:51 PM": how long a turn took, under a
+    /// glyph and a verb that change. The live "✻ Working… (12s)" is not it.
+    static func isDone(_ row: String) -> Bool {
+        guard let first = row.first, !first.isLetter, !first.isNumber, first != " ", !bullets.contains(first),
+              !"❯>".contains(first), row.dropFirst().first == " " else { return false }
+        return row.dropFirst(2).range(of: #"^\p{Lu}\p{L}+ for \d"#, options: .regularExpression) != nil
     }
 
     static func isBlank(_ row: String) -> Bool { row.allSatisfy { $0 == " " } }
@@ -58,7 +84,10 @@ public enum ToolBlockDimming {
     /// "⏺ Bash(…", "⏺ vitra - screen_capture (MCP)(…", "⏺ mcp__x__y(…", and
     /// the folded "⏺ Read 3 files (ctrl+o to expand)".
     static func isCall(_ row: String) -> Bool {
-        guard let first = row.first, bullets.contains(first), row.dropFirst().first == " " else { return false }
+        // A running call's bullet blinks: while it is off the row opens with
+        // a space where the bullet was.
+        guard let first = row.first, bullets.contains(first) || first == " ", row.dropFirst().first == " ",
+              row.dropFirst(2).first != " " else { return false }
         // A screen's row comes padded with spaces to the terminal's width.
         let rest = row.dropFirst(2).trimmingCharacters(in: .whitespaces)
         if rest.hasSuffix("(ctrl+o to expand)") || rest.contains(" (MCP)(") { return true }

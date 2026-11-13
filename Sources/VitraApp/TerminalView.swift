@@ -398,7 +398,13 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         let rows = (0 ..< Int(snapshot.rows)).map { row in
             (0 ..< columns).map { snapshot.text(of: snapshot[$0, row]) ?? " " }.joined()
         }
-        snapshot.rowDim = ToolBlockDimming.levels(rows: rows).map(\.rawValue)
+        var notices: Set<Int> = []
+        for (index, row) in rows.enumerated() {
+            guard let first = row.first, ToolBlockDimming.isBullet(first) else { continue }
+            let color = snapshot[0, index].foreground
+            if ToolBlockDimming.isNoticeColor(red: color.red, green: color.green, blue: color.blue) { notices.insert(index) }
+        }
+        snapshot.rowDim = ToolBlockDimming.levels(rows: rows, notices: notices).map(\.rawValue)
     }
 
     @objc private func renderFrame() {
