@@ -434,6 +434,22 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         listedFrames = [:]
     }
 
+    /// A server that wants a name and password before it shows anything.
+    public func webView(
+        _ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @MainActor @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        let asksPassword = [NSURLAuthenticationMethodHTTPBasic, NSURLAuthenticationMethodHTTPDigest, NSURLAuthenticationMethodNTLM]
+            .contains(challenge.protectionSpace.authenticationMethod)
+        guard asksPassword else { return completionHandler(.performDefaultHandling, nil) }
+        if challenge.previousFailureCount == 0, let known = challenge.proposedCredential, known.hasPassword {
+            return completionHandler(.useCredential, known)
+        }
+        chrome.credential(for: challenge.protectionSpace, failed: challenge.previousFailureCount > 0) { credential in
+            if let credential { completionHandler(.useCredential, credential) } else { completionHandler(.performDefaultHandling, nil) }
+        }
+    }
+
     /// What the page cannot show — a zip, a spreadsheet, anything sent as
     /// an attachment — is a download.
     public func webView(

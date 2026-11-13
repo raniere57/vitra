@@ -72,6 +72,40 @@ final class BrowserChrome: NSObject, WKUIDelegate, WKDownloadDelegate {
         alert.beginSheetModal(for: window) { response in MainActor.assumeIsolated { then(response) } }
     }
 
+    // MARK: - A page behind a name and password
+
+    /// HTTP Basic or Digest: the server answers 401 with nothing in it until
+    /// it is told who is asking. Asked of the user, never guessed; a page in
+    /// no window gets no credential and shows the server's refusal.
+    func credential(for space: URLProtectionSpace, failed: Bool, then: @escaping @MainActor (URLCredential?) -> Void) {
+        onNote?("[auth] \(space.host) asks for a name and password")
+        let alert = NSAlert()
+        alert.messageText = "\(space.host) pede usuário e senha"
+        var lines: [String] = []
+        if failed { lines.append("Usuário ou senha não aceitos.") }
+        if let realm = space.realm, !realm.isEmpty { lines.append("Área: \(realm)") }
+        if !space.receivesCredentialSecurely { lines.append("A senha segue sem criptografia (http).") }
+        alert.informativeText = lines.joined(separator: "\n")
+        alert.addButton(withTitle: "Entrar")
+        alert.addButton(withTitle: "Cancelar")
+        let user = NSTextField(string: "")
+        user.placeholderString = "Usuário"
+        let password = NSSecureTextField(string: "")
+        password.placeholderString = "Senha"
+        let stack = NSStackView(views: [user, password])
+        stack.orientation = .vertical
+        stack.spacing = 6
+        stack.frame = NSRect(x: 0, y: 0, width: 280, height: 54)
+        for field in [user, password] { field.widthAnchor.constraint(equalToConstant: 280).isActive = true }
+        user.nextKeyView = password
+        alert.accessoryView = stack
+        alert.window.initialFirstResponder = user
+        present(alert) { response in
+            guard response == .alertFirstButtonReturn, !user.stringValue.isEmpty else { return then(nil) }
+            then(URLCredential(user: user.stringValue, password: password.stringValue, persistence: .forSession))
+        }
+    }
+
     // MARK: - Choosing files to upload
 
     func webView(
