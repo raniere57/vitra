@@ -34,7 +34,7 @@ final class CockpitTabBar: NSView {
     var onReveal: ((Int) -> Void)?
     /// A tab dragged to another place: from which index to which.
     var onMove: ((Int, Int) -> Void)?
-    private var recent: [String] = []
+    private var recent: [(key: String, name: String, path: String)] = []
     /// Where a dragged tab would land.
     private let dropMark = NSView.filled(CockpitStyle.accent, cornerRadius: 1)
 
@@ -142,7 +142,7 @@ final class CockpitTabBar: NSView {
     }
 
     /// The folders of the projects closed lately, newest first.
-    func show(recent: [String]) { self.recent = recent }
+    func show(recent: [(key: String, name: String, path: String)]) { self.recent = recent }
 
     /// With projects closed lately, the "+" offers them back before the
     /// folder picker; with none it goes straight to the picker.
@@ -155,10 +155,10 @@ final class CockpitTabBar: NSView {
         let header = NSMenuItem(title: "Reabrir de onde parou", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
-        for path in recent {
-            let item = NSMenuItem(title: URL(fileURLWithPath: path).lastPathComponent, action: #selector(reopen(_:)), keyEquivalent: "")
+        for (key, name, path) in recent {
+            let item = NSMenuItem(title: name, action: #selector(reopen(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = path
+            item.representedObject = key
             item.toolTip = (path as NSString).abbreviatingWithTildeInPath
             item.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil)
             menu.addItem(item)
@@ -172,7 +172,7 @@ final class CockpitTabBar: NSView {
     }
 
     @objc private func reopen(_ sender: NSMenuItem) {
-        if let path = sender.representedObject as? String { onReopen?(path) }
+        if let key = sender.representedObject as? String { onReopen?(key) }
     }
 
     @objc private func pickFolder(_ sender: Any?) { onAdd?() }

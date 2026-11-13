@@ -16,7 +16,7 @@ extension ProjectView {
         queueDrawer.onChange = { [weak self] queue in self?.queueEdited(queue) }
         queueDrawer.onResume = { [weak self] in
             guard let self else { return }
-            self.offerQueue(.resumed(state: Attention.load(for: self.project.path)?.state))
+            self.offerQueue(.resumed(state: Attention.load(for: self.project.key)?.state))
         }
         queueDrawer.onDismiss = { [weak self] in
             self?.queueDrawer.collapse()
@@ -38,7 +38,7 @@ extension ProjectView {
     private func saveQueue() {
         guard let queueStore else { return }
         do {
-            try PromptQueueStore.save(promptQueue, for: project.path, in: queueStore)
+            try PromptQueueStore.save(promptQueue, for: project.key, in: queueStore)
         } catch {
             // The queue still works for this launch; it is just not kept.
             Self.log.error("could not save the queue of \(self.project.path, privacy: .private): \(error.localizedDescription, privacy: .public)")
@@ -65,7 +65,7 @@ extension ProjectView {
             queueRetry = Timer.scheduledTimer(withTimeInterval: Self.queueRetryInterval, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.offerQueue(.retry(state: Attention.load(for: self.project.path)?.state))
+                    self.offerQueue(.retry(state: Attention.load(for: self.project.key)?.state))
                 }
             }
         case .send:

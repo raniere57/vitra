@@ -47,7 +47,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         let saved = CockpitState.load(from: store)
         projects = saved.projects
         selected = saved.selected
-        closed = (saved.closed ?? []).filter { closed in !saved.projects.contains { $0.path == closed.path } }
+        closed = (saved.closed ?? []).filter { closed in !saved.projects.contains { $0.key == closed.key } }
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
@@ -82,7 +82,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         tabBar.onSelect = { [weak self] in self?.select($0, waking: false) }
         tabBar.onClose = { [weak self] in self?.close(at: $0) }
         tabBar.onAdd = { [weak self] in self?.openProject(nil) }
-        tabBar.onReopen = { [weak self] in self?.open($0) }
+        tabBar.onReopen = { [weak self] in self?.reopen($0) }
         tabBar.onSleep = { [weak self] in self?.sleep(at: $0) }
         tabBar.onMove = { [weak self] from, to in
             guard let self else { return }
@@ -96,7 +96,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         }
         feed.onChange = { [weak self] runs in self?.show(runs) }
         alerts.onOpen = { [weak self] path in
-            guard let self, let index = projects.firstIndex(where: { $0.path == path }) else { return }
+            guard let self, let index = projects.firstIndex(where: { $0.key == path }) else { return }
             self.window?.makeKeyAndOrderFront(nil)
             select(index)
         }
@@ -144,18 +144,28 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         open(url.path, maestro: MaestroCLI.allCases[max(choice.indexOfSelectedItem, 0)])
     }
 
-    /// Opens the project at `path`, as it was when it was closed if it is
-    /// remembered: the same conversation, mode and panel.
+    /// Opens the folder at `path` from the picker. One that is not open comes
+    /// back as it was closed, when it was closed with the same maestro; one
+    /// that is already open gets another tab, with a maestro of its own.
     private func open(_ path: String, maestro: MaestroCLI = .claude) {
-        let opened = CockpitProject(path: path, isReading: true)
-        if let index = closed.firstIndex(where: { $0.path == opened.path }) {
-            let remembered = closed.remove(at: index)
-            if !projects.contains(where: { $0.path == remembered.path }) { projects.append(remembered) }
-        } else {
-            projects = CockpitProjects.adding(path, maestro: maestro, to: projects)
+        let folder = CockpitProject(path: path).path
+        let isOpen = projects.contains { $0.path == folder }
+        if !isOpen, let remembered = closed.first(where: { $0.path == folder && $0.maestro == maestro }) {
+            reopen(remembered.key)
+            return
         }
+        projects = CockpitProjects.addingTab(folder, maestro: maestro, to: projects, taken: closed)
         save()
-        select(projects.firstIndex { $0.path == opened.path } ?? projects.count - 1)
+        select(projects.count - 1)
+    }
+
+    /// Puts back a tab closed lately: the same conversation, mode and panel.
+    private func reopen(_ key: String) {
+        guard let index = closed.firstIndex(where: { $0.key == key }) else { return }
+        let remembered = closed.remove(at: index)
+        if !projects.contains(where: { $0.key == remembered.key }) { projects.append(remembered) }
+        save()
+        select(projects.firstIndex { $0.key == remembered.key } ?? projects.count - 1)
     }
 
     /// Puts the project on screen to sleep, or the one a tab's menu named.
@@ -171,7 +181,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             select(index)
             return
         }
-        if views[projects[index].path]?.isBusy == true {
+        if views[projects[index].key]?.isBusy == true {
             let alert = NSAlert()
             alert.messageText = "Suspender \(projects[index].name)?"
             alert.informativeText = "O maestro deste projeto ainda está rodando. Suspender o encerra; a conversa fica guardada e volta ao clicar na aba. Workers já delegados continuam."
@@ -180,7 +190,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         projects[index].isAsleep = true
-        let path = projects[index].path
+        let path = projects[index].key
         views.removeValue(forKey: path)?.shutDown(endingSessions: true)
         attention[path] = nil
         guard index == selected else {
@@ -189,7 +199,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         // Somewhere already running, if there is one; nothing is woken for it.
-        let awake = projects.map { views[$0.path] != nil }
+        let awake = projects.map { views[$0.key] != nil }
         select(CockpitProjects.nearestAwake(to: index, awake: awake) ?? index, waking: false)
     }
 
@@ -200,7 +210,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             window?.performClose(sender)
             return
         }
-        if views[projects[selected].path]?.closeSidePanel() == true { return }
+        if views[projects[selected].key]?.closeSidePanel() == true { return }
         close(at: selected)
     }
 
@@ -245,7 +255,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     /// The project on screen, once its view is made.
     private var current: ProjectView? {
-        projects.indices.contains(selected) ? views[projects[selected].path] : nil
+        projects.indices.contains(selected) ? views[projects[selected].key] : nil
     }
 
     @objc func nextProject(_ sender: Any?) { step(by: 1) }
@@ -266,7 +276,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         guard projects.indices.contains(index) else { return }
         // Closing ends the shell and whatever conversation the maestro is in;
         // one stray Cmd-W should not be able to do that unasked.
-        if views[projects[index].path]?.isBusy == true {
+        if views[projects[index].key]?.isBusy == true {
             let alert = NSAlert()
             alert.messageText = "Fechar \(projects[index].name)?"
             alert.informativeText = "O maestro deste projeto ainda está rodando. Fechar encerra a conversa dele. Workers já delegados continuam."
@@ -277,7 +287,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         let project = projects.remove(at: index)
         closed = CockpitProjects.remembering(project, in: closed)
         // The one place a project's shells really end; quitting only lets go.
-        views.removeValue(forKey: project.path)?.shutDown(endingSessions: true)
+        views.removeValue(forKey: project.key)?.shutDown(endingSessions: true)
         save()
         select(min(selected > index ? selected - 1 : selected, projects.count - 1))
     }
@@ -314,7 +324,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         let project = projects[selected]
         // A project's shell starts the first time its tab is shown, not at
         // launch: ten remembered projects should not mean ten maestros.
-        let view = views[project.path] ?? makeView(project)
+        let view = views[project.key] ?? makeView(project)
         stage.addFilling(view)
         view.setShown(true)
         view.focusTerminal()
@@ -325,28 +335,28 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         // Spent only if the maestro has to be started again; a maestro the
         // pty-host kept was never interrupted. The attention file is cleared
         // at that start too: a kept maestro's file is still its word.
-        let wasInterrupted = Attention.takeInterrupted(for: project.path)
+        let wasInterrupted = Attention.takeInterrupted(for: project.key)
         let view = ProjectView(project: project, kit: kit, resumesInterruptedWork: wasInterrupted)
         view.browserParking = browserParking
         view.workers.onStopAll = { [weak self] ids in self?.feed.cancel(ids) }
         view.loadResumo = { [weak self] done in self?.feed.resumo(for: project, done) }
         view.onModeChange = { [weak self] mode in
-            guard let self, let index = self.projects.firstIndex(where: { $0.path == project.path }) else { return }
+            guard let self, let index = self.projects.firstIndex(where: { $0.key == project.key }) else { return }
             self.projects[index].mode = mode
             self.save()
         }
         view.onSideHiddenChange = { [weak self] hidden in
-            guard let self, let index = self.projects.firstIndex(where: { $0.path == project.path }) else { return }
+            guard let self, let index = self.projects.firstIndex(where: { $0.key == project.key }) else { return }
             self.projects[index].sidePanelHidden = hidden
             self.save()
         }
         view.onSessionChange = { [weak self] session in
-            guard let self, let index = self.projects.firstIndex(where: { $0.path == project.path }) else { return }
+            guard let self, let index = self.projects.firstIndex(where: { $0.key == project.key }) else { return }
             self.projects[index].session = session
             self.save()
         }
         view.onReadingChange = { [weak self] reading in
-            guard let self, let index = self.projects.firstIndex(where: { $0.path == project.path }) else { return }
+            guard let self, let index = self.projects.firstIndex(where: { $0.key == project.key }) else { return }
             self.projects[index].isReading = reading
             self.save()
         }
@@ -357,8 +367,8 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         // What the maestro is doing as the project opens is where its next
         // change is measured from: a turn already running when the app
         // started still ends in a send.
-        attention[project.path] = Attention.load(for: project.path)
-        views[project.path] = view
+        attention[project.key] = Attention.load(for: project.key)
+        views[project.key] = view
         return view
     }
 
@@ -405,7 +415,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         // A call that names a project which is not open goes nowhere: landing
         // in whatever is on screen would put one project's page in another.
         if let pane { throw ToolError("the project this call came from (\(pane)) is not open in Vitra") }
-        guard projects.indices.contains(selected), let view = views[projects[selected].path] else {
+        guard projects.indices.contains(selected), let view = views[projects[selected].key] else {
             throw ToolError("Vitra has no project open")
         }
         return view
@@ -416,21 +426,21 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     private func show(_ runs: [Run]) {
         self.runs = runs
         refresh()
-        if projects.indices.contains(selected) { views[projects[selected].path]?.runsChanged(runs) }
+        if projects.indices.contains(selected) { views[projects[selected].key]?.runsChanged(runs) }
     }
 
     private func refresh() {
         let now = Date()
         let usage = MaestroStatus.load()
         tabBar.show(tabs(now: now), selected: selected)
-        tabBar.show(recent: closed.map(\.path))
+        tabBar.show(recent: closed.map { ($0.key, $0.name, $0.path) })
         tabBar.show(chips: ProviderChips.derive(runs: runs, usage: usage, now: now))
         tabBar.show(costToday: WorkerBoard.totals(runs, since: Calendar.current.startOfDay(for: now)).cost)
         // Only the project on screen is redrawn; the others catch up when shown.
-        if projects.indices.contains(selected), let view = views[projects[selected].path] {
+        if projects.indices.contains(selected), let view = views[projects[selected].key] {
             view.show(usage: MaestroStatus.label(usage, now: now))
-            view.show(model: MaestroStatus.model(for: projects[selected].path))
-            view.show(attention: AttentionPolicy.label(attention[projects[selected].path], now: now))
+            view.show(model: MaestroStatus.model(for: projects[selected].key))
+            view.show(attention: AttentionPolicy.label(attention[projects[selected].key], now: now))
             view.show(WorkerBoard.runs(runs, in: projects[selected]), now: now)
         }
         scheduleAttentionTick(now: now)
@@ -439,17 +449,17 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     private func tabs(now: Date) -> [CockpitTabBar.Tab] {
         // The project in front of the user is seen as it stands.
         if window?.isKeyWindow == true, projects.indices.contains(selected) {
-            seenAt[projects[selected].path] = now
+            seenAt[projects[selected].key] = now
         }
         return projects.map {
-            let record = attention[$0.path]
+            let record = attention[$0.key]
             return CockpitTabBar.Tab(
                 name: $0.name,
                 running: WorkerBoard.runningCount(WorkerBoard.runs(runs, in: $0)),
                 callsForYou: record?.state == .needsPermission,
                 maestroWorking: record?.state == .working,
-                finishedUnseen: AttentionPolicy.isUnseen(record, seen: seenAt[$0.path], now: now),
-                queued: views[$0.path]?.promptQueue.count ?? 0,
+                finishedUnseen: AttentionPolicy.isUnseen(record, seen: seenAt[$0.key], now: now),
+                queued: views[$0.key]?.promptQueue.count ?? 0,
                 isAsleep: $0.isAsleep,
                 path: $0.path
             )
@@ -468,8 +478,8 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     private func refreshAttention() {
         let now = Date()
         var records: [String: AttentionRecord] = [:]
-        for project in projects where views[project.path] != nil {
-            records[project.path] = Attention.load(for: project.path)
+        for project in projects where views[project.key] != nil {
+            records[project.key] = Attention.load(for: project.key)
         }
         let previous = attention
         attention = records
@@ -482,13 +492,13 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         // Typing in that project's terminal: the app is in front, on that tab.
         let isInFront = NSApp.isActive && window?.isKeyWindow == true
         for (index, project) in projects.enumerated() {
-            guard let record = records[project.path] else {
-                _ = throttle.shouldAlert(project: project.path, state: nil, now: now, isWatching: false)
+            guard let record = records[project.key] else {
+                _ = throttle.shouldAlert(project: project.key, state: nil, now: now, isWatching: false)
                 continue
             }
             let isWatching = isInFront && index == selected
-            if throttle.shouldAlert(project: project.path, state: record.state, now: now, isWatching: isWatching) {
-                alerts.alert(project: project.path, name: project.name, body: AttentionPolicy.body(record))
+            if throttle.shouldAlert(project: project.key, state: record.state, now: now, isWatching: isWatching) {
+                alerts.alert(project: project.key, name: project.name, body: AttentionPolicy.body(record))
             }
         }
         showAttention(now: now)
@@ -497,10 +507,10 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     /// Redraws what depends on the attention records and the clock.
     private func showAttention(now: Date) {
         tabBar.show(tabs(now: now), selected: selected)
-        if projects.indices.contains(selected), let view = views[projects[selected].path] {
-            view.show(attention: AttentionPolicy.label(attention[projects[selected].path], now: now))
+        if projects.indices.contains(selected), let view = views[projects[selected].key] {
+            view.show(attention: AttentionPolicy.label(attention[projects[selected].key], now: now))
         }
-        let calling = projects.filter { AttentionPolicy.isCalling(attention[$0.path], now: now) }.count
+        let calling = projects.filter { AttentionPolicy.isCalling(attention[$0.key], now: now) }.count
         NSApp.dockTile.badgeLabel = calling > 0 ? "\(calling)" : nil
         scheduleAttentionTick(now: now)
     }
@@ -512,7 +522,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         attentionTick?.cancel()
         attentionTick = nil
         guard window?.occlusionState.contains(.visible) == true else { return }
-        let waiting = projects.compactMap { attention[$0.path] }.filter { $0.state != .working }
+        let waiting = projects.compactMap { attention[$0.key] }.filter { $0.state != .working }
         guard !waiting.isEmpty else { return }
         let untilCalling = waiting.compactMap { AttentionPolicy.untilCalling($0, now: now) }.min()
         let delay = min(untilCalling ?? Self.attentionTickLimit, Self.attentionTickLimit)
@@ -525,11 +535,11 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     /// a minute, and rebuilding the worker board from that would be the whole
     /// cockpit redrawing for a percentage that changed.
     private func refreshMaestroStatus() {
-        guard projects.indices.contains(selected), let view = views[projects[selected].path] else { return }
+        guard projects.indices.contains(selected), let view = views[projects[selected].key] else { return }
         let now = Date()
         let usage = MaestroStatus.load()
         view.show(usage: MaestroStatus.label(usage, now: now))
-        view.show(model: MaestroStatus.model(for: projects[selected].path))
+        view.show(model: MaestroStatus.model(for: projects[selected].key))
         tabBar.show(chips: ProviderChips.derive(runs: runs, usage: usage, now: now))
     }
 
@@ -666,10 +676,10 @@ extension CockpitWindowController: ToolHost {
     /// The project a call came from — the one on screen for a call that names
     /// none — without bringing it forward.
     private func locate(_ pane: String?) throws -> (index: Int, view: ProjectView) {
-        let named = pane.flatMap { id in projects.firstIndex { views[$0.path]?.paneID == id } }
+        let named = pane.flatMap { id in projects.firstIndex { views[$0.key]?.paneID == id } }
         if let pane, named == nil { throw ToolError("the project this call came from (\(pane)) is not open in Vitra") }
         let index = named ?? selected
-        guard projects.indices.contains(index), let view = views[projects[index].path] else {
+        guard projects.indices.contains(index), let view = views[projects[index].key] else {
             throw ToolError("Vitra has no project open")
         }
         return (index, view)

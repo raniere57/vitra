@@ -47,7 +47,7 @@ final class ProjectView: NSView {
     /// The project's path, not a fresh id: a maestro that outlived the app in
     /// the pty-host still carries the old value, and must still be routed
     /// here by the next app.
-    var paneID: String { project.path }
+    var paneID: String { project.key }
 
     /// The project's two terminals as the pty-host holds them, when it does.
     private var maestroHost: HostedPTY?
@@ -266,7 +266,7 @@ final class ProjectView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = CockpitStyle.ground.cgColor
-        if let queueStore { promptQueue = PromptQueueStore.load(for: project.path, in: queueStore) }
+        if let queueStore { promptQueue = PromptQueueStore.load(for: project.key, in: queueStore) }
         build()
         if showsHint ?? !FirstRunHint().isDismissed { addHint() }
         applySideWidth()
@@ -803,7 +803,7 @@ final class ProjectView: NSView {
     /// went away. Their pages load when each is first shown: a page is a
     /// WebKit process, not worth starting for a panel nobody opened.
     private func restoreBrowserPages() {
-        guard let saved = BrowserPages.load(project: project.path) else { return }
+        guard let saved = BrowserPages.load(project: project.key) else { return }
         let now = Date()
         for (id, address) in saved.pages.sorted(by: { $0.key < $1.key }) {
             guard let url = URL(string: address), id == BrowserTabs.maestro || BrowserTabs.isUsers(id) else { continue }
@@ -821,7 +821,7 @@ final class ProjectView: NSView {
             guard let url, url.scheme != "about" else { continue }
             pages[tab.id] = url.absoluteString
         }
-        BrowserPages.save(.init(pages: pages, current: browserTabs.current), project: project.path)
+        BrowserPages.save(.init(pages: pages, current: browserTabs.current), project: project.key)
     }
 
     private func showBrowserTab(_ id: String) {
@@ -1021,7 +1021,7 @@ final class ProjectView: NSView {
     /// Types the line that starts the maestro into a fresh shell.
     private func launchMaestro(in session: TerminalSession) {
         // A file left by a maestro from an earlier launch is not this one's word.
-        Attention.remove(for: project.path)
+        Attention.remove(for: project.key)
         if project.maestro == .cursor {
             launchCursorMaestro(in: session)
             return
@@ -1039,7 +1039,7 @@ final class ProjectView: NSView {
                 // may have moved to another conversation with /resume,
                 // and that one is where they left off.
                 conversation: Maestro.conversation(
-                    Maestro.rememberedSession(for: project.path)
+                    Maestro.rememberedSession(for: project.key)
                         ?? project.session
                         ?? UUID().uuidString.lowercased(),
                     project: project.path
@@ -1111,7 +1111,7 @@ final class ProjectView: NSView {
             colorDefaults: kit.config.colorDefaults,
             // The pane routes tool calls back here; the project is
             // what the session hook files its conversation under.
-            extra: ["VITRA_PANE": paneID, "VITRA_PROJECT": project.path]
+            extra: ["VITRA_PANE": paneID, "VITRA_PROJECT": project.path, "VITRA_TAB": project.key]
         )
         let core = try GhosttyTerminalCore(size: size)
         let session: TerminalSession
@@ -1119,7 +1119,7 @@ final class ProjectView: NSView {
         if TerminalHosting.isEnabled {
             let backend = HostedPTY(
                 spec: HostedPTY.Spec(
-                    id: TerminalHosting.sessionID(project: project.path, role: role),
+                    id: TerminalHosting.sessionID(project: project.key, role: role),
                     executable: shell,
                     arguments: ["-l"],
                     environment: environment,

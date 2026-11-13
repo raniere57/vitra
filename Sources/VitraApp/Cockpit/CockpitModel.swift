@@ -38,6 +38,15 @@ struct CockpitProject: Codable, Equatable {
     /// added and kept with it: a conversation belongs to the CLI it is in.
     var maestro: MaestroCLI = .claude
 
+    /// Which of the folder's tabs this is: 1 for the first, 2 for a second
+    /// maestro working in the same folder, and so on.
+    var slot = 1
+
+    /// What the tab is known by everywhere something is kept per tab: the
+    /// folder for the first tab on it, as it always was, and the folder with
+    /// its number for the others.
+    var key: String { slot <= 1 ? path : path + "#\(slot)" }
+
     init(path: String, session: String? = nil, mode: MaestroMode = .orchestrator, sidePanelHidden: Bool = false, isReading: Bool = false) {
         // One spelling per directory, so a trailing slash never makes a
         // second tab for the same place.
@@ -48,7 +57,7 @@ struct CockpitProject: Codable, Equatable {
         self.isReading = isReading
     }
 
-    private enum CodingKeys: String, CodingKey { case path, session, mode, sidePanelHidden, isReading, isAsleep, maestro }
+    private enum CodingKeys: String, CodingKey { case path, session, mode, sidePanelHidden, isReading, isAsleep, maestro, slot }
 
     /// Files saved before the mode existed, or with one this build does not
     /// know, open in the orchestrator mode.
@@ -63,9 +72,13 @@ struct CockpitProject: Codable, Equatable {
         )
         isAsleep = (try? container.decodeIfPresent(Bool.self, forKey: .isAsleep)) ?? false
         maestro = (try? container.decodeIfPresent(MaestroCLI.self, forKey: .maestro)) ?? .claude
+        slot = max((try? container.decodeIfPresent(Int.self, forKey: .slot)) ?? 1, 1)
     }
 
-    var name: String { URL(fileURLWithPath: path).lastPathComponent }
+    var name: String {
+        let folder = URL(fileURLWithPath: path).lastPathComponent
+        return slot <= 1 ? folder : "\(folder) \(slot)"
+    }
 }
 
 /// The CLI a project's maestro runs in.
@@ -100,6 +113,17 @@ enum CockpitProjects {
         return projects.contains { $0.path == project.path } ? projects : projects + [project]
     }
 
+    /// `projects` with another tab on `path`, under the first number no tab
+    /// of that folder has, open or in `taken` (the ones closed lately): a
+    /// number is never handed to two conversations.
+    static func addingTab(_ path: String, maestro: MaestroCLI = .claude, to projects: [CockpitProject], taken: [CockpitProject] = []) -> [CockpitProject] {
+        var project = CockpitProject(path: path, isReading: maestro.hasReading)
+        project.maestro = maestro
+        let used = Set((projects + taken).filter { $0.path == project.path }.map(\.slot))
+        project.slot = (1...).first { !used.contains($0) } ?? 1
+        return projects + [project]
+    }
+
     /// `projects` with the one at `from` moved to sit at `to`, and where the
     /// project that was at `selected` is afterwards.
     static func moving(_ projects: [CockpitProject], from: Int, to: Int, selected: Int) -> (projects: [CockpitProject], selected: Int) {
@@ -107,8 +131,8 @@ enum CockpitProjects {
         var moved = projects
         let project = moved.remove(at: from)
         moved.insert(project, at: min(max(to, 0), moved.count))
-        let front = projects.indices.contains(selected) ? projects[selected].path : nil
-        return (moved, moved.firstIndex { $0.path == front } ?? selected)
+        let front = projects.indices.contains(selected) ? projects[selected].key : nil
+        return (moved, moved.firstIndex { $0.key == front } ?? selected)
     }
 
     /// How many closed projects are remembered for reopening.
@@ -119,7 +143,7 @@ enum CockpitProjects {
     static func remembering(_ project: CockpitProject, in closed: [CockpitProject]) -> [CockpitProject] {
         var project = project
         project.isAsleep = false
-        return Array(([project] + closed.filter { $0.path != project.path }).prefix(closedLimit))
+        return Array(([project] + closed.filter { $0.key != project.key }).prefix(closedLimit))
     }
 
     /// The tab to show after the one at `index` went to sleep: the nearest
@@ -185,6 +209,7 @@ struct CockpitState: Codable, Equatable {
             guard !isUUID else { return project }
             var clean = CockpitProject(path: project.path, mode: project.mode, sidePanelHidden: project.sidePanelHidden, isReading: project.isReading)
             clean.maestro = project.maestro
+            clean.slot = project.slot
             clean.isAsleep = project.isAsleep
             return clean
         }
@@ -591,6 +616,13 @@ enum Maestro {
         return file.path
     }
 
+    /// The tab a hook or status line runs for, from the shell it was started
+    /// in: the tab's key, or the folder in a shell started before tabs had one.
+    static var tabFromEnvironment: String? {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["VITRA_TAB"] ?? environment["VITRA_PROJECT"]
+    }
+
     /// What a maestro that was cut off mid-turn is told when it comes back.
     static func resumePrompt(mode: MaestroMode) -> String {
         let base = "O Vitra foi reiniciado enquanto você trabalhava. Continue de onde parou, sem refazer o que já estava pronto."
@@ -927,7 +959,7 @@ enum MaestroStatus {
     static func run(input: Data, binary: String) {
         if let usage = usage(fromStatusInput: input, now: Date()) { save(usage) }
         let fields = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any]
-        let project = ProcessInfo.processInfo.environment["VITRA_PROJECT"]
+        let project = Maestro.tabFromEnvironment
             ?? (fields?["workspace"] as? [String: Any])?["project_dir"] as? String
             ?? fields?["cwd"] as? String
         if let project, let model = model(fromStatusInput: input, fallbackEffort: settingsEffort) {

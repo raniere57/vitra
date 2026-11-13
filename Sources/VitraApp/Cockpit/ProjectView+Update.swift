@@ -13,7 +13,7 @@ extension ProjectView {
     func checkSurvivorBuild() {
         let outdated = MaestroStamp.isOutdated(
             attached: true,
-            recorded: MaestroStamp.load(for: project.path),
+            recorded: MaestroStamp.load(for: project.key),
             current: MaestroStamp.currentBuild()
         )
         guard outdated else { return }
@@ -24,7 +24,7 @@ extension ProjectView {
     /// This build typed the launch line: the stamp says so, nothing is old.
     func maestroLaunched() {
         if let build = MaestroStamp.currentBuild() {
-            MaestroStamp.record(build: build, mode: mode, for: project.path)
+            MaestroStamp.record(build: build, mode: mode, for: project.key)
         }
         updateState.relaunched()
         fitHeader()
@@ -40,7 +40,7 @@ extension ProjectView {
         guard updateState.phase == .outdated else { return }
         // Read now, not from what the window last saw: at launch it may not
         // have seen anything yet.
-        let state = Attention.load(for: project.path)?.state
+        let state = Attention.load(for: project.key)?.state
         if state == nil || state == .waiting {
             relaunch(prompt: nil)
             return

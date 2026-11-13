@@ -719,3 +719,30 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(CursorChat.id(in: "x; rm -rf /") == nil)
     #expect(CursorChat.id(in: "") == nil)
 }
+
+// MARK: Several tabs on one folder
+
+@Test func aFolderAlreadyOpenGetsAnotherTabWithAKeyAndNameOfItsOwn() {
+    var projects = CockpitProjects.adding("/work/vitra", to: [])
+    projects = CockpitProjects.addingTab("/work/vitra/", maestro: .cursor, to: projects)
+    #expect(projects.map(\.path) == ["/work/vitra", "/work/vitra"])
+    #expect(projects.map(\.key) == ["/work/vitra", "/work/vitra#2"])
+    #expect(projects.map(\.name) == ["vitra", "vitra 2"])
+    #expect(projects[1].maestro == .cursor)
+    // A number held by a tab closed lately is not handed out again.
+    var closed = CockpitProject(path: "/work/vitra")
+    closed.slot = 3
+    let third = CockpitProjects.addingTab("/work/vitra", to: projects, taken: [closed])
+    #expect(third.last?.slot == 4)
+    // The first free number is taken, not the next after the highest.
+    #expect(CockpitProjects.addingTab("/work/vitra", to: [projects[1]]).last?.slot == 1)
+}
+
+@Test func aTabsNumberSurvivesASaveAndOldFilesAreTheFirstTab() throws {
+    var second = CockpitProject(path: "/a", session: UUID().uuidString.lowercased())
+    second.slot = 2
+    let back = try JSONDecoder().decode(CockpitProject.self, from: JSONEncoder().encode(second))
+    #expect(back.key == "/a#2")
+    let old = try JSONDecoder().decode(CockpitProject.self, from: Data(#"{"path":"/a"}"#.utf8))
+    #expect(old.key == "/a")
+}

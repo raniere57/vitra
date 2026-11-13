@@ -104,7 +104,7 @@ extension ProjectView {
         let shown = window != nil
         terminal?.setDrawingActive(!isReading && shown)
         if isReading {
-            let record = Attention.load(for: project.path)
+            let record = Attention.load(for: project.key)
             leitura.attention(record?.state, since: record?.since)
             leitura.isHidden = false
             leitura.setVisible(shown)
@@ -112,7 +112,7 @@ extension ProjectView {
             leitura.isHidden = true
             leitura.setVisible(false)
         }
-        pulseSwitch(isReading && Attention.load(for: project.path)?.state == .needsPermission)
+        pulseSwitch(isReading && Attention.load(for: project.key)?.state == .needsPermission)
         // The panel takes the room the reading column does not use.
         needsLayout = true
     }
@@ -123,7 +123,7 @@ extension ProjectView {
     /// The maestro's state, for Leitura's live row, composer and banner.
     func leituraAttentionChanged(to state: AttentionState?) {
         guard isLeituraMade else { return }
-        let record = Attention.load(for: project.path)
+        let record = Attention.load(for: project.key)
         leitura.attention(state, since: record?.state == state ? record?.since : nil)
         pulseSwitch(isReading && state == .needsPermission)
     }
