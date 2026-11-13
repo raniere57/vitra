@@ -134,3 +134,20 @@ private func filled(_ text: String) -> [Character] {
     let hit = try #require(TerminalPathLink.match(in: slashed, at: 4, base: root))
     #expect(hit.url.lastPathComponent == "one.swift")
 }
+
+@Test func aPathWithSpacesWordWrappedOverRowsIsFoundFromAnyOfItsWords() throws {
+    let path = "/Users/x/Downloads/Apresentação de resultados (versão infográfica) - outubro fechado.pptx"
+    let rows = [
+        row("pagaram (37%). Arquivo:", width: 60),
+        row("/Users/x/Downloads/Apresentação de resultados (versão", width: 60),
+        row("  infográfica) - outubro", width: 60),
+        row("  fechado.pptx. Script e regra atualizados no main.", width: 60),
+    ]
+    let exists: (URL) -> Bool = { $0.path == path }
+    for (line, column) in [(1, 3), (1, 34), (2, 5), (3, 4)] {
+        let hit = try #require(TerminalPathLink.matchSpaced(rows: rows, row: line, column: column, fileExists: exists))
+        #expect(hit.url.path == path)
+    }
+    #expect(TerminalPathLink.matchSpaced(rows: rows, row: 3, column: 20, fileExists: exists) == nil)
+    #expect(TerminalPathLink.matchSpaced(rows: rows, row: 0, column: 3, fileExists: exists) == nil)
+}

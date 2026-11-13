@@ -747,11 +747,16 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     private func pathLink(at position: (column: UInt16, row: UInt16)) -> URL? {
         guard let base = session.currentDirectory ?? pathBase else { return nil }
         let (rows, localRow) = wrappedRows(around: Int(position.row))
-        return TerminalPathLink.match(
-            rows: rows,
-            row: localRow,
-            column: Int(position.column),
-            base: base
+        if let hit = TerminalPathLink.match(rows: rows, row: localRow, column: Int(position.column), base: base) {
+            return hit.url
+        }
+        // A path with spaces, word-wrapped by whoever printed it.
+        let row = Int(position.row), around = 4
+        let first = max(0, row - around), last = min(Int(snapshot.rows) - 1, row + around)
+        return TerminalPathLink.matchSpaced(
+            rows: (first ... last).map { rowCharacters($0) },
+            row: row - first,
+            column: Int(position.column)
         )?.url
     }
 

@@ -100,7 +100,7 @@ final class LeituraContext {
     /// The file an inline code span names, when it is one that exists.
     func resolveFile(_ text: String) -> URL? {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard trimmed.count > 2, trimmed.count < 400, !trimmed.contains(" "),
+        guard trimmed.count > 2, trimmed.count < 400, !trimmed.contains(" ") || trimmed.hasPrefix("/") || trimmed.hasPrefix("~/"),
               trimmed.contains("/") || trimmed.range(of: #"\.[A-Za-z]{1,6}(:\d+)?$"#, options: .regularExpression) != nil
         else { return nil }
         let path = trimmed.replacingOccurrences(of: #":\d+(:\d+)?$"#, with: "", options: .regularExpression)

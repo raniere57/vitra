@@ -56,6 +56,57 @@ enum TerminalPathLink {
         return Hit(url: url, line: line, column: col)
     }
 
+    /// An absolute path with spaces in it, possibly broken over lines by the
+    /// program that printed it (word wrap, so the rows do not fill their last
+    /// column). `rows` is a window of rows around the click. Every stretch
+    /// from a `/` or `~/` before the click to a word end after it is tried,
+    /// longest first; the one that exists is the path.
+    static func matchSpaced(
+        rows: [[Character]],
+        row: Int,
+        column: Int,
+        fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
+    ) -> Hit? {
+        guard rows.indices.contains(row) else { return nil }
+        var text: [Character] = []
+        var click: Int?
+        for (index, cells) in rows.enumerated() {
+            let end = cells.lastIndex { !$0.isWhitespace }.map { $0 + 1 } ?? 0
+            var start = 0
+            if index > 0, !isWrapped(rows[index - 1]) {
+                start = cells.firstIndex { !$0.isWhitespace } ?? end
+                if !text.isEmpty { text.append(" ") }
+            }
+            if index == row {
+                guard (start ..< end).contains(column) else { return nil }
+                click = text.count + column - start
+            }
+            if start < end { text.append(contentsOf: cells[start ..< end]) }
+        }
+        guard let click else { return nil }
+
+        let reach = 400
+        var starts: [Int] = []
+        for index in stride(from: click, through: max(0, click - reach), by: -1) where starts.count < 8 {
+            let opens = text[index] == "/" || (text[index] == "~" && index + 1 < text.count && text[index + 1] == "/")
+            guard opens, index == 0 || isBoundary(text[index - 1]) || "([".contains(text[index - 1]) else { continue }
+            starts.append(index)
+        }
+        guard !starts.isEmpty else { return nil }
+        var ends: [Int] = []
+        for index in click ..< min(text.count, click + reach) where index == text.count - 1 || isBoundary(text[index + 1]) {
+            ends.append(index)
+        }
+        for start in starts {
+            for end in ends.reversed().prefix(30) {
+                let path = trimTrailing(String(text[start ... end]))
+                guard path.contains(" "), let url = resolve(path, base: URL(fileURLWithPath: "/")), fileExists(url) else { continue }
+                return Hit(url: url, line: nil, column: nil)
+            }
+        }
+        return nil
+    }
+
     /// Concatenates the soft-wrapped run that holds `(row, column)`.
     static func joined(rows: [[Character]], row: Int, column: Int) -> ([Character], Int)? {
         guard rows.indices.contains(row) else { return nil }
