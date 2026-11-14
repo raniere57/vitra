@@ -112,6 +112,9 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         watchUsage()
         // A project left asleep stays asleep through a relaunch.
         select(selected, waking: false)
+        // Maestros the pty-host kept through the relaunch run in tabs not
+        // opened yet; their dots and alerts should not wait for a click.
+        refreshAttention()
     }
 
     @available(*, unavailable)
@@ -199,7 +202,8 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         // Somewhere already running, if there is one; nothing is woken for it.
-        let awake = projects.map { views[$0.key] != nil }
+        // A tab not opened since launch may still run a maestro the pty-host kept.
+        let awake = projects.map { !$0.isAsleep }
         select(CockpitProjects.nearestAwake(to: index, awake: awake) ?? index, waking: false)
     }
 
@@ -474,13 +478,14 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Waiting for the user
 
-    /// Reads each started project's attention file, alerts on a new wait, and
+    /// Reads each awake project's attention file, alerts on a new wait, and
     /// redraws the labels. Small files, no run list: cheap enough to follow
-    /// every write to the maestro folder.
+    /// every write to the maestro folder. Awake, not only opened: after a
+    /// relaunch the pty-host keeps maestros running in tabs with no view yet.
     private func refreshAttention() {
         let now = Date()
         var records: [String: AttentionRecord] = [:]
-        for project in projects where views[project.key] != nil {
+        for project in projects where !project.isAsleep {
             records[project.key] = Attention.load(for: project.key)
         }
         let previous = attention
