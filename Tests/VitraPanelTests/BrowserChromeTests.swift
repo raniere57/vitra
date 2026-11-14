@@ -95,6 +95,97 @@ struct BrowserChromeTests {
     panel.dropBrowser(for: "maestro")
 }
 
+/// A load overtaken by another — a restored tab's address, then an agent's
+/// open — is not a failure for whoever waited on the first.
+@MainActor
+@Test func aLoadReplacedByAnotherDoesNotFailItsWaiter() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-replaced-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let first = folder.appendingPathComponent("a.html"), second = folder.appendingPathComponent("b.html")
+    try "<h1>a</h1>".write(to: first, atomically: true, encoding: .utf8)
+    try "<h1>b</h1>".write(to: second, atomically: true, encoding: .utf8)
+
+    let browser = BrowserView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    defer { browser.prepareForRemoval() }
+    let results = try await withCheckedThrowingContinuation { (done: CheckedContinuation<[Bool], Error>) in
+        var answers: [Bool] = []
+        let answer: (Result<Void, Error>) -> Void = { result in
+            answers.append((try? result.get()) != nil)
+            if answers.count == 2 { done.resume(returning: answers) }
+        }
+        browser.load(first, completion: answer)
+        browser.load(second, completion: answer)
+    }
+    #expect(results == [true, true])
+    #expect(browser.currentURL?.lastPathComponent == "b.html")
+}
+
+/// An expression runs once: whether it returns nothing, throws or rejects,
+/// a second run would click or post twice.
+@MainActor
+@Test func anAgentsScriptRunsOnceAndItsErrorIsReported() async throws {
+    let browser = BrowserView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    defer { browser.prepareForRemoval() }
+    try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+        browser.load(URL(string: "about:blank")!) { done.resume(with: $0) }
+    }
+    _ = try await browser.evaluateUserScript("globalThis.runs = 0")
+    #expect(try await browser.evaluateUserScript("void (globalThis.runs += 1)") == nil)
+    for failing in ["(globalThis.runs += 1, null.x)", "(globalThis.runs += 1, Promise.reject(new Error('recusado')))"] {
+        let failed = (try? await browser.evaluateUserScript(failing)) == nil
+        #expect(failed)
+    }
+    #expect(try await browser.evaluateUserScript("globalThis.runs") as? Int == 3)
+    // Statements still work, and run once too.
+    #expect(try await browser.evaluateUserScript("globalThis.runs += 1; return globalThis.runs") as? Int == 4)
+}
+
+/// A page that did not load keeps its address, so Reload retries it and the
+/// tab is saved with it.
+@MainActor
+@Test func aFailedLoadKeepsTheAddressThatFailed() async throws {
+    let browser = BrowserView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    defer { browser.prepareForRemoval() }
+    try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+        browser.load(URL(string: "about:blank")!) { done.resume(with: $0) }
+    }
+    // A high port nothing listens on (WebKit blocks low ones like 9 outright).
+    let down = URL(string: "http://127.0.0.1:65531/")!
+    let result = await withCheckedContinuation { (done: CheckedContinuation<Result<Void, Error>, Never>) in
+        browser.load(down) { done.resume(returning: $0) }
+    }
+    #expect((try? result.get()) == nil)
+    // Once the error page is up, the address is the one it settled on.
+    for _ in 0 ..< 40 {
+        let text = try? await browser.evaluate("return document.body ? document.body.innerText : ''") as? String
+        if text?.contains("127.0.0.1:65531") == true { break }
+        try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    #expect(browser.currentURL == down)
+}
+
+/// A local page gets the style sheet beside it, as every generated report
+/// expects.
+@MainActor
+@Test func aLocalPageLoadsWhatSitsBesideIt() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-assets-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    try "h1 { color: rgb(1, 2, 3); }".write(to: folder.appendingPathComponent("style.css"), atomically: true, encoding: .utf8)
+    let page = folder.appendingPathComponent("index.html")
+    try "<html><head><link rel=stylesheet href=style.css></head><body><h1>Relatório</h1></body></html>"
+        .write(to: page, atomically: true, encoding: .utf8)
+
+    let browser = BrowserView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    defer { browser.prepareForRemoval() }
+    try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+        browser.load(page) { done.resume(with: $0) }
+    }
+    let color = try await browser.evaluate("return getComputedStyle(document.querySelector('h1')).color") as? String
+    #expect(color == "rgb(1, 2, 3)")
+}
+
 @Test func aFailurePageShowsTheAddressAndReasonAsTextNeverAsMarkup() {
     let page = BrowserScripts.failurePage(address: "http://x/<script>alert(1)</script>", reason: "A \"conexão\" foi <recusada> & pronto")
     #expect(!page.contains("<script>alert(1)</script>"))

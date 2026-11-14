@@ -42,6 +42,8 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
     private var addressBeforeList = ""
     private let progress = NSProgressIndicator()
     private var pendingLoads: [(Result<Void, Error>) -> Void] = []
+    /// The error page on screen, shown under the address that failed.
+    private var failurePage: WKNavigation?
     private lazy var findBar: FindBar = {
         let bar = FindBar(placeholder: "find in page")
         bar.onStep = { [weak self] query, forward in self?.find(query, forward: forward) }
@@ -79,7 +81,9 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         pendingLoads.append(completion)
 
         if url.isFileURL {
-            webView.loadFileURL(url, allowingReadAccessTo: url)
+            // The folder, not the file alone: a report or a build loads its
+            // style sheet, scripts and images from beside it.
+            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         } else {
             webView.load(URLRequest(url: url))
         }
@@ -197,9 +201,34 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         // `callAsyncJavaScript` runs a function body, so a bare expression has
         // to be returned explicitly. Statements are tried when that does not
         // parse, which is what makes both `1 + 1` and `let x = 1; return x` work.
-        if let value = try? await evaluate("return (\(script))") { return value }
-        return try await evaluate(script)
+        //
+        // Only when it does not parse: an expression that ran and threw, or
+        // ran and gave `undefined` (`button.click()`), has already done what
+        // it does — a click, a POST — and running it again would do it twice.
+        // So what it throws is caught in the page and handed back as a value,
+        // and the one exception that remains is the parser's.
+        guard let webView else { throw ToolFailure("the browser is not open") }
+        let value: Any?
+        do {
+            value = try await webView.callAsyncJavaScript(
+                "try { return await (\(script)) } catch (e) { return { \(Self.thrownKey): String(e) } }",
+                arguments: [:],
+                in: nil,
+                contentWorld: Self.world
+            )
+        } catch let error as WKError where error.code == .javaScriptExceptionOccurred {
+            return try await evaluate(script)
+        } catch {
+            throw ToolFailure("JavaScript failed: \(error.localizedDescription)")
+        }
+        if let thrown = (value as? [String: Any])?[Self.thrownKey] {
+            throw ToolFailure("JavaScript failed: \(thrown)")
+        }
+        return value
     }
+
+    /// The key an expression's exception comes back under, in place of a result.
+    private static let thrownKey = "__vitraThrown"
 
     public func snapshot() async throws -> String {
         let raw = try await evaluate(BrowserScripts.snapshot(limit: Self.snapshotLimit))
@@ -355,7 +384,8 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         progress.stopAnimation(nil)
         progress.isHidden = true
         onPageChanged?(webView.title ?? "", webView.url?.host ?? "")
-        if let url = webView.url {
+        // A page that failed is not somewhere to go back to by typing.
+        if let url = webView.url, navigation !== failurePage {
             BrowserHistory.record(url)
             refreshHistory()
         }
@@ -379,6 +409,12 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         progress.stopAnimation(nil)
         progress.isHidden = true
         showFailure(error)
+        // A cancelled load was replaced by a newer one — a restored tab's
+        // address overtaken by an agent's `browser_open`, two opens back to
+        // back — and that one's finish answers everyone waiting. Failing them
+        // here would tell an agent its page failed while it is still loading.
+        let failure = error as NSError
+        if failure.domain == NSURLErrorDomain, failure.code == NSURLErrorCancelled { return }
         finishLoads(with: .failure(ToolFailure(error.localizedDescription)))
     }
 
@@ -392,9 +428,19 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         let isCancelled = failure.domain == NSURLErrorDomain && failure.code == NSURLErrorCancelled
         let becameDownload = failure.domain == "WebKitErrorDomain" && failure.code == 102
         guard !isCancelled, !becameDownload, let webView else { return }
-        let address = (failure.userInfo[NSURLErrorFailingURLStringErrorKey] as? String) ?? self.address.stringValue
-        webView.loadHTMLString(BrowserScripts.failurePage(address: address, reason: failure.localizedDescription), baseURL: nil)
-        self.address.stringValue = address
+        let address = (failure.userInfo[NSURLErrorFailingURLErrorKey] as? URL)?.absoluteString
+            ?? (failure.userInfo[NSURLErrorFailingURLStringErrorKey] as? String)
+            ?? self.address.stringValue
+        let page = BrowserScripts.failurePage(address: address, reason: failure.localizedDescription)
+        // Under the address that failed, not about:blank: the bar keeps it,
+        // Reload tries it again — the dev server that was not up yet — and
+        // the tab is saved with it rather than dropped as a blank page.
+        if let url = URL(string: address), ["http", "https"].contains(url.scheme?.lowercased()) {
+            failurePage = webView.loadSimulatedRequest(URLRequest(url: url), responseHTML: page)
+        } else {
+            webView.loadHTMLString(page, baseURL: nil)
+            self.address.stringValue = address
+        }
     }
 
     private func finishLoads(with result: Result<Void, Error>) {
