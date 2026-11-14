@@ -50,6 +50,8 @@ final class TranscriptReader: @unchecked Sendable {
     private var end: UInt64 = 0
     private var hasLoaded = false
     private var watch: DispatchSourceFileSystemObject?
+    /// Asked to follow: a file missing then is watched once it is written.
+    private var isFollowing = false
     private var stats = Stats()
 
     init(url: URL, itemsPerRead: Int = 80, blockSize: Int = 256 * 1024, onUpdate: @escaping @MainActor @Sendable (Update) -> Void) {
@@ -66,6 +68,9 @@ final class TranscriptReader: @unchecked Sendable {
         queue.async { [self] in
             // Again when the file was missing: a new session writes it late.
             if !hasLoaded || end == 0 { loadTail() }
+            // A new session's file appears after the follow was asked for,
+            // when there was nothing to watch yet.
+            if isFollowing { startWatching() }
             publish()
         }
     }
@@ -82,6 +87,7 @@ final class TranscriptReader: @unchecked Sendable {
     /// Follows appends while `following`; a hidden Leitura watches nothing.
     func follow(_ following: Bool) {
         queue.async { [self] in
+            isFollowing = following
             if following { startWatching() } else { stopWatching() }
         }
     }

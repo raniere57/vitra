@@ -83,6 +83,26 @@ struct LeituraReaderTests {
         #expect(update.isMissing && update.items.isEmpty)
     }
 
+    /// A new session's file is written after Leitura opened and asked to
+    /// follow it: once it is there, its appends still arrive.
+    @Test func aFileWrittenAfterTheFollowIsFollowed() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("late.jsonl")
+        let collector = Collector()
+        let reader = reader(file, collector)
+        reader.open()
+        reader.follow(true)
+        #expect(try await waitFor(1, collector).isMissing)
+
+        try (JSONL.user("primeira", "u1", at: 0) + "\n").write(to: file, atomically: true, encoding: .utf8)
+        reader.open()
+        #expect(try await waitFor(2, collector).items.count == 1)
+
+        try append(JSONL.text("resposta", "a1", at: 1) + "\n", to: file)
+        #expect(try await waitFor(3, collector).items.count == 2)
+    }
+
     /// 50 MB of transcript: the tail is read in well under a second, and only
     /// a sliver of the file is read or parsed. Older stretches come on demand.
     @Test func readsOnlyTheTailOfABigFile() async throws {
