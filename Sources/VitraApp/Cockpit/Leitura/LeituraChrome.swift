@@ -173,8 +173,11 @@ final class MenuOptionButton: NSView {
     override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    /// One press per click: the second of a double-click would be the same
+    /// digit again, and answer the next question or permission unseen.
     override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onPress?() }
+        guard event.clickCount == 1, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        onPress?()
     }
 
     override func accessibilityPerformPress() -> Bool {
