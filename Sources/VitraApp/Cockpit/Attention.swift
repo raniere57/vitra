@@ -87,9 +87,12 @@ enum AttentionHook {
     /// The project a hook belongs to: the one the cockpit named in the shell's
     /// environment, else the folder claude was in.
     static func project(input: Data, environment: String?) -> String? {
-        if let environment, !environment.isEmpty { return CockpitProject(path: environment).path }
         let payload = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any]
-        return (payload?["cwd"] as? String).map { CockpitProject(path: $0).path }
+        let cwd = payload?["cwd"] as? String
+        if let environment, !environment.isEmpty {
+            return Maestro.belongs(cwd: cwd, to: environment) ? CockpitProject(path: environment).path : nil
+        }
+        return cwd.map { CockpitProject(path: $0).path }
     }
 
     /// The `hooks` entries for the maestro's settings: one command per event.

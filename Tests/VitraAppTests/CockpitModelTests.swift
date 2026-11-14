@@ -487,6 +487,12 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
 
     // Nothing that is not exactly a session id is ever remembered: it ends up
     // on a command line.
+    // A background session for another folder carries this tab's environment.
+    let stray = "fd35f303-918f-4ae8-90d3-e375be37ab0f"
+    Maestro.recordSession(hookInput: hook(stray, "/work/efetivy"), project: "/work/hapto", in: directory)
+    #expect(Maestro.rememberedSession(for: "/work/hapto", in: directory) != stray)
+    #expect(Maestro.belongs(cwd: "/work/hapto/.claude/worktrees/x", to: "/work/hapto#2"))
+    #expect(!Maestro.belongs(cwd: "/work/hapto-maestro", to: "/work/hapto"))
     Maestro.recordSession(hookInput: hook("x; rm -rf ~", "/work/hapto"), project: "/work/hapto", in: directory)
     Maestro.recordSession(hookInput: Data("not json".utf8), project: "/work/hapto", in: directory)
     Maestro.recordSession(hookInput: Data(), project: "/work/hapto", in: directory)

@@ -85,7 +85,9 @@ private func update(_ event: String, type: String? = nil, message: String? = nil
 }
 
 @Test func projectIsTheCockpitsOneWhenNamedElseTheWorkingFolder() {
-    #expect(AttentionHook.project(input: hook("Stop"), environment: "/Users/x/other") == CockpitProject(path: "/Users/x/other").path)
+    #expect(AttentionHook.project(input: hook("Stop"), environment: project + "#2") == CockpitProject(path: project + "#2").path)
+    // A session in another folder that inherited this tab's environment is not the tab's.
+    #expect(AttentionHook.project(input: hook("Stop"), environment: "/Users/x/other") == nil)
     #expect(AttentionHook.project(input: hook("Stop"), environment: nil) == CockpitProject(path: project).path)
     #expect(AttentionHook.project(input: Data(), environment: "") == nil)
 }

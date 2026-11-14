@@ -623,6 +623,21 @@ enum Maestro {
         return environment["VITRA_TAB"] ?? environment["VITRA_PROJECT"]
     }
 
+    /// Whether a session that runs in `cwd` can be the tab's. claude's daemon
+    /// for background sessions keeps the environment of the terminal that
+    /// started it, so a session it runs for another folder still carries
+    /// this tab's VITRA_TAB; taken at its word, it hijacked the tab.
+    static func belongs(cwd: String?, to tab: String) -> Bool {
+        guard let cwd, !cwd.isEmpty else { return true }
+        var folder = tab
+        if let hash = folder.lastIndex(of: "#"), Int(folder[folder.index(after: hash)...]) != nil {
+            folder = String(folder[..<hash])
+        }
+        folder = CockpitProject(path: folder).path
+        let place = CockpitProject(path: cwd).path
+        return place == folder || place.hasPrefix(folder + "/")
+    }
+
     /// What a maestro that was cut off mid-turn is told when it comes back.
     static func resumePrompt(mode: MaestroMode) -> String {
         let base = "O Vitra foi reiniciado enquanto você trabalhava. Continue de onde parou, sem refazer o que já estava pronto."
@@ -714,7 +729,8 @@ enum Maestro {
         guard let input = (try? JSONSerialization.jsonObject(with: hookInput)) as? [String: Any],
               let session = input["session_id"] as? String,
               UUID(uuidString: session) != nil,
-              let path = project ?? input["cwd"] as? String
+              let path = project ?? input["cwd"] as? String,
+              belongs(cwd: input["cwd"] as? String, to: path)
         else { return }
         let record = ["path": CockpitProject(path: path).path, "session": session]
         guard let data = try? JSONEncoder().encode(record) else { return }
