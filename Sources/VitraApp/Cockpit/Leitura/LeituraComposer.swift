@@ -125,7 +125,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     /// The labels follow whether the maestro is mid-turn.
     func setWorking(_ working: Bool) {
         isWorking = working
-        let title = working ? "Enviar (entra na fila · ⌃⏎ envia já)" : "Enviar"
+        let title = working ? "Enviar (lê assim que puder · ⌃⏎ envia já)" : "Enviar"
         send.attributedTitle = NSAttributedString(string: title + "  ⏎", attributes: [.font: ReadingStyle.smallMedium, .foregroundColor: CockpitStyle.bar])
         send.layer?.backgroundColor = CockpitStyle.accent.cgColor
         send.toolTip = working
