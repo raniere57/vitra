@@ -44,11 +44,17 @@ final class DeliveryActionsView: NSStackView {
         guard opening, let delivery else { return }
         reading += 1
         let this = reading
+        // Hidden until git answers, and for good when the branch is gone: the
+        // review would only say there is nothing to see. Hidden, not disabled,
+        // because the accent is baked into the title and would not dim.
+        button.isHidden = true
+        stat.stringValue = ""
         DispatchQueue.global(qos: .utility).async {
             let text = DeliveryDiff.summary(delivery)
             DispatchQueue.main.async { [weak self] in
                 MainActor.assumeIsolated {
                     guard let self, this == self.reading else { return }
+                    self.button.isHidden = text == nil
                     self.stat.stringValue = text ?? "já integrada ou descartada"
                 }
             }

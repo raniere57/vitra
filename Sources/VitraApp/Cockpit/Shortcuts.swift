@@ -89,6 +89,7 @@ struct Shortcut {
 
             Shortcut(menu: .file, title: "Abrir projeto…", chord: chord("o"), action: #selector(CockpitWindowController.openProject(_:))),
             Shortcut(menu: .file, title: "Fechar projeto", chord: chord("w"), action: #selector(CockpitWindowController.closeProject(_:))),
+            Shortcut(menu: .file, title: "Reabrir projeto fechado", chord: chord("t", [.command, .shift]), action: #selector(CockpitWindowController.reopenClosedProject(_:))),
             Shortcut(menu: .file, title: "Suspender projeto", chord: nil, action: #selector(CockpitWindowController.sleepProject(_:))),
             Shortcut(menu: .file, title: "Adicionar à fila", chord: chord("\r", [.command, .shift]), action: #selector(CockpitWindowController.addToQueue(_:)), separatorBefore: true),
 

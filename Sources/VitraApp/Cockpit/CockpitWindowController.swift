@@ -162,6 +162,11 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         select(projects.count - 1)
     }
 
+    /// ⇧⌘T: the tab closed last, back, so a stray ⌘W is undone from the keyboard.
+    @objc func reopenClosedProject(_ sender: Any?) {
+        if let key = closed.first?.key { reopen(key) }
+    }
+
     /// Puts back a tab closed lately: the same conversation, mode and panel.
     private func reopen(_ key: String) {
         guard let index = closed.firstIndex(where: { $0.key == key }) else { return }
@@ -584,15 +589,28 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     @objc private func occlusionChanged(_ notification: Notification) {
         let visible = window?.occlusionState.contains(.visible) ?? false
         feed.setVisible(visible)
-        // A minimized or covered window draws nothing and polls nothing:
-        // the project in front stops as one in a background tab does.
-        current?.setShown(visible)
+        // Nobody looking: the project in front stops drawing too, and lets go
+        // of its terminals' display link and GPU surfaces until they are.
+        shownView?.setShown(visible)
         showAttention(now: Date())
+    }
+
+    /// The project's view when it is the one on the stage, not hidden behind
+    /// the sleeping or welcome page.
+    private var shownView: ProjectView? {
+        guard let view = current, view.superview === stage else { return nil }
+        return view
     }
 
     /// Coming back to the window is looking at the project in front.
     func windowDidBecomeKey(_ notification: Notification) {
+        shownView?.keyChanged()
         refresh()
+    }
+
+    /// Leaving the window: its cursors stop blinking and draw hollow.
+    func windowDidResignKey(_ notification: Notification) {
+        shownView?.keyChanged()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -646,6 +664,8 @@ extension CockpitWindowController: NSMenuItemValidation {
             let asleep = projects.indices.contains(selected) && projects[selected].isAsleep
             item.title = asleep ? "Retomar projeto" : "Suspender projeto"
             return projects.indices.contains(selected)
+        case #selector(reopenClosedProject(_:)):
+            return !closed.isEmpty
         case #selector(showProject(_:)):
             return projects.indices.contains(item.tag)
         case #selector(nextProject(_:)), #selector(previousProject(_:)):

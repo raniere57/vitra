@@ -390,6 +390,15 @@ final class ProjectView: NSView {
         sharedTerminalView?.setDrawingActive(shown && tabs.selected == .terminal)
     }
 
+    /// The window gained or lost focus: a cursor blinks and draws solid only
+    /// in the key window, and nothing else tells the terminals it changed.
+    func keyChanged() {
+        [terminal, sharedTerminalView].compactMap { $0 }.forEach {
+            $0.updateBlinkTimer()
+            $0.setNeedsRender()
+        }
+    }
+
     /// Whether something is running in the project's shell beyond the shell
     /// itself — the maestro, most likely.
     var isBusy: Bool { terminal?.session.isRunningProgram ?? false }
@@ -437,7 +446,10 @@ final class ProjectView: NSView {
         // open is memory held.
         runTitles = Dictionary(runs.map { ($0.id, $0.spec.label ?? $0.spec.worker) }) { first, _ in first }
         let isRunning = Dictionary(runs.map { ($0.id, $0.state == .running) }) { first, _ in first }
-        browserTabs.finished(isRunning: isRunning).forEach(closeBrowserTab)
+        // Except the one being looked at: a finished worker's page is often
+        // the thing to read. It goes on the first update after the user leaves it.
+        let onScreen = (window != nil && tabs.selected == .browser) ? browserTabs.current : nil
+        browserTabs.finished(isRunning: isRunning).filter { $0 != onScreen }.forEach(closeBrowserTab)
         refreshBrowserStrip()
         let running = workers.runningCount
         tabs.setTitle(running == 0 ? SideTab.workers.title : "\(SideTab.workers.title) · \(running)", for: .workers)

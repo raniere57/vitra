@@ -70,6 +70,7 @@ final class WorkersPanel: NSView {
         let view = WorkerRowView()
         view.onClick = { [weak self] in self?.toggle(id) }
         view.onReview = { [weak self] delivery in self?.onReview?(delivery) }
+        view.onStop = { [weak self] in self?.onStopAll?([id]) }
         rowViews[id] = view
         rows.addArrangedSubview(view)
         // Full width: a row's hover and its hairline run edge to edge, and it
@@ -100,6 +101,16 @@ final class WorkersPanel: NSView {
     }
 
     @objc private func stopAllWorkers(_ sender: Any?) {
+        // One click in the footer must not throw away several workers' paid
+        // work unasked; a single one has its own "Parar" in its row too.
+        if runningIDs.count > 1 {
+            let alert = NSAlert()
+            alert.messageText = "Parar \(runningIDs.count) workers?"
+            alert.informativeText = "Todos os workers em andamento neste projeto são encerrados. O que já fizeram fica como está."
+            alert.addButton(withTitle: "Parar todos")
+            alert.addButton(withTitle: "Cancelar")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
         onStopAll?(runningIDs)
     }
 
@@ -190,6 +201,8 @@ final class WorkersPanel: NSView {
 final class WorkerRowView: NSView {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     var onClick: (() -> Void)?
+    /// The user asked for this one worker to be stopped.
+    var onStop: (() -> Void)?
     var onReview: ((Delivery) -> Void)? {
         get { actions.onReview }
         set { actions.onReview = newValue }
@@ -207,7 +220,10 @@ final class WorkerRowView: NSView {
     private let answerBox = NSView.filled(CockpitStyle.bar, cornerRadius: CockpitStyle.Radius.card)
     private let hairline = NSView.rule(CockpitStyle.softLine)
     private let actions = DeliveryActionsView()
+    /// Stops just this worker; shown while its row is open and it runs.
+    private let stop = NSButton(title: "", target: nil, action: nil)
     private var delivery: Delivery?
+    private var isRunning = false
     /// Whether the row draws the hairline under it.
     var showsSeparator = true {
         didSet { hairline.isHidden = !showsSeparator }
@@ -233,6 +249,7 @@ final class WorkerRowView: NSView {
         title.stringValue = row.title
         title.textColor = row.kind == .stopped ? CockpitStyle.muted : CockpitStyle.text
         state.stringValue = row.stateText
+        isRunning = row.kind == .running
         meta.stringValue = row.meta
         // Two lines closed, all of it open: the model, the times, the cost and
         // why this worker do not fit one line of the narrow panel.
@@ -262,6 +279,7 @@ final class WorkerRowView: NSView {
         isOpen = open
         answerBox.isHidden = !(open && hasAnswer)
         actions.show(delivery, isOpen: open)
+        stop.isHidden = !(open && isRunning)
         paint()
     }
 
@@ -328,8 +346,20 @@ final class WorkerRowView: NSView {
 
     // MARK: - Layout
 
+    @objc private func stopClicked() { onStop?() }
+
     private func build() {
-        let top = NSStackView(views: [dot, title, state])
+        stop.target = self
+        stop.action = #selector(stopClicked)
+        stop.isBordered = false
+        stop.attributedTitle = NSAttributedString(string: "Parar", attributes: [
+            .font: CockpitStyle.label, .foregroundColor: CockpitStyle.dangerText,
+        ])
+        stop.toolTip = "Parar só este worker"
+        stop.isHidden = true
+        stop.setContentHuggingPriority(.required, for: .horizontal)
+        stop.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let top = NSStackView(views: [dot, title, state, stop])
         top.spacing = CockpitStyle.Space.md
         // The state word keeps its room, pinned to the right edge; the title
         // takes what is left and is the one that is cut.
