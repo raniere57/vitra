@@ -66,8 +66,16 @@ enum WorktreeSetup {
         return parsed
     }
 
+    /// Ignored folders most projects cannot build or test without, linked in
+    /// when a project has no `.vitra/worktree` of its own. Without them a
+    /// worker in a JavaScript or Python project cannot type-check or run its
+    /// tests, and its own request to link them is refused. A project's file
+    /// replaces this list.
+    static let defaultLinks = ["node_modules", ".venv", "vendor"]
+
     /// Makes what `.vitra/worktree` asks for appear in `tree`, from the
-    /// repository at `repository`. Empty when there is no file.
+    /// repository at `repository`. With no file, the default links the
+    /// checkout has and the tree lacks.
     static func apply(repository: URL, to tree: URL) -> Outcome {
         apply(listIn: repository, sourcesIn: repository, to: tree)
     }
@@ -78,7 +86,13 @@ enum WorktreeSetup {
     /// the ignored files are.
     static func apply(listIn listRoot: URL, sourcesIn repository: URL, to tree: URL) -> Outcome {
         guard let text = try? String(contentsOf: listRoot.appendingPathComponent(fileName), encoding: .utf8) else {
-            return Outcome()
+            // Only what is there to link and not already checked out (some
+            // projects commit vendor/), so nothing is reported as skipped.
+            let defaults = defaultLinks
+                .filter { FileManager.default.fileExists(atPath: repository.appendingPathComponent($0).path) }
+                .filter { !exists(tree.appendingPathComponent($0).path) }
+                .map { Entry(kind: .link, path: $0) }
+            return apply(defaults, repository: repository, to: tree)
         }
         let parsed = parse(text)
         var outcome = apply(parsed.entries, repository: repository, to: tree)

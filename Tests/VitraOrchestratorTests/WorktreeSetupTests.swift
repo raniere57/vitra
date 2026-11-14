@@ -139,6 +139,23 @@ private func write(_ text: String, to url: URL) throws {
     #expect(try FileManager.default.contentsOfDirectory(atPath: tree.path).isEmpty)
 }
 
+@Test func withoutAWorktreeFileTheCheckoutsNodeModulesIsLinkedAndATrackedVendorIsLeftAlone() throws {
+    let repository = try scratchDirectory()
+    let tree = try scratchDirectory()
+    defer {
+        try? FileManager.default.removeItem(at: repository)
+        try? FileManager.default.removeItem(at: tree)
+    }
+    try write("module", to: repository.appendingPathComponent("node_modules/hono/index.js"))
+    try write("tracked", to: repository.appendingPathComponent("vendor/lib.txt"))
+    try write("tracked", to: tree.appendingPathComponent("vendor/lib.txt"))
+
+    let outcome = WorktreeSetup.apply(repository: repository, to: tree)
+
+    #expect(outcome == WorktreeSetup.Outcome(applied: ["node_modules"], skipped: []))
+    #expect(FileManager.default.fileExists(atPath: tree.appendingPathComponent("node_modules/hono/index.js").path))
+}
+
 @Test func applyRefusesDotDotTildeAndDotEntriesEvenWhenNotParsed() throws {
     let repository = try scratchDirectory()
     let tree = try scratchDirectory()
