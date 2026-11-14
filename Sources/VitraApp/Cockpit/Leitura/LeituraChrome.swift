@@ -95,8 +95,11 @@ final class PermissionBanner: NSView {
             hint.stringValue = ""
             return
         }
-        for option in menu.options where !(option.isFreeText && menu.freeText != nil) {
-            let row = MenuOptionButton(option)
+        // The free-text option is the composer's: the rest are numbered as
+        // shown, with no gap, while a press still sends the option's own digit.
+        let shown = menu.options.filter { !($0.isFreeText && menu.freeText != nil) }
+        for (index, option) in shown.enumerated() {
+            let row = MenuOptionButton(option, position: index + 1)
             row.onPress = { [weak self] in self?.onChoose?(option) }
             options.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: options.widthAnchor).isActive = true
@@ -120,15 +123,19 @@ final class MenuOptionButton: NSView {
     private var isInside = false { didSet { paint() } }
     private let option: TerminalMenu.Option
 
-    init(_ option: TerminalMenu.Option) {
+    /// Claude Code's own fixed option, in the panel's language.
+    private static let translated = ["Chat about this": "Conversar sobre isso"]
+
+    init(_ option: TerminalMenu.Option, position: Int) {
         self.option = option
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 6
         layer?.borderWidth = 1
-        let mark = option.isChecked.map { $0 ? "☑" : "☐" } ?? String(option.number)
+        let mark = option.isChecked.map { $0 ? "☑" : "☐" } ?? String(position)
+        let label = Self.translated[option.label] ?? option.label
         let number = NSTextField.label(mark, font: CockpitStyle.mono(12, .medium), color: CockpitStyle.accent)
-        let title = NSTextField.label(option.label, font: ReadingStyle.smallMedium, color: ReadingStyle.text)
+        let title = NSTextField.label(label, font: ReadingStyle.smallMedium, color: ReadingStyle.text)
         let detail = NSTextField.label(option.detail ?? "", font: CockpitStyle.caption, color: ReadingStyle.quiet)
         detail.isHidden = option.detail == nil
         let words = NSStackView(views: [title, detail])
@@ -149,7 +156,7 @@ final class MenuOptionButton: NSView {
         ])
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        setAccessibilityLabel([option.label, option.detail].compactMap { $0 }.joined(separator: ". "))
+        setAccessibilityLabel([label, option.detail].compactMap { $0 }.joined(separator: ". "))
         paint()
     }
 
