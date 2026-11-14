@@ -474,8 +474,11 @@ private func failures(_ worker: ModelCatalog.Offer, _ count: Int, kind: TaskKind
 }
 
 @Test func rankingUsesTheRunsOfTheSameDifficultyWhenAWorkerHasTwoOfThem() {
+    // A third easy run, by a worker not offered: an odd count, so the easy
+    // piece is not a learning turn.
     let slowOnHard = runs(glm, 2, seconds: 5, score: 5, difficulty: .easy)
         + runs(glm, 2, seconds: 100, score: 5, difficulty: .hard, at: start.addingTimeInterval(10))
+        + runs(haikuLow, 1, score: 5, difficulty: .easy, at: start.addingTimeInterval(30))
     let steady = runs(grokLow, 3, seconds: 20, score: 5, at: start.addingTimeInterval(20))
     let history = slowOnHard + steady
     #expect(pick([glm, grokLow], history, difficulty: .easy)?.offer == glm)
@@ -491,4 +494,14 @@ private func failures(_ worker: ModelCatalog.Offer, _ count: Int, kind: TaskKind
         kind: .review, access: .read, needsCommands: false, history: [], offers: [haikuLow, haikuMedium],
         installed: installed, excludedWorkers: [haikuLow], now: now
     )?.offer == haikuMedium)
+}
+
+@Test func aWorkerKnownOnNormalPiecesStillGetsALearningTurnOnHardOnes() {
+    // sonnet has many normal deliveries but none hard; opus took every hard one.
+    let normal = runs(sonnet, 20, kind: .implement, score: 5, difficulty: .normal)
+    let hard = runs(opus, 4, kind: .implement, score: 4, difficulty: .hard, pick: PickReason(code: .lineup, text: "", position: 1),
+                    at: start.addingTimeInterval(100))
+    let choice = pick([sonnet, opus], normal + hard, kind: .implement, access: .edit, difficulty: .hard, lineup: .standard)
+    #expect(choice?.offer == sonnet)
+    #expect(choice?.pick.code == .learning)
 }

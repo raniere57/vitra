@@ -257,7 +257,7 @@ public enum WorkerPicker {
         return pool.map(candidate)
             .filter { !isCold($0.offer) }
             // Still unknown here, or back from the cold for another chance.
-            .filter { $0.delivered < deliveriesToLearn || $0.coldUntil != nil }
+            .filter { $0.deliveredHere < deliveriesToLearn || $0.coldUntil != nil }
             .filter { lowerEffortTried($0.offer, offers: offers, ofKind: ofKind) }
             // A worker that never ran anything goes before one known from another kind.
             .map { (candidate: $0, used: everRan($0.offer) ? 1 : 0) }
@@ -340,6 +340,9 @@ public enum WorkerPicker {
         let difficulty: Difficulty
 
         var delivered: Int { Self.delivered(runs).count }
+        /// Deliveries at the piece's own difficulty: a worker known on normal
+        /// pieces is still unknown on hard ones, and learns there too.
+        var deliveredHere: Int { Self.delivered(runs.filter { ($0.spec.difficulty ?? .normal) == difficulty }).count }
 
         private static func delivered(_ runs: [Run]) -> [Run] {
             runs.filter { run in
