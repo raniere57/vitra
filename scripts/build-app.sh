@@ -63,6 +63,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIconFile</key>        <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
     <key>NSHighResolutionCapable</key> <true/>
+    <key>NSMicrophoneUsageDescription</key> <string>Programas do terminal, como o ditado por voz do Claude Code, usam o microfone.</string>
     <!-- The panel is a browser: it opens plain-http pages too (a dev server,
          a router, an intranet box by its address). Web content only; the
          app's own requests stay under App Transport Security. -->
