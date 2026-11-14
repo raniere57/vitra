@@ -66,18 +66,51 @@ final class CockpitTabBar: NSView {
         self.selected = selected
 
         self.tabs.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for (index, tab) in tabs.enumerated() {
+        // Suspended projects wait behind one button, out of the way of the ones
+        // being worked on; the one in front stays on the strip even asleep.
+        asleep = tabs.indices.filter { tabs[$0].isAsleep && $0 != selected }
+        visible = tabs.indices.filter { !asleep.contains($0) }
+        for (position, index) in visible.enumerated() {
+            let tab = tabs[index]
             let view = TabView(tab, isSelected: index == selected, number: index + 1)
-            view.onDrag = { [weak self] point in self?.dragged(index, to: point) }
-            view.onDrop = { [weak self] point in self?.dropped(index, at: point) }
+            view.onDrag = { [weak self] point in self?.dragged(position, to: point) }
+            view.onDrop = { [weak self] point in self?.dropped(position, at: point) }
             view.onClick = { [weak self] in self?.onSelect?(index) }
             view.onClose = { [weak self] in self?.onClose?(index) }
             view.onSleep = { [weak self] in self?.onSleep?(index) }
             view.onReveal = { [weak self] in self?.onReveal?(index) }
             self.tabs.addArrangedSubview(view)
         }
+        if !asleep.isEmpty {
+            sleepers.title = "\(asleep.count)"
+            sleepers.toolTip = asleep.count == 1 ? "1 projeto suspenso" : "\(asleep.count) projetos suspensos"
+            sleepers.setAccessibilityLabel(sleepers.toolTip)
+            self.tabs.addArrangedSubview(sleepers)
+        }
         self.tabs.addArrangedSubview(add)
     }
+
+    /// The suspended projects' indices, behind the moon button.
+    private var asleep: [Int] = []
+    private let sleepers = NSButton(title: "", target: nil, action: nil)
+
+    @objc private func showSleepers(_ sender: Any?) {
+        let menu = NSMenu()
+        let header = NSMenuItem(title: "Suspensos", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        for index in asleep {
+            let item = NSMenuItem(title: shown[index].name, action: #selector(wake(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            item.toolTip = (shown[index].path as NSString).abbreviatingWithTildeInPath
+            item.image = NSImage(systemSymbolName: "moon.fill", accessibilityDescription: nil)
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sleepers.bounds.maxY + CockpitStyle.Space.xs), in: sleepers)
+    }
+
+    @objc private func wake(_ sender: NSMenuItem) { onSelect?(sender.tag) }
 
     func show(costToday: Double) {
         cost.stringValue = WorkerBoard.money(costToday)
@@ -138,8 +171,17 @@ final class CockpitTabBar: NSView {
     private func dropped(_ index: Int, at point: NSPoint) {
         dropMark.isHidden = true
         let target = slot(for: index, at: point)
-        if target != index { onMove?(index, target) }
+        guard target != index else { return }
+        // Positions on the strip to places in the list, the hidden asleep
+        // ones counted: before the tab it lands in front of, or after the last.
+        let from = visible[index]
+        let others = visible.filter { $0 != from }
+        let anchor = target < others.count ? others[target] : others[others.count - 1] + 1
+        onMove?(from, anchor > from ? anchor - 1 : anchor)
     }
+
+    /// The list's indices of the tabs on the strip, in order.
+    private var visible: [Int] = []
 
     /// The folders of the projects closed lately, newest first.
     func show(recent: [(key: String, name: String, path: String)]) { self.recent = recent }
@@ -187,6 +229,16 @@ final class CockpitTabBar: NSView {
         add.toolTip = "Abrir projeto"
         add.widthAnchor.constraint(equalToConstant: CockpitStyle.rowHeight).isActive = true
         add.heightAnchor.constraint(equalToConstant: CockpitStyle.rowHeight).isActive = true
+
+        sleepers.image = NSImage(systemSymbolName: "moon.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .regular))
+        sleepers.imagePosition = .imageLeading
+        sleepers.isBordered = false
+        sleepers.font = CockpitStyle.meta
+        sleepers.contentTintColor = CockpitStyle.muted
+        sleepers.target = self
+        sleepers.action = #selector(showSleepers(_:))
+        sleepers.heightAnchor.constraint(equalToConstant: CockpitStyle.rowHeight).isActive = true
 
         tabs.spacing = CockpitStyle.Space.xs
         chipRow.spacing = CockpitStyle.Space.sm
