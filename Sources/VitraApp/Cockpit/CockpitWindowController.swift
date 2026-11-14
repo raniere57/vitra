@@ -289,7 +289,9 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         // The one place a project's shells really end; quitting only lets go.
         views.removeValue(forKey: project.key)?.shutDown(endingSessions: true)
         save()
-        select(min(selected > index ? selected - 1 : selected, projects.count - 1))
+        // The tab that lands in front is only shown: a sleeping one stays
+        // asleep, as it does on every other way of getting to it.
+        select(min(selected > index ? selected - 1 : selected, projects.count - 1), waking: false)
     }
 
     private func select(_ index: Int, waking: Bool = true) {
