@@ -1303,6 +1303,22 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         return (UInt16(first), UInt16(start), UInt16(last), UInt16(end))
     }
 
+    /// The menu the running program has up at the bottom of its screen, read
+    /// fresh like `typedInput`: nil with no program, or scrolled away.
+    func askedMenu() -> TerminalMenu? {
+        if session.updateSnapshot(snapshot) {
+            updateQuietRows()
+            setNeedsRender()
+        }
+        guard session.isRunningProgram, snapshot.rows > 0, snapshot.scroll.isAtBottom, !snapshot.isAlternateScreen else { return nil }
+        let rows = (0 ..< Int(snapshot.rows)).map { row in
+            var text = (0 ..< Int(snapshot.columns)).map { snapshot.text(of: snapshot[$0, row]) ?? " " }.joined()
+            while text.last == " " { text.removeLast() }
+            return text
+        }
+        return TerminalMenu.read(rows: rows)
+    }
+
     /// What the user has typed into the running program's input and not yet
     /// sent: "" for an empty input, nil when that cannot be told — no program
     /// holding the terminal, nothing drawn yet, or the view scrolled away

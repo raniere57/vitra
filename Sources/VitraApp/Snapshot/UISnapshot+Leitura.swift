@@ -1,4 +1,5 @@
 import AppKit
+import VitraCore
 
 /// Leitura's pictures: the whole window reading, at full and minimum size,
 /// an opened activity, a wide table, the empty state and a permission wait.
@@ -42,7 +43,7 @@ extension UISnapshot {
             freezeClock(project.leitura, at: context.fixtures.now)
             project.isReading = true
             project.applyReading()
-            project.leitura.showForSnapshot(items, queued: [UserMessage(id: "q1", time: Date(), text: "> O arquivo abre direto no Numbers e no Excel\n\ne no LibreOffice, abre também?", isQueued: true)], attention: state, since: since)
+            project.leitura.showForSnapshot(items, queued: [UserMessage(id: "q1", time: Date(), text: "> O arquivo abre direto no Numbers e no Excel\n\ne no LibreOffice, abre também?", isQueued: true)], attention: state, since: since, menu: state == .needsPermission ? askedMenu : nil)
             project.leitura.list.context.open(activity: "a2")
             if let draft { project.leitura.composer.message = draft }
             if draft != nil {
@@ -52,6 +53,14 @@ extension UISnapshot {
             project.pulseSwitch(state == .needsPermission)
         }
     }
+
+    private static let askedMenu = TerminalMenu.read(rows: [
+        "Em qual formato o relatório deve sair?", "",
+        "❯ 1. CSV", "     Abre direto no Numbers e no Excel",
+        "  2. PDF", "     Pronto para enviar, não dá para editar",
+        "  3. Type something.", "──────", "  4. Chat about this", "",
+        "Enter to select · ↑/↓ to navigate · Esc to cancel",
+    ])
 
     /// Leitura alone, as wide as a pane, scrolled to `row` if given.
     private static func pane(

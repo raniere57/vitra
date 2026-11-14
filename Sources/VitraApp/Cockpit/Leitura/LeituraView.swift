@@ -1,4 +1,5 @@
 import AppKit
+import VitraCore
 
 /// Leitura: the maestro's conversation rendered to be read, over the same
 /// area as its terminal. The terminal keeps running underneath, untouched;
@@ -17,6 +18,58 @@ final class LeituraView: NSView {
     var onDeliverQueue: (() -> Void)?
     /// The prompt the maestro's terminal suggests now, if any.
     var suggestionSource: (() -> String?)?
+    /// The menu the maestro's terminal has up now, if any.
+    var menuSource: (() -> TerminalMenu?)?
+    /// Keys for that menu: an option's digit, Tab.
+    var onMenuKeys: ((String) -> Void)?
+    /// The user's own words, into the menu's "Type something" option.
+    var onMenuAnswer: ((TerminalMenu.Option, String) -> Void)?
+    private var menuPoll: Timer?
+    private static let menuInterval: TimeInterval = 0.5
+
+    /// While Leitura is shown the terminal's screen is looked at twice a
+    /// second for a menu: the hooks say the maestro waits, not on what.
+    private func watchMenu() {
+        menuPoll?.invalidate()
+        menuPoll = nil
+        guard isVisible else { return }
+        readMenu()
+        menuPoll = Timer.scheduledTimer(withTimeInterval: Self.menuInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.readMenu() }
+        }
+    }
+
+    /// A menu counts when the hooks say the maestro waits on the user, or
+    /// when it carries its own hint row: the hook can come late.
+    private func readMenu() {
+        let found = menuSource?()
+        let menu = found.flatMap { attention == .needsPermission || $0.hasFooter ? $0 : nil }
+        let wasHidden = banner.isHidden
+        banner.show(menu)
+        banner.isHidden = attention != .needsPermission && menu == nil
+        if wasHidden != banner.isHidden || menu != nil { needsLayout = true }
+    }
+
+    /// With a menu up, a message is not one: pasted into the terminal its
+    /// Return would pick whatever option is lit. The user's own words go to
+    /// the menu's field when it has one; otherwise the menu is answered first.
+    private func answersMenu(with text: String) -> Bool {
+        guard !banner.isHidden, let menu = banner.asked else { return false }
+        guard let option = menu.freeText else {
+            composer.showProblem("O maestro espera uma escolha: responda acima antes de enviar.")
+            return true
+        }
+        onMenuAnswer?(option, text)
+        composer.clear()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.readMenu() }
+        return true
+    }
+
+    private func pressed(_ keys: String) {
+        onMenuKeys?(keys)
+        // The screen changes a moment after the key.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.readMenu() }
+    }
     private var suggestionPoll: Timer?
     private var suggestionChecks = 0
     /// Claude Code writes its suggestion a moment after the turn ends.
@@ -133,6 +186,8 @@ final class LeituraView: NSView {
         ])
         banner.isHidden = true
         banner.onGo = { [weak self] in self?.onBackToTerminal?() }
+        banner.onChoose = { [weak self] option in self?.pressed(String(option.number)) }
+        banner.onNext = { [weak self] in self?.pressed("\t") }
         empty.isHidden = true
         empty.onBack = { [weak self] in self?.onBackToTerminal?() }
         pill.isHidden = true
@@ -150,6 +205,8 @@ final class LeituraView: NSView {
         composer.onEscape = { [weak self] in self?.focusList() }
         composer.onSend = { [weak self] text in
             guard let self else { return }
+            // A question is up that takes the user's own words: they are its answer.
+            if self.answersMenu(with: text) { return }
             self.onSend?(text) { [weak self] problem in
                 guard let self else { return }
                 if let problem {
@@ -165,6 +222,7 @@ final class LeituraView: NSView {
         composer.onSendNow = { [weak self] text in
             guard let self else { return }
             guard !text.isEmpty else { return self.onDeliverQueue?() ?? () }
+            if self.answersMenu(with: text) { return }
             self.onSend?(text) { [weak self] problem in
                 guard let self else { return }
                 if let problem { return self.composer.showProblem(problem) }
@@ -205,6 +263,7 @@ final class LeituraView: NSView {
         }
         updateClock()
         watchSuggestion()
+        watchMenu()
     }
 
     /// The maestro may be in another conversation now (/resume, /clear,
@@ -302,7 +361,7 @@ final class LeituraView: NSView {
         attention = state
         workingSince = state == .working ? (since ?? Date()) : nil
         composer.setWorking(isWorking)
-        banner.isHidden = state != .needsPermission
+        readMenu()
         updateClock()
         watchSuggestion()
         refresh()
@@ -350,7 +409,8 @@ final class LeituraView: NSView {
     // MARK: - For the snapshot tool
 
     /// Shows `items` as if read from a transcript, with no file and no reader.
-    func showForSnapshot(_ items: [TranscriptItem], queued: [UserMessage] = [], attention state: AttentionState?, since: Date?, missing: Bool = false) {
+    func showForSnapshot(_ items: [TranscriptItem], queued: [UserMessage] = [], attention state: AttentionState?, since: Date?, missing: Bool = false, menu: TerminalMenu? = nil) {
+        banner.show(menu)
         self.items = items
         self.queued = queued
         isVisible = true

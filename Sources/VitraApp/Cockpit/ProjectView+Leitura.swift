@@ -18,6 +18,9 @@ extension ProjectView {
         // every terminal passes on (⌃⏎ reaches some as a plain Return).
         view.onDeliverQueue = { [weak self] in self?.deliverQueueNow() }
         view.suggestionSource = { [weak self] in self?.terminal?.suggestedInput() }
+        view.menuSource = { [weak self] in self?.terminal?.askedMenu() }
+        view.onMenuKeys = { [weak self] keys in self?.terminal?.session.send(text: keys) }
+        view.onMenuAnswer = { [weak self] option, text in self?.answerMenu(option, with: text) }
         view.onOpenLink = { [weak self] url in self?.openTerminalLink(url, external: false) }
         view.onOpenWorker = { [weak self] id in
             self?.choose(.workers)
@@ -147,6 +150,18 @@ extension ProjectView {
             self?.submit(text, to: session)
         }
         done(nil)
+    }
+
+    /// The user's own words into a question's "Type something": its digit
+    /// puts the cursor in the field, the words are typed there, Return sends.
+    func answerMenu(_ option: TerminalMenu.Option, with text: String) {
+        guard let session = terminal?.session else { return }
+        let words = text.split(whereSeparator: \.isNewline).joined(separator: " ")
+        session.send(text: String(option.number))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            session.send(text: words)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { session.send(text: "\r") }
+        }
     }
 
     /// ⌃U on an empty prompt does nothing: a few more than any prompt has lines.
