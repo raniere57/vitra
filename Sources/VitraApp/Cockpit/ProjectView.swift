@@ -353,8 +353,10 @@ final class ProjectView: NSView {
             update: updateState.phase == .current ? nil : updatePill.widths.full,
             updateCompact: updateState.phase == .current ? nil : updatePill.widths.compact,
             usage: usageIsKnown ? usagePill.fittingSize.width : nil,
-            hasSession: sessionName != nil,
-            branch: hasBranch ? branchPill.fittingSize.width : nil
+            // Neither the session name nor the branch: claude's own prompt
+            // shows the name, and the Git tab and the Palco the branch.
+            hasSession: false,
+            branch: nil
         )
     }
 
