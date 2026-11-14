@@ -189,14 +189,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             select(index)
             return
         }
-        if views[projects[index].key]?.isBusy == true {
-            let alert = NSAlert()
-            alert.messageText = "Suspender \(projects[index].name)?"
-            alert.informativeText = "O maestro deste projeto ainda está rodando. Suspender o encerra; a conversa fica guardada e volta ao clicar na aba. Workers já delegados continuam."
-            alert.addButton(withTitle: "Suspender projeto")
-            alert.addButton(withTitle: "Cancelar")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
+        // No question: the conversation is kept and a click on the tab wakes it.
         projects[index].isAsleep = true
         let path = projects[index].key
         views.removeValue(forKey: path)?.shutDown(endingSessions: true)
