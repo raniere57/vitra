@@ -142,9 +142,11 @@ final class LeituraList: NSView, NSTableViewDataSource, NSTableViewDelegate {
         }
     }
 
-    /// Brings the current match into view.
+    /// Brings the current match into view, and stops following the bottom:
+    /// the next append would pull the view away from it.
     func reveal(row id: String) {
         guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
+        setAtBottom(false)
         table.scrollRowToVisible(index)
         table.layoutSubtreeIfNeeded()
         guard let view = table.view(atColumn: 0, row: index, makeIfNecessary: false) as? LeituraRowView,

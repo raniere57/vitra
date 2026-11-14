@@ -121,7 +121,7 @@ extension ProjectView {
     }
 
     /// Whether Leitura was ever made; asking `leitura` itself would make it.
-    private var isLeituraMade: Bool { subviews.contains { $0 is LeituraView } }
+    var isLeituraMade: Bool { subviews.contains { $0 is LeituraView } }
 
     /// The maestro's state, for Leitura's live row, composer and banner.
     func leituraAttentionChanged(to state: AttentionState?) {

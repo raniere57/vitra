@@ -407,6 +407,9 @@ final class ProjectView: NSView {
             endingSessions ? session?.terminate() : session?.detach()
         }
         git.setActive(false)
+        // Leitura's polls and file watch stop only when it is hidden, and a
+        // project taken off the screen is never told it is no longer shown.
+        if isLeituraMade { leitura.setVisible(false) }
         sharedTerminalView?.session.onExit = nil
         release(sharedTerminalView?.session)
         sharedTerminalView?.prepareForRemoval()

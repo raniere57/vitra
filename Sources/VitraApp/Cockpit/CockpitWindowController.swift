@@ -575,7 +575,11 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - Window
 
     @objc private func occlusionChanged(_ notification: Notification) {
-        feed.setVisible(window?.occlusionState.contains(.visible) ?? false)
+        let visible = window?.occlusionState.contains(.visible) ?? false
+        feed.setVisible(visible)
+        // A minimized or covered window draws nothing and polls nothing:
+        // the project in front stops as one in a background tab does.
+        current?.setShown(visible)
         showAttention(now: Date())
     }
 

@@ -37,12 +37,14 @@ final class LeituraFind {
         show(reveal: true)
     }
 
-    /// The items changed under an open find: count again.
+    /// The items changed under an open find: count again, keeping the match
+    /// the user is on and the view where it is — while the maestro streams,
+    /// this runs several times a second.
     func itemsChanged() {
-        if isOpen, !bar.query.isEmpty { run(bar.query) }
+        if isOpen, !bar.query.isEmpty { run(bar.query, reveal: false) }
     }
 
-    private func run(_ query: String) {
+    private func run(_ query: String, reveal: Bool = true) {
         search?.cancel()
         guard let list, !query.isEmpty else {
             matches = []
@@ -60,16 +62,25 @@ final class LeituraFind {
             let startRow = firstFrom.map { items[$0].id }
             await MainActor.run {
                 guard !Task.isCancelled else { return }
-                self?.found(found, query: query, startingAt: startRow)
+                self?.found(found, query: query, startingAt: startRow, reveal: reveal)
             }
         }
     }
 
-    private func found(_ found: [(row: String, index: Int)], query: String, startingAt row: String?) {
+    private func found(_ found: [(row: String, index: Int)], query: String, startingAt row: String?, reveal: Bool) {
+        let kept = reveal ? nil : current.map { matches[$0] }
         matches = found
-        current = found.isEmpty ? nil : (found.firstIndex { $0.row == row } ?? found.count - 1)
+        current = Self.current(in: found, keeping: kept, startingAt: row)
         list?.context.query = query
-        show(reveal: true)
+        show(reveal: reveal)
+    }
+
+    /// The match to be on: the one kept, while it is still found; else the
+    /// first from `row` on, or the last one.
+    static func current(in found: [(row: String, index: Int)], keeping kept: (row: String, index: Int)?, startingAt row: String?) -> Int? {
+        guard !found.isEmpty else { return nil }
+        if let kept, let same = found.firstIndex(where: { $0.row == kept.row && $0.index == kept.index }) { return same }
+        return found.firstIndex { $0.row == row } ?? found.count - 1
     }
 
     private func show(reveal: Bool) {
