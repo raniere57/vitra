@@ -47,6 +47,19 @@ struct ToolBlockDimmingTests {
         #expect(levels(blinking) == [1, 2, 0, 1])
     }
 
+    @Test func aFoldedRunOfCallsWithoutBulletIsQuiet() {
+        let screen = """
+        ⏺ O main não andou. Vou publicar.
+
+          Ran 1 shell command
+
+          Read 2 files, searched for 1 pattern
+
+          Fiz 3 ajustes no layout.
+        """
+        #expect(levels(screen) == [0, 0, 1, 0, 1, 0, 0])
+    }
+
     @Test func aScreenThatOpensInsideABlockQuietsItsTail() {
         let screen = """
              linha 41

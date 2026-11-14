@@ -90,13 +90,21 @@ public enum ToolBlockDimming {
               row.dropFirst(2).first != " " else { return false }
         // A screen's row comes padded with spaces to the terminal's width.
         let rest = row.dropFirst(2).trimmingCharacters(in: .whitespaces)
-        if rest.hasSuffix("(ctrl+o to expand)") || rest.contains(" (MCP)(") { return true }
+        if rest.hasSuffix("(ctrl+o to expand)") || rest.contains(" (MCP)(") || isFolded(rest) { return true }
         guard let paren = rest.firstIndex(of: "("), let initial = rest.first else { return false }
         let name = rest[..<paren]
         if name.hasPrefix("mcp__") { return true }
         // A tool's name: one capitalised word. Prose with a parenthesis in
         // it has spaces before it gets there.
         return initial.isUppercase && !name.isEmpty && name.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+    }
+
+    /// A folded run of calls, as Claude Code now prints it without a bullet or
+    /// a hint: "Ran 1 shell command", "Read 2 files, searched for 1 pattern",
+    /// "Calling vitra 3 times…". Told from prose by its English verb and the
+    /// count right after it.
+    static func isFolded(_ rest: String) -> Bool {
+        rest.range(of: #"^(Ran|Read|Wrote|Found|Made|\p{Lu}[a-z]+(ed|ing)) (for |up )?\d+ \p{Ll}"#, options: .regularExpression) != nil
     }
 
     /// Under a call: the "⎿" line, or anything five spaces in or more.
