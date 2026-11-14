@@ -153,6 +153,16 @@ public final class TerminalSession: @unchecked Sendable {
         }
     }
 
+    /// Writes raw bytes to the child, for encodings that are bytes rather than
+    /// text: the legacy mouse report puts values up to 255 in single bytes,
+    /// which `send(text:)` would turn into two-byte UTF-8.
+    public func send(bytes: [UInt8]) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            bytes.withUnsafeBytes { try? self.pty.write($0) }
+        }
+    }
+
     /// Scrolls the viewport by `lines`; negative scrolls up into scrollback.
     public func scroll(lines: Int) {
         guard lines != 0 else { return }

@@ -395,8 +395,18 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
             return
         }
         let columns = min(Int(snapshot.columns), ToolBlockDimming.prefixLength)
+        // One String per row, built from the raw bytes: this runs on every
+        // changed frame while the maestro works, and a String per cell is the
+        // churn the snapshot was designed to avoid.
+        var bytes: [UInt8] = []
         let rows = (0 ..< Int(snapshot.rows)).map { row in
-            (0 ..< columns).map { snapshot.text(of: snapshot[$0, row]) ?? " " }.joined()
+            bytes.removeAll(keepingCapacity: true)
+            for column in 0 ..< columns {
+                if snapshot.withText(of: snapshot[column, row], { bytes.append(contentsOf: $0) }) == nil {
+                    bytes.append(0x20)
+                }
+            }
+            return String(decoding: bytes, as: UTF8.self)
         }
         var notices: Set<Int> = []
         for (index, row) in rows.enumerated() {
@@ -431,7 +441,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
 
         // An unfocused terminal shows a hollow cursor rather than none: it still
         // marks the position without claiming to accept input.
-        let focused = window?.isKeyWindow ?? false
+        let focused = hasKeyboardFocus
         if var cursor = snapshot.cursor {
             // Unfocused wins over both: a hollow cursor still marks the position
             // without claiming to accept input.
@@ -635,21 +645,33 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     // MARK: - Cursor blink
 
     override func becomeFirstResponder() -> Bool {
-        updateBlinkTimer()
-        updateFocusIndicator()
-        setNeedsRender()
+        afterResponderChange()
         onFocused?()
         return true
     }
 
     override func resignFirstResponder() -> Bool {
-        updateBlinkTimer()
-        // The border is drawn after the responder change lands, because AppKit
-        // asks the old responder to resign before the new one becomes first and
-        // reading `firstResponder` here would still name this pane.
-        DispatchQueue.main.async { [weak self] in self?.updateFocusIndicator() }
-        setNeedsRender()
+        afterResponderChange()
         return true
+    }
+
+    /// The border, the cursor and the blink timer all follow
+    /// `hasKeyboardFocus`, which reads `firstResponder` — and AppKit updates
+    /// that only after both the resign and the become have returned, so the
+    /// redraw waits for the change to land.
+    private func afterResponderChange() {
+        DispatchQueue.main.async { [weak self] in
+            self?.updateFocusIndicator()
+            self?.updateBlinkTimer()
+            self?.setNeedsRender()
+        }
+    }
+
+    /// The pane typing goes to. Only that one shows a solid (or blinking)
+    /// cursor: with splits, or the maestro beside the panel's terminal, every
+    /// pane in the key window claiming the keyboard says nothing.
+    private var hasKeyboardFocus: Bool {
+        window?.isKeyWindow == true && window?.firstResponder === self
     }
 
     /// Called when this pane takes the keyboard, so the window can point the
@@ -686,7 +708,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// exactly the idle cost this design exists to avoid.
     func updateBlinkTimer() {
         let shouldBlink = isDrawingActive
-            && window?.isKeyWindow == true
+            && hasKeyboardFocus
             && snapshot.cursor?.isBlinking == true
         guard shouldBlink else {
             guard blinkTimer != nil else { return }
@@ -738,11 +760,17 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     }
 
     /// Web links are shape-only. Paths hit the disk, so hover waits ~80 ms.
+    ///
+    /// The soft-wrapped run is matched, not the one row: a login or signed URL
+    /// longer than the pane fills the last column and carries on below, and
+    /// matching one row would open it cut off at the pane's edge.
     private func link(at position: (column: UInt16, row: UInt16), allowingPathStat: Bool) -> URL? {
         let row = Int(position.row)
         guard row < Int(snapshot.rows) else { return nil }
-        let characters = rowCharacters(row)
-        if let url = TerminalLink.match(in: characters, at: Int(position.column), base: nil)?.url {
+        let (rows, localRow) = wrappedRows(around: row)
+        guard let (text, index) = TerminalPathLink.joined(rows: rows, row: localRow, column: Int(position.column))
+        else { return nil }
+        if let url = TerminalLink.match(in: text, at: index, base: nil)?.url {
             if !url.isFileURL { return url }
             if allowingPathStat, FileManager.default.fileExists(atPath: url.path) { return url }
         }
@@ -841,15 +869,17 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     ///
     /// The terminal cannot move that cursor itself, but it can press the keys
     /// that do: one arrow per cell between where the cursor is and where the
-    /// click landed, which every line editor understands. Only the cursor's
-    /// own row on the live screen counts, for the same reason the selection
-    /// edit stops there — a click in the transcript above is a click, not an
-    /// instruction to walk the cursor up into someone else's history.
+    /// click landed, which every line editor understands. Only the live
+    /// screen counts, on the cursor's row or an earlier row of the same
+    /// wrapped prompt (`stepsBack` refuses anything above the prompt), for
+    /// the same reason the selection edit stops there — a click in the
+    /// transcript above is a click, not an instruction to walk the cursor up
+    /// into someone else's history.
     private func placeCursor(at position: (column: UInt16, row: UInt16), event: NSEvent) {
         guard event.modifierFlags.isDisjoint(with: [.shift, .option, .command, .control]),
               snapshot.scroll.isAtBottom,
               let cursor = snapshot.cursor,
-              cursor.row == position.row
+              position.row <= cursor.row
         else { return }
         let delta: Int
         if cursor.row == position.row {
@@ -1151,20 +1181,18 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         let column = Int(position.column) + 1
         let row = Int(position.row) + 1
 
-        let report: String
+        let report: [UInt8]
         if snapshot.sgrMouse {
-            report = "\u{1b}[<\(button);\(column);\(row)M"
+            report = Array("\u{1b}[<\(button);\(column);\(row)M".utf8)
         } else {
             // 32 is the offset the original encoding adds to every field, and
             // the fields are single bytes, so anything past 223 cannot be said.
+            // They go out as raw bytes: as text, 128 and up would be UTF-8.
             guard column <= 223, row <= 223 else { return }
-            report = "\u{1b}[M"
-                + String(UnicodeScalar(UInt8(32 + button)))
-                + String(UnicodeScalar(UInt8(32 + column)))
-                + String(UnicodeScalar(UInt8(32 + row)))
+            report = [0x1b, 0x5b, 0x4d, UInt8(32 + button), UInt8(32 + column), UInt8(32 + row)]
         }
 
-        for _ in 0 ..< min(abs(lines), 24) { session.send(text: report) }
+        for _ in 0 ..< min(abs(lines), 24) { session.send(bytes: report) }
     }
 
     private var scrollAccumulator: CGFloat = 0
@@ -1824,7 +1852,10 @@ extension TerminalView: @preconcurrency NSTextInputClient {
         let cellHeight = renderer.metrics.cellHeight / scale
         let local = NSRect(
             x: padding + gutterWidth + CGFloat(cursor.column) * cellWidth,
-            y: bounds.height - padding - CGFloat(cursor.row + 1) * cellHeight,
+            // The view is flipped, so rows count down from the top; the find
+            // overlay's bottom-up formula would put the candidate window at
+            // the mirrored row.
+            y: padding + CGFloat(cursor.row) * cellHeight,
             width: cellWidth,
             height: cellHeight
         )
