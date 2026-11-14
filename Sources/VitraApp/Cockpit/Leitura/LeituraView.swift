@@ -320,7 +320,12 @@ final class LeituraView: NSView {
             return
         }
         let url = TranscriptLocator.url(project: project.path, session: current, root: transcripts)
-        reader = TranscriptReader(url: url) { [weak self] update in self?.apply(update) }
+        // The old reader may still have a read queued: what it publishes late
+        // is the previous conversation's, and must not paint over this one.
+        reader = TranscriptReader(url: url) { [weak self] update in
+            guard let self, self.session == current else { return }
+            self.apply(update)
+        }
         if isVisible {
             reader?.open()
             reader?.follow(true)
