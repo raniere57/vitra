@@ -53,8 +53,13 @@ final class LeituraView: NSView {
     /// With a menu up, a message is not one: pasted into the terminal its
     /// Return would pick whatever option is lit. The user's own words go to
     /// the menu's field when it has one; otherwise the menu is answered first.
+    /// A prompt up that could not be read blocks the send all the same.
     private func answersMenu(with text: String) -> Bool {
-        guard !banner.isHidden, let menu = banner.asked else { return false }
+        guard !banner.isHidden else { return false }
+        guard let menu = banner.asked else {
+            composer.showProblem("O maestro espera uma resposta no terminal: responda lá antes de enviar.")
+            return true
+        }
         guard let option = menu.freeText else {
             composer.showProblem("O maestro espera uma escolha: responda acima antes de enviar.")
             return true
@@ -63,6 +68,15 @@ final class LeituraView: NSView {
         composer.clear()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.readMenu() }
         return true
+    }
+
+    /// Claude Code's queue, sent now: its ⌃⏎ arrives as Return with a menu
+    /// or prompt up, and Return picks the lit option.
+    private func deliverQueue() {
+        guard banner.isHidden else {
+            return composer.showProblem("O maestro espera uma escolha: responda acima antes de enviar.")
+        }
+        onDeliverQueue?()
     }
 
     private func pressed(_ keys: String) {
@@ -218,18 +232,22 @@ final class LeituraView: NSView {
                 }
             }
         }
-        list.context.sendQueuedNow = { [weak self] in self?.onDeliverQueue?() }
+        list.context.sendQueuedNow = { [weak self] in self?.deliverQueue() }
         composer.onSendNow = { [weak self] text in
             guard let self else { return }
-            guard !text.isEmpty else { return self.onDeliverQueue?() ?? () }
+            guard !text.isEmpty else { return self.deliverQueue() }
             if self.answersMenu(with: text) { return }
             self.onSend?(text) { [weak self] problem in
                 guard let self else { return }
                 if let problem { return self.composer.showProblem(problem) }
                 self.composer.clear()
                 self.list.scrollToBottom()
-                // After the paste and its Return have reached the prompt.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.onDeliverQueue?() }
+                // After the paste and its Return have reached the prompt, and
+                // the screen looked at again for a menu that came up meanwhile.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                    self?.readMenu()
+                    self?.deliverQueue()
+                }
             }
         }
         composer.onQueue = { [weak self] text in
