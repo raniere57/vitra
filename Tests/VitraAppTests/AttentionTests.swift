@@ -326,6 +326,13 @@ private let utc = TimeZone(identifier: "UTC")!
         claude: "claude", conversation: .new("abc"), config: "/c", settings: "/s", brief: "/b", prompt: "go on"
     )
     #expect(!fresh.contains("go on"))
+    // A conversation running in the background is attached before it is resumed.
+    let flagged = Maestro.launchLine(
+        claude: "claude --dangerously-skip-permissions", conversation: .resume("5d424431-4523-458d-91cc-2719ed5275f9"),
+        config: "/c", settings: "/s", brief: "/b"
+    )
+    #expect(flagged.hasPrefix("claude attach '5d424431' 2>/dev/null || claude --dangerously-skip-permissions --resume "))
+    #expect(!fresh.contains("attach"))
     #expect(Maestro.resumePrompt(mode: .orchestrator).contains("agent_wait"))
     #expect(!Maestro.resumePrompt(mode: .solo).contains("agent_wait"))
 }

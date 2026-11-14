@@ -363,7 +363,7 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     defer { try? FileManager.default.removeItem(at: directory) }
     let id = "0f3c1a52-9d2e-4b7a-8c11-5e6f7a8b9c0d"
     let line = try Maestro.install(binary: "/b/Vitra", claude: "claude", conversation: .resume(id), mode: .solo, in: directory)
-    #expect(line == "claude --resume '\(id)' --mcp-config '\(directory.path)/mcp-solo.json' --settings '\(directory.path)/settings.json' --append-system-prompt-file '\(directory.path)/solo.md'\n")
+    #expect(line == "claude attach '0f3c1a52' 2>/dev/null || claude --resume '\(id)' --mcp-config '\(directory.path)/mcp-solo.json' --settings '\(directory.path)/settings.json' --append-system-prompt-file '\(directory.path)/solo.md'\n")
     #expect(!line.contains("brief.md"))
     let solo = try String(contentsOf: directory.appendingPathComponent("solo.md"), encoding: .utf8)
     #expect(solo.contains("do the work yourself"))
@@ -401,7 +401,7 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     let fresh = try Maestro.install(binary: binary, claude: "claude --model opus", conversation: .new(id), in: directory)
     #expect(fresh == "claude --model opus --session-id '\(id)' " + files)
     let resumed = try Maestro.install(binary: binary, claude: "claude --model opus", conversation: .resume(id), in: directory)
-    #expect(resumed == "claude --model opus --resume '\(id)' " + files)
+    #expect(resumed == "claude attach '0f3c1a52' 2>/dev/null || claude --model opus --resume '\(id)' " + files)
 
     // The config names this very binary, spaces in its path and all.
     let config = try Data(contentsOf: directory.appendingPathComponent("mcp.json"))

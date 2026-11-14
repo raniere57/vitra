@@ -757,7 +757,16 @@ enum Maestro {
         // a maestro cut off mid-turn to go on, and a new one has nothing to go on with.
         var first: [String] = []
         if let prompt, case .resume = conversation { first = [ShellQuote.quote(prompt)] }
-        return ([claude] + pickUp + [
+        // A conversation sent to the background (claude's own --bg, or a
+        // session that went on there) refuses --resume while it runs: it is
+        // attached instead, still working, and resumed only when no job has
+        // it. attach knows a job by its short id, not the full one.
+        var attach = ""
+        if case let .resume(id) = conversation {
+            let bare = claude.components(separatedBy: " -").first ?? claude
+            attach = bare + " attach " + ShellQuote.quote(String(id.prefix(8))) + " 2>/dev/null || "
+        }
+        return attach + ([claude] + pickUp + [
             "--mcp-config", ShellQuote.quote(config),
             "--settings", ShellQuote.quote(settings),
             "--append-system-prompt-file", ShellQuote.quote(brief),
