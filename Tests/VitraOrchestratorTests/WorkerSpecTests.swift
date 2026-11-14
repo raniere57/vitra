@@ -190,7 +190,7 @@ private func spec(
 // MARK: - Which workers there are
 
 @Test func claudeWorkersAreExactlyTheModelAndEffortPairsOnOffer() {
-    for (model, effort) in [("haiku", "low"), ("haiku", "medium"), ("haiku", "high"), ("sonnet", "high"), ("opus", "low")] {
+    for (model, effort) in [("haiku", "low"), ("haiku", "medium"), ("haiku", "high"), ("sonnet", "medium"), ("sonnet", "high"), ("opus", "low")] {
         #expect(throws: Never.self) { try spec(.claude, model: model, effort: effort).validate() }
     }
     // An effort is part of what a Claude worker is: there is no default one.

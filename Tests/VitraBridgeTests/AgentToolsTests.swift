@@ -125,7 +125,7 @@ private let answers = #"cat >/dev/null; echo '{"result":"the answer","is_error":
     // Only claude is installed: the normal lineup's first claude worker.
     #expect(empty.contains("review\n  vitra picks next: claude haiku (low) — 2nd in your lineup for normal pieces\n"))
     #expect(empty.contains("the user's lineup (Vitra picks the first that may run and is not demoted)\n  hard: 1. claude opus (low), 2. claude sonnet (high)"))
-    #expect(empty.contains("  not tried yet: claude haiku (low), claude haiku (medium), claude haiku (high), claude sonnet (high), claude opus (low)"))
+    #expect(empty.contains("  not tried yet: claude haiku (low), claude haiku (medium), claude haiku (high), claude sonnet (medium), claude sonnet (high), claude opus (low)"))
 
     let id = try await fixture.spawn()
     _ = try await fixture.call("agent_wait", ["ids": [.string(id)], "timeout_seconds": 10])
@@ -260,7 +260,7 @@ private let answers = #"cat >/dev/null; echo '{"result":"the answer","is_error":
     await #expect(throws: ToolError("missing argument: model")) {
         try await fixture.call("agent_spawn", ["cli": "claude", "prompt": "go", "directory": "/tmp"])
     }
-    await #expect(throws: ToolError("claude workers are haiku at low, medium or high; sonnet at high; opus at low — not opus at high")) {
+    await #expect(throws: ToolError("claude workers are haiku at low, medium or high; sonnet at medium or high; opus at low — not opus at high")) {
         try await fixture.spawn(["model": "opus", "effort": "high"])
     }
     await #expect(throws: ToolError("'bun test; rm -rf ~' is not a command a worker can be allowed: name one plain command, such as bun test")) {
@@ -910,7 +910,7 @@ echo '{"result":"done","is_error":false}'
         cursor: ["Available models", "auto - Auto (default)", "gpt-5.2 - GPT-5.2", "cursor-grok-4.5-high - Grok 4.5", "grok-4.7-low - Grok 4.7  Low", "grok-4.7-low-fast - Grok 4.7  Low Fast"]
     )
     #expect(ModelCatalog.summary(everything) == """
-    cli "claude" (Claude subscription) — a model and an effort together: haiku at low, medium or high; sonnet at high; opus at low.
+    cli "claude" (Claude subscription) — a model and an effort together: haiku at low, medium or high; sonnet at medium or high; opus at low.
     cli "opencode" (free models only; effort optional): opencode/glm-free, opencode/deepseek-free
     cli "gemini" (Google AI subscription, through Antigravity; the effort is part of the id, so pass none; no commands): gemini-3.8-flash-high, gemini-3.8-flash-low
     cli "cursor" (Grok models only; the effort is part of the id, so pass none): cursor-grok-4.5-high, grok-4.7-low, grok-4.7-low-fast

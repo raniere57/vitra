@@ -388,7 +388,7 @@ public enum WorkerPicker {
         var medianCost: Double { Scoreboard.median(Self.delivered(ranked).map { $0.output?.costUSD ?? 0 }) ?? .infinity }
 
         /// Free CLIs cost nothing; claude costs by its tier, in the order the
-        /// catalogue lists them: haiku low < medium < high < sonnet high < opus low.
+        /// catalogue lists them: haiku low < medium < high < sonnet medium < high < opus low.
         var costRank: Int {
             guard offer.cli == .claude else { return 0 }
             let tiers = ModelCatalog.claudeWorkers.flatMap { worker in worker.efforts.map { (worker.model, $0) } }

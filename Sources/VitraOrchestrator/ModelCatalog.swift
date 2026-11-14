@@ -30,13 +30,14 @@ public enum ModelCatalog {
 
     /// The Claude workers on offer: each model with the efforts it may run at.
     ///
-    /// A short, deliberate list. Sonnet at high and Opus at low are the two
-    /// strong workers, Haiku at three efforts the cheap ones; every other
-    /// pairing costs more subscription than it returns as a worker, and Opus
-    /// and Fable at full effort are what the maestro itself runs on.
+    /// A short, deliberate list. Sonnet at medium and high and Opus at low are
+    /// the strong workers, Haiku at three efforts the cheap ones; which strong
+    /// one earns the hard pieces is for the record to say, so each is offered
+    /// and gets its learning turns. Opus and Fable at full effort are what the
+    /// maestro itself runs on.
     public static let claudeWorkers: [(model: String, efforts: [String])] = [
         ("haiku", ["low", "medium", "high"]),
-        ("sonnet", ["high"]),
+        ("sonnet", ["medium", "high"]),
         ("opus", ["low"]),
     ]
 
