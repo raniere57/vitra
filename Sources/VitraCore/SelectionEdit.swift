@@ -19,6 +19,11 @@ public struct SelectionEdit: Equatable, Sendable {
     /// Backspaces to press once it is there.
     public let backspaces: Int
 
+    public init(move: Int, backspaces: Int) {
+        self.move = move
+        self.backspaces = backspaces
+    }
+
     /// The keystrokes that delete `start...end` of `row`, or nil when the
     /// selection is not on the line being typed.
     ///

@@ -55,7 +55,22 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     /// which physical key produced the text it is handed.
     private var pendingKeyEvent: NSEvent?
     private var keyWasHandledByInput = false
-    private var markedText = ""
+    private var markedText = "" {
+        didSet { if markedText != oldValue { showComposition() } }
+    }
+    /// What a dead key or an input method is composing, drawn at the cursor
+    /// until it is committed: without it a ' typed on its own shows nothing,
+    /// and gets typed again.
+    private lazy var composition: NSTextField = {
+        let field = NSTextField.label(font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), color: .textColor)
+        field.wantsLayer = true
+        field.drawsBackground = true
+        field.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.3)
+        field.isHidden = true
+        field.translatesAutoresizingMaskIntoConstraints = true
+        addSubview(field)
+        return field
+    }()
 
     private let attachments: AttachmentStore
     private let chips = AttachmentChipView()
@@ -1305,11 +1320,11 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
 
         // A program draws its input between rules, or under what came before:
         // a rule or an empty row ends it on either side.
-        func ends(_ candidate: Int) -> Bool {
-            let cells = rowCells(candidate)
-            guard cells.contains(where: { $0 != " " }) else { return true }
-            return cells.filter { $0 == "─" || $0 == "━" || $0 == "═" }.count >= 8
+        func isBlank(_ candidate: Int) -> Bool { !rowCells(candidate).contains(where: { $0 != " " }) }
+        func isRule(_ candidate: Int) -> Bool {
+            rowCells(candidate).filter { $0 == "─" || $0 == "━" || $0 == "═" }.count >= 8
         }
+        func ends(_ candidate: Int) -> Bool { isBlank(candidate) || isRule(candidate) }
 
         // Up to the row that carries the marker; the cursor's own row when no
         // row above it does.
@@ -1324,6 +1339,16 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         }
         var last = row
         while last + 1 < min(rows, row + Self.longestInput), !ends(last + 1) { last += 1 }
+        // Between the program's two rules a prompt may hold blank lines of its
+        // own: the rules, not the first blank row, are its edges.
+        if let above = (max(0, row - Self.longestInput) ..< row).reversed().first(where: isRule),
+           let below = (row + 1 ..< min(rows, row + Self.longestInput)).first(where: isRule) {
+            let filled = (above + 1 ..< below).filter { !isBlank($0) }
+            if let top = filled.first, let bottom = filled.last {
+                first = top
+                last = bottom
+            }
+        }
 
         guard var start = rowCells(first).firstIndex(where: { $0 != " " }),
               let end = rowCells(last).lastIndex(where: { $0 != " " })
@@ -1725,10 +1750,16 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
               // is for draw their prompt there, and their prompt is exactly the
               // line this is for.
               snapshot.scroll.isAtBottom,
-              let cursor = snapshot.cursor,
-              let span = selectedSpan(),
-              span.row == Int(cursor.row)
+              let cursor = snapshot.cursor
         else { return nil }
+        guard let span = selectedSpan() else {
+            // Several rows, as ⌘A selects a long prompt: deleted from its end,
+            // when it ends on the cursor's row. A backspace too many stops at
+            // the start of the input and does nothing.
+            guard let rows = selectedRows(), rows.lastRow == Int(cursor.row) else { return nil }
+            return SelectionEdit(move: (rows.lastColumn + 1) - Int(cursor.column), backspaces: rows.cells)
+        }
+        guard span.row == Int(cursor.row) else { return nil }
         return SelectionEdit.replacing(
             selectionRow: span.row,
             start: span.start,
@@ -1766,6 +1797,18 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
                 guard span.row == row else { return nil }
                 span.end = column
                 found = span
+            }
+        }
+        return found
+    }
+
+    /// The selection's last row and column and how many cells it covers,
+    /// whatever rows it spans.
+    private func selectedRows() -> (lastRow: Int, lastColumn: Int, cells: Int)? {
+        var found: (lastRow: Int, lastColumn: Int, cells: Int)?
+        for row in 0 ..< Int(snapshot.rows) {
+            for column in 0 ..< Int(snapshot.columns) where snapshot[column, row].flags.contains(.selected) {
+                found = (row, column, (found?.cells ?? 0) + 1)
             }
         }
         return found
@@ -1866,6 +1909,29 @@ extension TerminalView: @preconcurrency NSTextInputClient {
     }
 
     func characterIndex(for point: NSPoint) -> Int { NSNotFound }
+
+    private func showComposition() {
+        guard !markedText.isEmpty, let cursor = snapshot.cursor else {
+            composition.isHidden = true
+            return
+        }
+        let cellWidth = renderer.metrics.cellWidth / scale
+        let cellHeight = renderer.metrics.cellHeight / scale
+        composition.font = NSFont(name: fontName, size: fontSize) ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        composition.attributedStringValue = NSAttributedString(string: markedText, attributes: [
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+            .foregroundColor: NSColor.textColor,
+            .font: composition.font as Any,
+        ])
+        composition.sizeToFit()
+        composition.frame = NSRect(
+            x: padding + gutterWidth + CGFloat(cursor.column) * cellWidth,
+            y: padding + CGFloat(cursor.row) * cellHeight,
+            width: max(composition.frame.width, cellWidth),
+            height: cellHeight
+        )
+        composition.isHidden = false
+    }
 
     override func doCommand(by selector: Selector) {
         // The terminal encodes its own control keys; AppKit's editing commands
