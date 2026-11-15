@@ -55,9 +55,29 @@ struct ToolBlockDimmingTests {
 
           Read 2 files, searched for 1 pattern
 
+          Called vitra 6 times
+
+          Read 1 file, called vitra
+
           Fiz 3 ajustes no layout.
         """
-        #expect(levels(screen) == [0, 0, 1, 0, 1, 0, 0])
+        #expect(levels(screen) == [0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0])
+        #expect(!ToolBlockDimming.isFolded("Fixed the logo and the sheet."))
+        #expect(!ToolBlockDimming.isFolded("Testei no navegador simulando"))
+    }
+
+    @Test func aDiffFillingTheScreenStaysQuietPastItsHunkBreaks() {
+        let screen = """
+               11  /// once.
+              ...
+               18      private var began: Date?
+               21 +    private var label: NSTextField?
+
+        ⏺ Pronto.
+        """
+        #expect(levels(screen) == [2, 2, 2, 2, 0, 0])
+        let call = "⏺ Update(A.swift)\n  ⎿  Added 2 lines\n       11  /// once.\n    ...\n       18  x"
+        #expect(levels(call) == [1, 2, 2, 2, 2])
     }
 
     @Test func aScreenThatOpensInsideABlockQuietsItsTail() {

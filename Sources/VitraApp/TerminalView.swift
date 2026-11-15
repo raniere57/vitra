@@ -390,7 +390,10 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     private static let isQuietingAllowed = UserDefaults.standard.object(forKey: "dimToolOutput") as? Bool ?? true
 
     private func updateQuietRows() {
-        guard quietsToolBlocks, Self.isQuietingAllowed, session.isRunningProgram, !snapshot.isAlternateScreen else {
+        // `claude attach` draws a background session on the alternate screen;
+        // any other program there (an editor, a pager) is left alone.
+        guard quietsToolBlocks, Self.isQuietingAllowed, session.isRunningProgram,
+              !snapshot.isAlternateScreen || session.foregroundName == "claude" else {
             if !snapshot.rowDim.isEmpty { snapshot.rowDim = [] }
             return
         }

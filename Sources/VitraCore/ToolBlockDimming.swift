@@ -104,21 +104,21 @@ public enum ToolBlockDimming {
     /// "Calling vitra 3 times…". Told from prose by its English verb and the
     /// count right after it.
     static func isFolded(_ rest: String) -> Bool {
-        rest.range(of: #"^(Ran|Read|Wrote|Found|Made|\p{Lu}[a-z]+(ed|ing)) (for |up )?\d+ \p{Ll}"#, options: .regularExpression) != nil
+        rest.range(of: #"^(Ran|Read|Wrote|Found|Made|\p{Lu}[a-z]+(ed|ing)) ((for |up )?\d+ \p{Ll}|[a-z][\w-]*( \d+ times?)?(,|$|…))"#, options: .regularExpression) != nil
     }
 
     /// Under a call: the "⎿" line, or anything five spaces in or more.
     static func isOutput(_ row: String) -> Bool {
         let indent = row.prefix { $0 == " " }.count
-        return indent >= 5 || (indent >= 2 && row.dropFirst(indent).first == "⎿")
+        let rest = row.dropFirst(indent)
+        // A diff's "..." between hunks sits a column left of its line numbers.
+        return indent >= 5 || (indent >= 2 && (rest.first == "⎿" || rest.hasPrefix("...") || rest.hasPrefix("…")))
     }
 
     private static func opensInsideBlock(_ rows: [String]) -> Bool {
-        for row in rows where !isBlank(row) {
-            guard row.first == " " else { return false }
-            guard isOutput(row) else { return false }
-            if row.contains("⎿") { return true }
-        }
-        return false
+        // A long diff or log fills the whole screen with no call and no "⎿"
+        // left in view: a screen that opens deep in is in a block.
+        guard let first = rows.first(where: { !isBlank($0) }) else { return false }
+        return isOutput(first)
     }
 }
