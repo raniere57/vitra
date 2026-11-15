@@ -2,23 +2,20 @@ import AppKit
 import VitraCore
 import VitraGhostty
 
-/// A place for one-off conversations: plain claude, in a folder of its own,
-/// with nothing kept once Vitra closes.
-///
-/// claude's `--no-session-persistence` works only with `--print`, one
-/// question and one answer. So the conversation here is an ordinary one, and
-/// what claude writes of it is wiped when Vitra starts and when it quits:
-/// open while Vitra is open, clean the next time.
+/// A place for conversations outside every project: plain claude, in a
+/// folder of its own. It is kept like any other: after a relaunch the last
+/// one comes back where it stopped (`/clear` starts a new one).
 final class ScratchChatView: NSView {
     /// Where the conversation runs, and so where claude files it.
     static var folder: URL { Vitra.supportDirectory.appendingPathComponent("avulsa") }
 
-    /// Deletes what claude kept of the one-off conversations.
-    static func wipe(conversations: URL = Maestro.conversationsDirectory) {
-        let slug = TranscriptLocator.slug(for: folder.resolvingSymlinksInPath().path)
-        try? FileManager.default.removeItem(at: conversations.appendingPathComponent(slug))
-        let plain = TranscriptLocator.slug(for: folder.path)
-        if plain != slug { try? FileManager.default.removeItem(at: conversations.appendingPathComponent(plain)) }
+    /// Whether claude has a conversation filed for the folder already.
+    static func hasConversation(conversations: URL = Maestro.conversationsDirectory) -> Bool {
+        let slugs = Set([folder.path, folder.resolvingSymlinksInPath().path].map(TranscriptLocator.slug(for:)))
+        return slugs.contains { slug in
+            let files = (try? FileManager.default.contentsOfDirectory(atPath: conversations.appendingPathComponent(slug).path)) ?? []
+            return files.contains { $0.hasSuffix(".jsonl") }
+        }
     }
 
     private let kit: TerminalKit
@@ -67,7 +64,8 @@ final class ScratchChatView: NSView {
         view.focusTint = CockpitStyle.accent
         view.quietsToolBlocks = true
         session.start()
-        session.send(text: "claude\n")
+        // The last conversation back, when there is one to go back to.
+        session.send(text: Self.hasConversation() ? "claude --continue\n" : "claude\n")
         addFilling(view, inset: CockpitStyle.Space.md)
         terminal = view
     }

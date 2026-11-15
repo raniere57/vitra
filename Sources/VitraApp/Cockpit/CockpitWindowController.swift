@@ -110,12 +110,6 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             self.open(self.projects[index].path, maestro: self.projects[index].maestro)
         }
         sidebar.onScratch = { [weak self] in self?.showScratch() }
-        // The one-off conversation leaves nothing behind: what claude kept of
-        // the last one goes now, and this one goes when the app quits.
-        ScratchChatView.wipe()
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
-        ) { _ in ScratchChatView.wipe() }
         feed.onChange = { [weak self] runs in self?.show(runs) }
         alerts.onOpen = { [weak self] path in
             guard let self, let index = projects.firstIndex(where: { $0.key == path }) else { return }

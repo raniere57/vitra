@@ -369,7 +369,7 @@ private final class SessionRow: NSView {
     @objc private func closeSession(_ sender: Any?) { onClose?() }
 }
 
-/// "Conversa avulsa": a conversation outside every project, gone when Vitra closes.
+/// "Conversa avulsa": a conversation outside every project, back where it stopped after a relaunch.
 private final class ScratchRow: NSView {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     var onClick: (() -> Void)?
@@ -395,7 +395,7 @@ private final class ScratchRow: NSView {
             row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CockpitStyle.Space.md),
             row.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
-        toolTip = "Conversa fora dos projetos. Some quando o Vitra fecha."
+        toolTip = "Conversa fora dos projetos. Continua de onde parou; /clear começa outra."
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityLabel("Conversa avulsa")
