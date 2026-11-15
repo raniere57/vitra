@@ -43,3 +43,13 @@ import Testing
     #expect(ProjectSidebar.sessionTitle(tabs[0]) == "principal")
     #expect(ProjectSidebar.sessionTitle(tabs[2]) == "sessão 2")
 }
+
+@MainActor @Test func theOneOffConversationsTranscriptsAreWipedAndNothingElse() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let mine = root.appendingPathComponent(TranscriptLocator.slug(for: ScratchChatView.folder.path))
+    let other = root.appendingPathComponent("-Users-x-hapto")
+    for folder in [mine, other] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+    ScratchChatView.wipe(conversations: root)
+    #expect(!FileManager.default.fileExists(atPath: mine.path))
+    #expect(FileManager.default.fileExists(atPath: other.path))
+}

@@ -16,6 +16,21 @@ final class ProjectSidebar: NSView {
     var onNewSession: ((Int) -> Void)?
     var onAdd: (() -> Void)?
     var onReopen: ((String) -> Void)?
+    /// The one-off conversation, at the foot of the list.
+    var onScratch: (() -> Void)?
+
+    /// The one-off conversation is on screen, not a project.
+    var isScratchSelected = false {
+        didSet {
+            guard isScratchSelected != oldValue else { return }
+            scratch.isSelected = isScratchSelected
+            // The project's row stops looking selected while it is not shown.
+            let tabs = shown
+            shown = []
+            show(tabs, selected: selected)
+        }
+    }
+    private let scratch = ScratchRow()
 
     private let list = NSStackView()
     private let add = NSButton(title: "", target: nil, action: nil)
@@ -67,7 +82,7 @@ final class ProjectSidebar: NSView {
             list.addArrangedSubview(header)
             header.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
             for index in group.indices {
-                let row = SessionRow(tabs[index], title: Self.sessionTitle(tabs[index]), isSelected: index == selected, number: index + 1)
+                let row = SessionRow(tabs[index], title: Self.sessionTitle(tabs[index]), isSelected: index == selected && !isScratchSelected, number: index + 1)
                 row.onClick = { [weak self] in self?.onSelect?(index) }
                 row.onClose = { [weak self] in self?.onClose?(index) }
                 row.onSleep = { [weak self] in self?.onSleep?(index) }
@@ -141,7 +156,9 @@ final class ProjectSidebar: NSView {
         scroll.automaticallyAdjustsContentInsets = false
 
         let rule = NSView.filled(CockpitStyle.line, cornerRadius: 0)
-        for view in [top, scroll, rule] as [NSView] {
+        scratch.onClick = { [weak self] in self?.onScratch?() }
+        let footRule = NSView.filled(CockpitStyle.softLine, cornerRadius: 0)
+        for view in [top, scroll, rule, footRule, scratch] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -153,7 +170,14 @@ final class ProjectSidebar: NSView {
             scroll.topAnchor.constraint(equalTo: top.bottomAnchor, constant: CockpitStyle.Space.sm),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: rule.leadingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+            scroll.bottomAnchor.constraint(equalTo: footRule.topAnchor),
+            footRule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            footRule.trailingAnchor.constraint(equalTo: rule.leadingAnchor),
+            footRule.heightAnchor.constraint(equalToConstant: 1),
+            footRule.bottomAnchor.constraint(equalTo: scratch.topAnchor, constant: -CockpitStyle.Space.sm),
+            scratch.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CockpitStyle.Space.sm),
+            scratch.trailingAnchor.constraint(equalTo: rule.leadingAnchor, constant: -CockpitStyle.Space.sm),
+            scratch.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -CockpitStyle.Space.sm),
             document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
             document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
             document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
@@ -343,4 +367,58 @@ private final class SessionRow: NSView {
     @objc private func sleepSession(_ sender: Any?) { onSleep?() }
     @objc private func revealSession(_ sender: Any?) { onReveal?() }
     @objc private func closeSession(_ sender: Any?) { onClose?() }
+}
+
+/// "Conversa avulsa": a conversation outside every project, gone when Vitra closes.
+private final class ScratchRow: NSView {
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    var onClick: (() -> Void)?
+    var isSelected = false { didSet { paint() } }
+    private var isHovered = false
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = CockpitStyle.Radius.control
+        translatesAutoresizingMaskIntoConstraints = false
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: "bubble.left", accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .regular))
+        icon.contentTintColor = CockpitStyle.muted
+        let name = NSTextField.label("Conversa avulsa", font: CockpitStyle.ui(13, .regular), color: CockpitStyle.muted)
+        let row = NSStackView(views: [icon, name])
+        row.spacing = CockpitStyle.Space.md
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 30),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CockpitStyle.Space.md),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        toolTip = "Conversa fora dos projetos. Some quando o Vitra fecha."
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("Conversa avulsa")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true; paint() }
+    override func mouseExited(with event: NSEvent) { isHovered = false; paint() }
+    override func mouseUp(with event: NSEvent) {
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
+    }
+
+    override func accessibilityPerformPress() -> Bool { onClick?(); return true }
+
+    private func paint() {
+        layer?.backgroundColor = isSelected ? CockpitStyle.tab.cgColor : (isHovered ? CockpitStyle.raised.cgColor : NSColor.clear.cgColor)
+    }
 }

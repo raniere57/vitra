@@ -15,6 +15,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     private let tabBar = CockpitTabBar()
     private let sidebar = ProjectSidebar()
+    private lazy var scratch = ScratchChatView(kit: kit)
     private let stage = NSView()
     /// Under everything, never shown: where every project's browsers wait
     /// while off screen, still in the window so their pages keep running.
@@ -108,6 +109,13 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             guard let self, self.projects.indices.contains(index) else { return }
             self.open(self.projects[index].path, maestro: self.projects[index].maestro)
         }
+        sidebar.onScratch = { [weak self] in self?.showScratch() }
+        // The one-off conversation leaves nothing behind: what claude kept of
+        // the last one goes now, and this one goes when the app quits.
+        ScratchChatView.wipe()
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { _ in ScratchChatView.wipe() }
         feed.onChange = { [weak self] runs in self?.show(runs) }
         alerts.onOpen = { [weak self] path in
             guard let self, let index = projects.firstIndex(where: { $0.key == path }) else { return }
@@ -310,7 +318,17 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         select(min(selected > index ? selected - 1 : selected, projects.count - 1), waking: false)
     }
 
+    /// Puts the one-off conversation on screen, in place of the project.
+    private func showScratch() {
+        stage.subviews.forEach { $0.removeFromSuperview() }
+        views.values.forEach { $0.setShown(false) }
+        stage.addFilling(scratch)
+        sidebar.isScratchSelected = true
+        scratch.show()
+    }
+
     private func select(_ index: Int, waking: Bool = true) {
+        sidebar.isScratchSelected = false
         selected = max(index, 0)
         stage.subviews.forEach { $0.removeFromSuperview() }
         views.values.forEach { $0.setShown(false) }
