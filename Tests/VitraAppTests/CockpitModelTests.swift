@@ -772,3 +772,27 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(abs(turn.cost - (40 + 200_000 + 8000 + 3000) / 1_000_000) < 1e-9)
     #expect(turn.ended.timeIntervalSince(turn.started) == 60)
 }
+
+@Test func anAgentTheMaestroStartedIsReadFromBesideItsConversation() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let agents = root.appendingPathComponent("s1/subagents")
+    try FileManager.default.createDirectory(at: agents, withIntermediateDirectories: true)
+    let conversation = root.appendingPathComponent("s1.jsonl")
+    try Data().write(to: conversation)
+    let lines = [
+        #"{"type":"user","isSidechain":true,"uuid":"a","timestamp":"2026-11-15T10:00:00.000Z","message":{"role":"user","content":"Crie a aba Tração"}}"#,
+        #"{"type":"assistant","isSidechain":true,"timestamp":"2026-11-15T10:05:00.000Z","message":{"id":"m1","model":"claude-opus-5-5","stop_reason":"tool_use","usage":{"output_tokens":100}}}"#,
+        #"{"type":"user","isSidechain":true,"timestamp":"2026-11-15T10:05:01.000Z","message":{"role":"user","content":"mais uma coisa"}}"#,
+        #"{"type":"assistant","isSidechain":true,"timestamp":"2026-11-15T10:06:00.000Z","message":{"id":"m2","model":"claude-opus-5-5","stop_reason":"tool_use","usage":{"output_tokens":50}}}"#,
+    ]
+    try Data((lines.joined(separator: "\n") + "\n").utf8).write(to: agents.appendingPathComponent("agent-x.jsonl"))
+    try Data(#"{"description":"Aba de tração","finished":false}"#.utf8).write(to: agents.appendingPathComponent("agent-x.meta.json"))
+
+    let log = MaestroWorkLog()
+    log.refresh(conversation)
+    #expect(log.agents.count == 1)
+    let turn = try #require(log.agents.first?.turn)
+    #expect(turn.output == 150 && turn.ended.timeIntervalSince(turn.started) == 360)
+    let rows = MaestroWorkLog.rows(log.agents, now: turn.ended.addingTimeInterval(30))
+    #expect(rows.first?.row.title == "Aba de tração" && rows.first?.row.kind == .running)
+}

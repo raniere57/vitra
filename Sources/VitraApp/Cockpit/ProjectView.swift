@@ -30,6 +30,8 @@ final class ProjectView: NSView {
     let project: CockpitProject
     /// The maestro's own turns, read from its conversation for the Work tab.
     private let maestroWork = MaestroWorkLog()
+    private var lastRuns: [Run] = []
+    private var workTick: Timer?
     let workers = WorkersPanel()
     /// The live stage and timeline of the workers: the Palco tab.
     private(set) lazy var palco: PalcoView = {
@@ -427,6 +429,7 @@ final class ProjectView: NSView {
         release(sharedTerminalView?.session)
         sharedTerminalView?.prepareForRemoval()
         housekeeping?.invalidate()
+        workTick?.invalidate()
         queueRetry?.invalidate()
         if let activityMonitor { NSEvent.removeMonitor(activityMonitor) }
         saveBrowserPages()
@@ -443,15 +446,17 @@ final class ProjectView: NSView {
 
     /// Brings the Work tab's maestro rows up to date, when the tab is open.
     func maestroWorked(_ runs: [Run], now: Date) {
+        lastRuns = runs
         guard tabs.selected == .workers else { return }
         maestroWork.refresh(maestroWork.locate(project))
-        workers.show(runs, now: now, maestro: MaestroWorkLog.rows(maestroWork.turns, now: now))
+        workers.show(runs, now: now, maestro: MaestroWorkLog.rows(maestroWork.turns, now: now) + MaestroWorkLog.rows(maestroWork.agents, now: now))
     }
 
     /// Shows the workers and, on the tab, how many are running.
     func show(_ runs: [Run], now: Date) {
+        lastRuns = runs
         maestroWork.refresh(maestroWork.locate(project))
-        workers.show(runs, now: now, maestro: MaestroWorkLog.rows(maestroWork.turns, now: now))
+        workers.show(runs, now: now, maestro: MaestroWorkLog.rows(maestroWork.turns, now: now) + MaestroWorkLog.rows(maestroWork.agents, now: now))
         palco.show(runs, now: now)
         if tabs.selected == .ranking { ranking.runsChanged(runs) }
         // A worker that is done has no more use for its tab, and each tab
@@ -921,6 +926,14 @@ final class ProjectView: NSView {
                 guard let self else { return }
                 self.browserTabs.idle(now: Date()).forEach(self.unloadBrowserTab)
                 self.saveBrowserPages()
+            }
+        }
+        // An agent of the maestro's works while the maestro waits and its
+        // status line stays still: the Work tab looks again on its own.
+        workTick = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.window != nil else { return }
+                self.maestroWorked(self.lastRuns, now: Date())
             }
         }
         activityMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown, .scrollWheel]) { [weak self] event in

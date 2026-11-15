@@ -54,6 +54,12 @@ enum MaestroPrice {
 /// file runs to tens of megabytes, so each refresh reads only what was added.
 final class MaestroWorkLog {
     private(set) var turns: [MaestroTurn] = []
+    /// Agents the maestro started, each read from its own file beside the
+    /// conversation: one row each, running until claude marks it finished.
+    private(set) var agents: [MaestroAgent] = []
+    private var agentLogs: [String: MaestroWorkLog] = [:]
+    /// Read a subagent's file, whose lines are all marked as a side chain.
+    private var isSubagent = false
     private var url: URL?
     private var offset: UInt64 = 0
     private var pending = Data()
@@ -81,7 +87,9 @@ final class MaestroWorkLog {
     /// Catches up with `url`; starts over when the file changed or shrank.
     func refresh(_ url: URL?) {
         if url != self.url { reset(url) }
-        guard let url, let handle = try? FileHandle(forReadingFrom: url) else { return }
+        guard let url else { return }
+        if !isSubagent { refreshAgents(beside: url) }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
         defer { try? handle.close() }
         let size = (try? handle.seekToEnd()) ?? 0
         if size < offset { reset(url) }
@@ -102,17 +110,38 @@ final class MaestroWorkLog {
         pending = Data()
         turns = []
         seen = []
+        agents = []
+        agentLogs = [:]
+    }
+
+    private func refreshAgents(beside conversation: URL) {
+        let folder = conversation.deletingPathExtension().appendingPathComponent("subagents")
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        agents = files.filter { $0.pathExtension == "jsonl" }.compactMap { file in
+            let id = file.deletingPathExtension().lastPathComponent
+            let log = agentLogs[id] ?? {
+                let made = MaestroWorkLog()
+                made.isSubagent = true
+                agentLogs[id] = made
+                return made
+            }()
+            log.refresh(file)
+            let metaURL = file.deletingPathExtension().appendingPathExtension("meta.json")
+            let meta = (try? Data(contentsOf: metaURL)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            return MaestroAgent(id: id, description: meta?["description"] as? String, isFinished: meta?["finished"] as? Bool == true, turns: log.turns)
+        }
     }
 
     func read(_ line: Data) {
         guard let entry = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
-              entry["isSidechain"] as? Bool != true,
+              isSubagent || entry["isSidechain"] as? Bool != true,
               let message = entry["message"] as? [String: Any],
               let time = (entry["timestamp"] as? String).flatMap(Self.date)
         else { return }
         switch entry["type"] as? String {
         case "user":
-            guard entry["isMeta"] as? Bool != true, let prompt = Self.prompt(message["content"]) else { return }
+            guard entry["isMeta"] as? Bool != true, !(isSubagent && !turns.isEmpty),
+                  let prompt = Self.prompt(message["content"]) else { return }
             turns.append(MaestroTurn(id: entry["uuid"] as? String ?? UUID().uuidString, prompt: prompt, started: time, ended: time))
         case "assistant":
             guard !turns.isEmpty else { return }
@@ -163,6 +192,35 @@ final class MaestroWorkLog {
         return formatter.date(from: text) ?? ISO8601DateFormatter().date(from: text)
     }
 
+    /// The agents as the work panel's rows: what the maestro handed off,
+    /// running for as long as claude has not marked it finished.
+    static func rows(_ agents: [MaestroAgent], now: Date, timeZone: TimeZone = .current) -> [(row: WorkerRow, started: Date)] {
+        agents.compactMap { agent in
+            guard let turn = agent.turn else { return nil }
+            // A file that stopped growing long ago belongs to an agent that
+            // went with its session, whatever its meta still says.
+            let isRunning = !agent.isFinished && now.timeIntervalSince(turn.ended) < 600
+            let model = turn.model.map { $0.replacingOccurrences(of: "claude-", with: "") } ?? "agente"
+            let meta = [
+                model,
+                WorkerBoard.startedText(turn.started, now: now, timeZone: timeZone),
+                WorkerBoard.duration((isRunning ? now : turn.ended).timeIntervalSince(turn.started)),
+                WorkerBoard.money(turn.cost),
+                WorkerBoard.tokens(turn.tokens),
+            ].joined(separator: " · ")
+            let title = agent.description ?? WorkerBoard.firstLine(turn.prompt)
+            let row = WorkerRow(
+                id: "agent-" + agent.id,
+                title: WorkerBoard.shortened(title, to: 60),
+                kind: isRunning ? .running : .done,
+                stateText: isRunning ? "agente do maestro rodando" : "agente do maestro",
+                meta: meta,
+                detail: turn.prompt
+            )
+            return (row, turn.started)
+        }
+    }
+
     /// The turns as the work panel's rows. The last one runs while the
     /// maestro is in it; a turn cut off and never ended stops counting after
     /// a while.
@@ -187,5 +245,28 @@ final class MaestroWorkLog {
             )
             return (row, turn.started)
         }
+    }
+}
+
+/// An agent the maestro started inside its own session (claude's Agent tool).
+struct MaestroAgent: Equatable {
+    let id: String
+    let description: String?
+    let isFinished: Bool
+    let turns: [MaestroTurn]
+
+    /// The agent's whole run as one turn: its brief, first to last line, every token.
+    var turn: MaestroTurn? {
+        guard var total = turns.first else { return nil }
+        for more in turns.dropFirst() {
+            total.ended = more.ended
+            total.model = more.model ?? total.model
+            total.input += more.input
+            total.cacheRead += more.cacheRead
+            total.cacheWrite5m += more.cacheWrite5m
+            total.cacheWrite1h += more.cacheWrite1h
+            total.output += more.output
+        }
+        return total
     }
 }
