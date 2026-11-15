@@ -31,7 +31,7 @@ import Testing
     #expect(turn.prompt == "Cria a aba Tração" && turn.answer == "Aba criada e publicada.")
 }
 
-@Test func theSidebarGroupsAFoldersSessionsUnderItInTheOrderOfTheFirst() {
+@MainActor @Test func theSidebarGroupsAFoldersSessionsUnderItInTheOrderOfTheFirst() {
     let tabs: [CockpitTabBar.Tab] = [
         .init(name: "hapto", running: 0, path: "/x/hapto"),
         .init(name: "vitra", running: 0, path: "/x/vitra"),
