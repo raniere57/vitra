@@ -456,7 +456,7 @@ enum WorkerBoard {
         return line.trimmingCharacters(in: .whitespaces)
     }
 
-    private static func shortened(_ text: String, to length: Int) -> String {
+    static func shortened(_ text: String, to length: Int) -> String {
         text.count <= length ? text : text.prefix(length - 1).trimmingCharacters(in: .whitespaces) + "…"
     }
 }

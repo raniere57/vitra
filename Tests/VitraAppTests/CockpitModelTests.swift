@@ -502,7 +502,7 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
 // MARK: - The ranking and the side tabs
 
 @Test @MainActor func theTabsOfTheSideAreNamedAndOnlyAPageOrAFileTakesHalfTheWindow() {
-    #expect(SideTab.allCases.map(\.title) == ["Palco", "Workers", "Ranking", "Resumo", "Navegador", "Arquivos", "Git", "Terminal"])
+    #expect(SideTab.allCases.map(\.title) == ["Palco", "Work", "Ranking", "Resumo", "Navegador", "Arquivos", "Git", "Terminal"])
     #expect(SideTab.allCases.filter(\.isWide) == [.browser, .files, .terminal])
     _ = NSApplication.shared
     let tabs = SideTabs()
@@ -751,4 +751,24 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(back.key == "/a#2")
     let old = try JSONDecoder().decode(CockpitProject.self, from: Data(#"{"path":"/a"}"#.utf8))
     #expect(old.key == "/a")
+}
+
+@Test func theMaestrosTurnsAreReadWithTheirTokensCountedOncePerMessage() {
+    let log = MaestroWorkLog()
+    let lines = [
+        #"{"type":"user","uuid":"u1","timestamp":"2026-11-15T10:00:00.000Z","message":{"role":"user","content":"Arruma o login"}}"#,
+        #"{"type":"assistant","timestamp":"2026-11-15T10:00:10.000Z","message":{"id":"m1","model":"claude-opus-5-5","stop_reason":"tool_use","usage":{"input_tokens":10,"cache_read_input_tokens":1000000,"output_tokens":100,"cache_creation":{"ephemeral_1h_input_tokens":1000}}}}"#,
+        #"{"type":"assistant","timestamp":"2026-11-15T10:00:11.000Z","message":{"id":"m1","model":"claude-opus-5-5","stop_reason":"tool_use","usage":{"input_tokens":10,"cache_read_input_tokens":1000000,"output_tokens":100}}}"#,
+        #"{"type":"user","timestamp":"2026-11-15T10:00:12.000Z","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}"#,
+        #"{"type":"user","timestamp":"2026-11-15T10:00:12.000Z","message":{"role":"user","content":"<task-notification>x</task-notification>"}}"#,
+        #"{"type":"assistant","timestamp":"2026-11-15T10:01:00.000Z","message":{"id":"m2","model":"claude-opus-5-5","stop_reason":"end_turn","usage":{"output_tokens":50}}}"#,
+    ]
+    lines.forEach { log.read(Data($0.utf8)) }
+    #expect(log.turns.count == 1)
+    let turn = log.turns[0]
+    #expect(turn.prompt == "Arruma o login" && turn.isDone)
+    #expect(turn.tokens == 10 + 1_000_000 + 1000 + 150)
+    // 10×4 + 1M×0.20 + 1000×8 + 150×20, per million
+    #expect(abs(turn.cost - (40 + 200_000 + 8000 + 3000) / 1_000_000) < 1e-9)
+    #expect(turn.ended.timeIntervalSince(turn.started) == 60)
 }

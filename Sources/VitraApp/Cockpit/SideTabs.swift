@@ -7,7 +7,7 @@ enum SideTab: String, CaseIterable {
     var title: String {
         switch self {
         case .palco: return "Palco"
-        case .workers: return "Workers"
+        case .workers: return "Work"
         case .ranking: return "Ranking"
         case .resumo: return "Resumo"
         case .browser: return "Navegador"

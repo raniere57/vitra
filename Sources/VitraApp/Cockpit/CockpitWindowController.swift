@@ -547,6 +547,9 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         view.show(usage: MaestroStatus.label(usage, now: now))
         view.show(model: MaestroStatus.model(for: projects[selected].key))
         tabBar.show(chips: ProviderChips.derive(runs: runs, usage: usage, now: now))
+        // The status line writes after each of the maestro's answers: the
+        // Work tab's maestro rows move with it.
+        view.maestroWorked(WorkerBoard.runs(runs, in: projects[selected]), now: now)
     }
 
     /// Redraws the usage figure whenever the maestro's status line writes a

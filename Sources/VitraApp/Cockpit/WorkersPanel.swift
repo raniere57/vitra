@@ -32,8 +32,12 @@ final class WorkersPanel: NSView {
     required init?(coder: NSCoder) { fatalError("not used") }
 
     /// Shows `runs`, newest first, as they stand at `now`.
-    func show(_ runs: [Run], now: Date) {
-        let shown = runs.map { WorkerBoard.row($0, now: now) }
+    func show(_ runs: [Run], now: Date, maestro: [(row: WorkerRow, started: Date)] = []) {
+        // The maestro's turns and the workers' runs on one timeline, newest first.
+        let entries = (runs.map { (row: WorkerBoard.row($0, now: now), started: $0.started, run: Optional($0)) }
+            + maestro.map { (row: $0.row, started: $0.started, run: Run?.none) })
+            .sorted { $0.started > $1.started }
+        let shown = entries.map(\.row)
         runningIDs = runs.filter { $0.state == .running }.map(\.id)
         // Only worth a button while there is something to stop.
         stopAll.isHidden = runningIDs.isEmpty
@@ -53,9 +57,10 @@ final class WorkersPanel: NSView {
             view.removeFromSuperview()
             rowViews[id] = nil
         }
-        for (index, (row, run)) in zip(shown, runs).enumerated() {
+        for (index, entry) in entries.enumerated() {
+            let row = entry.row
             let view = rowViews[row.id] ?? makeRow(row.id)
-            view.show(row, isOpen: openRow == row.id, delivery: Delivery(run))
+            view.show(row, isOpen: openRow == row.id, delivery: entry.run.flatMap(Delivery.init))
             // The last row ends on the footer's rule: two lines there would
             // read as a seam.
             view.showsSeparator = index < shown.count - 1
@@ -131,8 +136,8 @@ final class WorkersPanel: NSView {
         scroll.scrollerStyle = .overlay
         scroll.automaticallyAdjustsContentInsets = false
 
-        let headline = NSTextField.label("Nenhum worker ainda", font: CockpitStyle.title, color: CockpitStyle.text)
-        let body = NSTextField(wrappingLabelWithString: "Peça algo ao maestro. O que ele delegar a outros modelos aparece aqui, com tempo e custo.")
+        let headline = NSTextField.label("Nenhum trabalho ainda", font: CockpitStyle.title, color: CockpitStyle.text)
+        let body = NSTextField(wrappingLabelWithString: "Peça algo ao maestro. O que ele fizer e o que delegar a outros modelos aparece aqui, com tempo e custo.")
         body.font = CockpitStyle.body
         body.textColor = CockpitStyle.muted
         body.alignment = .center

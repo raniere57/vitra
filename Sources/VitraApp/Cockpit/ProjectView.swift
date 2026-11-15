@@ -28,6 +28,8 @@ private final class MaestroHeader: NSStackView {
 /// was last done in its repository.
 final class ProjectView: NSView {
     let project: CockpitProject
+    /// The maestro's own turns, read from its conversation for the Work tab.
+    private let maestroWork = MaestroWorkLog()
     let workers = WorkersPanel()
     /// The live stage and timeline of the workers: the Palco tab.
     private(set) lazy var palco: PalcoView = {
@@ -439,9 +441,17 @@ final class ProjectView: NSView {
 
     // MARK: - The tabs of the right side
 
+    /// Brings the Work tab's maestro rows up to date, when the tab is open.
+    func maestroWorked(_ runs: [Run], now: Date) {
+        guard tabs.selected == .workers else { return }
+        maestroWork.refresh(maestroWork.locate(project))
+        workers.show(runs, now: now, maestro: MaestroWorkLog.rows(maestroWork.turns, now: now))
+    }
+
     /// Shows the workers and, on the tab, how many are running.
     func show(_ runs: [Run], now: Date) {
-        workers.show(runs, now: now)
+        maestroWork.refresh(maestroWork.locate(project))
+        workers.show(runs, now: now, maestro: MaestroWorkLog.rows(maestroWork.turns, now: now))
         palco.show(runs, now: now)
         if tabs.selected == .ranking { ranking.runsChanged(runs) }
         // A worker that is done has no more use for its tab, and each tab
