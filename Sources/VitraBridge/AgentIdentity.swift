@@ -78,7 +78,22 @@ struct AgentIdentity: Equatable, Sendable {
             ?? source.nonEmpty(projectKey)
             ?? source.nonEmpty(runKey).flatMap(runProject)
         let pane = own.nonEmpty(paneKey) ?? source.nonEmpty(paneKey)
+        // claude's daemon for background sessions keeps the environment of
+        // the terminal that started it: a session it runs for another folder
+        // carries that tab's pane. Its working directory says where it is.
+        if agent == nil, let cwd, !cwd.isEmpty, let project, !isInside(cwd, project) {
+            return AgentIdentity(agent: nil, project: cwd, pane: folderPanePrefix + cwd)
+        }
         return AgentIdentity(agent: agent, project: project, pane: pane)
+    }
+
+    /// A pane that names a folder instead of a shell: the call goes to the
+    /// tab open on that folder.
+    static let folderPanePrefix = "folder:"
+
+    static func isInside(_ path: String, _ folder: String) -> Bool {
+        let folder = folder.count > 1 && folder.hasSuffix("/") ? String(folder.dropLast()) : folder
+        return path == folder || path.hasPrefix(folder + "/")
     }
 
     /// The run directory `cwd` sits in, when it is inside `runsRoot`: the first

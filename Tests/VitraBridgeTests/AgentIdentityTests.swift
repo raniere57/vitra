@@ -253,3 +253,11 @@ private func fakeRuns() throws -> (root: URL, run: URL) {
     // What the helper's own environment says is never overruled from above.
     #expect(Role.decide(own: ["VITRA_AGENT": "abcd1234"]) { ["VITRA_ROLE": "maestro"] } == .worker)
 }
+
+@Test func aMaestroRunningInAnotherFolderIsRoutedByItsFolderNotTheInheritedPane() {
+    let own = ["VITRA_ROLE": "maestro", "VITRA_PROJECT": "/Dev/efetivy", "VITRA_PANE": "p-efetivy"]
+    let stray = AgentIdentity.resolve(own: own, cwd: "/Dev/hapto", nearestAncestor: { nil }, runProject: { _ in nil })
+    #expect(stray == AgentIdentity(agent: nil, project: "/Dev/hapto", pane: "folder:/Dev/hapto"))
+    let home = AgentIdentity.resolve(own: own, cwd: "/Dev/efetivy/.claude/worktrees/x", nearestAncestor: { nil }, runProject: { _ in nil })
+    #expect(home.pane == "p-efetivy")
+}

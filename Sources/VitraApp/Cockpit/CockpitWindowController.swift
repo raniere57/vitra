@@ -416,6 +416,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         if let pane, let view = views.values.first(where: { $0.paneID == pane }) {
             return view
         }
+        if let index = tabIndex(forFolderPane: pane), let view = views[projects[index].key] { return view }
         // A call that names a project which is not open goes nowhere: landing
         // in whatever is on screen would put one project's page in another.
         if let pane { throw ToolError("the project this call came from (\(pane)) is not open in Vitra") }
@@ -697,10 +698,20 @@ extension CockpitWindowController: ToolHost {
         try locate(pane).view.browserTabList(agent: agent)
     }
 
+    /// The tab on the folder a "folder:" pane names: the deepest project the
+    /// folder sits in, its first tab.
+    private func tabIndex(forFolderPane pane: String?) -> Int? {
+        guard let pane, pane.hasPrefix("folder:") else { return nil }
+        let folder = String(pane.dropFirst("folder:".count))
+        return projects.indices
+            .filter { folder == projects[$0].path || folder.hasPrefix(projects[$0].path + "/") }
+            .max { (projects[$0].path.count, -projects[$0].slot) < (projects[$1].path.count, -projects[$1].slot) }
+    }
+
     /// The project a call came from — the one on screen for a call that names
     /// none — without bringing it forward.
     private func locate(_ pane: String?) throws -> (index: Int, view: ProjectView) {
-        let named = pane.flatMap { id in projects.firstIndex { views[$0.key]?.paneID == id } }
+        let named = pane.flatMap { id in projects.firstIndex { views[$0.key]?.paneID == id } } ?? tabIndex(forFolderPane: pane)
         if let pane, named == nil { throw ToolError("the project this call came from (\(pane)) is not open in Vitra") }
         let index = named ?? selected
         guard projects.indices.contains(index), let view = views[projects[index].key] else {
