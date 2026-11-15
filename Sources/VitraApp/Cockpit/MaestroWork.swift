@@ -8,6 +8,13 @@ struct MaestroTurn: Equatable, Sendable {
     let started: Date
     var ended: Date
     var model: String?
+    /// The effort claude ran the turn at, as it notes on each answer.
+    var effort: String?
+
+    /// "opus-5-5 (high)", the way a worker's row names its model.
+    func modelName(or fallback: String) -> String {
+        WorkerBoard.shortName(model.map { $0.replacingOccurrences(of: "claude-", with: "") } ?? fallback, effort: effort)
+    }
     var input = 0
     var cacheRead = 0
     var cacheWrite5m = 0
@@ -192,6 +199,7 @@ final class MaestroWorkLog: @unchecked Sendable {
             defer { turns.append(turn) }
             turn.ended = time
             turn.model = message["model"] as? String ?? turn.model
+            turn.effort = entry["effort"] as? String ?? turn.effort
             turn.isDone = message["stop_reason"] as? String == "end_turn"
             // claude writes one line per content block, each carrying the
             // message's usage: count a message once.
@@ -243,7 +251,7 @@ final class MaestroWorkLog: @unchecked Sendable {
             // A file that stopped growing long ago belongs to an agent that
             // went with its session, whatever its meta still says.
             let isRunning = !agent.isFinished && now.timeIntervalSince(turn.ended) < 600
-            let model = turn.model.map { $0.replacingOccurrences(of: "claude-", with: "") } ?? "agente"
+            let model = turn.modelName(or: "agente")
             let meta = [
                 model,
                 WorkerBoard.startedText(turn.started, now: now, timeZone: timeZone),
@@ -270,7 +278,7 @@ final class MaestroWorkLog: @unchecked Sendable {
     static func rows(_ turns: [MaestroTurn], now: Date, timeZone: TimeZone = .current) -> [(row: WorkerRow, started: Date)] {
         turns.enumerated().map { index, turn in
             let isRunning = index == turns.count - 1 && !turn.isDone && now.timeIntervalSince(turn.ended) < 600
-            let model = turn.model.map { $0.replacingOccurrences(of: "claude-", with: "") } ?? "maestro"
+            let model = turn.modelName(or: "maestro")
             let meta = [
                 model,
                 WorkerBoard.startedText(turn.started, now: now, timeZone: timeZone),
@@ -304,6 +312,7 @@ struct MaestroAgent: Equatable, Sendable {
         for more in turns.dropFirst() {
             total.ended = more.ended
             total.model = more.model ?? total.model
+            total.effort = more.effort ?? total.effort
             total.input += more.input
             total.cacheRead += more.cacheRead
             total.cacheWrite5m += more.cacheWrite5m

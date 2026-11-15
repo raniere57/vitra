@@ -761,7 +761,7 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
         #"{"type":"assistant","timestamp":"2026-11-15T10:00:11.000Z","message":{"id":"m1","model":"claude-opus-5-5","stop_reason":"tool_use","usage":{"input_tokens":10,"cache_read_input_tokens":1000000,"output_tokens":100}}}"#,
         #"{"type":"user","timestamp":"2026-11-15T10:00:12.000Z","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}"#,
         #"{"type":"user","timestamp":"2026-11-15T10:00:12.000Z","message":{"role":"user","content":"<task-notification>x</task-notification>"}}"#,
-        #"{"type":"assistant","timestamp":"2026-11-15T10:01:00.000Z","message":{"id":"m2","model":"claude-opus-5-5","stop_reason":"end_turn","usage":{"output_tokens":50}}}"#,
+        #"{"type":"assistant","effort":"high","timestamp":"2026-11-15T10:01:00.000Z","message":{"id":"m2","model":"claude-opus-5-5","stop_reason":"end_turn","usage":{"output_tokens":50}}}"#,
     ]
     lines.forEach { log.read(Data($0.utf8)) }
     #expect(log.turns.count == 1)
@@ -771,6 +771,7 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     // 10×4 + 1M×0.20 + 1000×8 + 150×20, per million
     #expect(abs(turn.cost - (40 + 200_000 + 8000 + 3000) / 1_000_000) < 1e-9)
     #expect(turn.ended.timeIntervalSince(turn.started) == 60)
+    #expect(turn.modelName(or: "maestro") == "opus-5-5 (high)")
 }
 
 @Test func anAgentTheMaestroStartedIsReadFromBesideItsConversation() throws {
