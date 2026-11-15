@@ -33,10 +33,12 @@ final class WorkersPanel: NSView {
 
     /// Shows `runs`, newest first, as they stand at `now`.
     func show(_ runs: [Run], now: Date, maestro: [(row: WorkerRow, started: Date)] = []) {
-        // The maestro's turns and the workers' runs on one timeline, newest first.
+        // The maestro's turns and the workers' runs on one timeline, newest
+        // first, what is running on top: an agent resumed hours after it
+        // started is the work of now.
         let entries = (runs.map { (row: WorkerBoard.row($0, now: now), started: $0.started, run: Optional($0)) }
             + maestro.map { (row: $0.row, started: $0.started, run: Run?.none) })
-            .sorted { $0.started > $1.started }
+            .sorted { ($0.row.kind == .running ? 1 : 0, $0.started) > ($1.row.kind == .running ? 1 : 0, $1.started) }
         let shown = entries.map(\.row)
         runningIDs = runs.filter { $0.state == .running }.map(\.id)
         // Only worth a button while there is something to stop.
