@@ -15,23 +15,25 @@ if CommandLine.arguments.dropFirst().first == "mcp" {
 // the project, and says nothing: a SessionStart hook's output goes into the
 // conversation.
 if CommandLine.arguments.dropFirst().first == "maestro-session" {
-    Maestro.recordSession(
-        hookInput: FileHandle.standardInput.readDataToEndOfFile(),
-        project: Maestro.tabFromEnvironment
-    )
+    let input = FileHandle.standardInput.readDataToEndOfFile()
+    Maestro.recordSession(hookInput: input, project: Maestro.tabFromEnvironment)
+    // The one thing it says: what the project's other tabs did lately, which
+    // claude adds to the conversation it is starting.
+    if let news = ProjectJournal.start(input: input, tab: Maestro.tabFromEnvironment) { print(news) }
     exit(0)
 }
 
 // `Vitra hook <event>` is the hook claude runs when the maestro needs the user
 // (Notification), ends a turn (Stop), is answered (UserPromptSubmit) or goes
-// away (SessionEnd). It leaves the project's attention state on disk and says
-// nothing; it always exits 0, so a hook can never get in claude's way.
+// away (SessionEnd). It leaves the project's attention state on disk, keeps
+// the project's diary, and always exits 0, so a hook can never get in claude's way.
 if CommandLine.arguments.dropFirst().first == "hook" {
-    Attention.run(
-        event: CommandLine.arguments.dropFirst(2).first,
-        input: FileHandle.standardInput.readDataToEndOfFile(),
-        environmentProject: Maestro.tabFromEnvironment
-    )
+    let event = CommandLine.arguments.dropFirst(2).first
+    let input = FileHandle.standardInput.readDataToEndOfFile()
+    Attention.run(event: event, input: input, environmentProject: Maestro.tabFromEnvironment)
+    // A turn's end goes in the project's diary; a prompt is sent with what
+    // the other tabs did since (printed, it joins the conversation).
+    if let news = ProjectJournal.hook(event: event, input: input, tab: Maestro.tabFromEnvironment) { print(news) }
     exit(0)
 }
 
