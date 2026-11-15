@@ -212,18 +212,20 @@ enum UISnapshot {
         configure(project)
 
         let bar = CockpitTabBar()
-        bar.show([
+        let sidebar = ProjectSidebar()
+        sidebar.show([
             .init(name: "vitra", running: WorkerBoard.runningCount(runs), callsForYou: AttentionPolicy.isCalling(attention[fixtures.path], now: fixtures.now),
-                  queued: project.promptQueue.count),
-            .init(name: "hapto", running: 0, finishedUnseen: AttentionPolicy.isCalling(attention["hapto"], now: fixtures.now)),
-            .init(name: "docs", running: 0),
-            .init(name: "farol", running: 0, isAsleep: true),
+                  queued: project.promptQueue.count, path: "/x/vitra"),
+            .init(name: "hapto", running: 0, finishedUnseen: AttentionPolicy.isCalling(attention["hapto"], now: fixtures.now), path: "/x/hapto"),
+            .init(name: "hapto 2", running: 2, maestroWorking: true, path: "/x/hapto", slot: 2, session: "aba de tração no painel"),
+            .init(name: "docs", running: 0, path: "/x/docs"),
+            .init(name: "farol", running: 0, isAsleep: true, path: "/x/farol"),
         ], selected: 0)
         bar.show(chips: ProviderChips.derive(runs: fixtures.chipRuns(), usage: fixtures.subscription, now: fixtures.now))
         bar.show(costToday: WorkerBoard.totals(runs, since: Calendar.current.startOfDay(for: fixtures.now)).cost)
 
         let window = NSView()
-        for view in [bar, project] as [NSView] {
+        for view in [bar, sidebar, project] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             window.addSubview(view)
         }
@@ -232,8 +234,12 @@ enum UISnapshot {
             bar.leadingAnchor.constraint(equalTo: window.leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: window.trailingAnchor),
             bar.heightAnchor.constraint(equalToConstant: CockpitStyle.barHeight),
+            sidebar.topAnchor.constraint(equalTo: bar.bottomAnchor),
+            sidebar.leadingAnchor.constraint(equalTo: window.leadingAnchor),
+            sidebar.bottomAnchor.constraint(equalTo: window.bottomAnchor),
+            sidebar.widthAnchor.constraint(equalToConstant: ProjectSidebar.width),
             project.topAnchor.constraint(equalTo: bar.bottomAnchor),
-            project.leadingAnchor.constraint(equalTo: window.leadingAnchor),
+            project.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             project.trailingAnchor.constraint(equalTo: window.trailingAnchor),
             project.bottomAnchor.constraint(equalTo: window.bottomAnchor),
         ])

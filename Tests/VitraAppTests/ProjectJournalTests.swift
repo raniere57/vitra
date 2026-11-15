@@ -30,3 +30,16 @@ import Testing
     let turn = try #require(ProjectJournal.lastTurn(in: url))
     #expect(turn.prompt == "Cria a aba Tração" && turn.answer == "Aba criada e publicada.")
 }
+
+@Test func theSidebarGroupsAFoldersSessionsUnderItInTheOrderOfTheFirst() {
+    let tabs: [CockpitTabBar.Tab] = [
+        .init(name: "hapto", running: 0, path: "/x/hapto"),
+        .init(name: "vitra", running: 0, path: "/x/vitra"),
+        .init(name: "hapto 2", running: 0, path: "/x/hapto", slot: 2),
+    ]
+    let groups = ProjectSidebar.groups(tabs)
+    #expect(groups.map(\.path) == ["/x/hapto", "/x/vitra"])
+    #expect(groups[0].indices == [0, 2])
+    #expect(ProjectSidebar.sessionTitle(tabs[0]) == "principal")
+    #expect(ProjectSidebar.sessionTitle(tabs[2]) == "sessão 2")
+}

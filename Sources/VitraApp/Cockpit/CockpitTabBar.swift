@@ -23,6 +23,10 @@ final class CockpitTabBar: NSView {
         var isAsleep = false
         /// The project's folder, for the tooltip.
         var path = ""
+        /// Which of the folder's sessions this is, and claude's name for its
+        /// conversation when it has one.
+        var slot = 1
+        var session: String?
     }
 
     var onSelect: ((Int) -> Void)?

@@ -14,6 +14,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     private let store: URL
 
     private let tabBar = CockpitTabBar()
+    private let sidebar = ProjectSidebar()
     private let stage = NSView()
     /// Under everything, never shown: where every project's browsers wait
     /// while off screen, still in the window so their pages keep running.
@@ -93,6 +94,19 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         tabBar.onReveal = { [weak self] index in
             guard let self, self.projects.indices.contains(index) else { return }
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: self.projects[index].path)])
+        }
+        sidebar.onSelect = { [weak self] in self?.select($0, waking: false) }
+        sidebar.onClose = { [weak self] in self?.close(at: $0) }
+        sidebar.onAdd = { [weak self] in self?.openProject(nil) }
+        sidebar.onReopen = { [weak self] in self?.reopen($0) }
+        sidebar.onSleep = { [weak self] in self?.sleep(at: $0) }
+        sidebar.onReveal = { [weak self] index in
+            guard let self, self.projects.indices.contains(index) else { return }
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: self.projects[index].path)])
+        }
+        sidebar.onNewSession = { [weak self] index in
+            guard let self, self.projects.indices.contains(index) else { return }
+            self.open(self.projects[index].path, maestro: self.projects[index].maestro)
         }
         feed.onChange = { [weak self] runs in self?.show(runs) }
         alerts.onOpen = { [weak self] path in
@@ -437,8 +451,10 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     private func refresh() {
         let now = Date()
         let usage = MaestroStatus.load()
-        tabBar.show(tabs(now: now), selected: selected)
-        tabBar.show(recent: closed.map { ($0.key, $0.name, $0.path) })
+        // The projects and their sessions live in the sidebar now; the top bar
+        // keeps the window's controls, the providers' chips and the day's cost.
+        sidebar.show(tabs(now: now), selected: selected)
+        sidebar.show(recent: closed.map { ($0.key, $0.name, $0.path) })
         tabBar.show(chips: ProviderChips.derive(runs: runs, usage: usage, now: now))
         tabBar.show(costToday: WorkerBoard.totals(runs, since: Calendar.current.startOfDay(for: now)).cost)
         // Only the project on screen is redrawn; the others catch up when shown.
@@ -466,7 +482,9 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
                 finishedUnseen: AttentionPolicy.isUnseen(record, seen: seenAt[$0.key], now: now),
                 queued: views[$0.key]?.promptQueue.count ?? 0,
                 isAsleep: $0.isAsleep,
-                path: $0.path
+                path: $0.path,
+                slot: $0.slot,
+                session: views[$0.key]?.conversationName
             )
         }
     }
@@ -512,7 +530,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     /// Redraws what depends on the attention records and the clock.
     private func showAttention(now: Date) {
-        tabBar.show(tabs(now: now), selected: selected)
+        sidebar.show(tabs(now: now), selected: selected)
         if projects.indices.contains(selected), let view = views[projects[selected].key] {
             view.show(attention: AttentionPolicy.label(attention[projects[selected].key], now: now))
         }
@@ -633,7 +651,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         // What covers the lot must be solid, whatever a project draws.
         stage.wantsLayer = true
         stage.layer?.backgroundColor = CockpitStyle.bar.cgColor
-        for view in [tabBar, stage] as [NSView] {
+        for view in [tabBar, sidebar, stage] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)
         }
@@ -642,8 +660,12 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             tabBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             tabBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             tabBar.heightAnchor.constraint(equalToConstant: CockpitStyle.barHeight),
+            sidebar.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            sidebar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            sidebar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            sidebar.widthAnchor.constraint(equalToConstant: ProjectSidebar.width),
             stage.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-            stage.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            stage.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             stage.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             stage.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])

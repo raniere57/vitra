@@ -211,6 +211,8 @@ final class ProjectView: NSView {
     /// The maestro's session name, when it has told one; what the header can
     /// hide is decided by `fitHeader`.
     private var sessionName: String?
+    /// claude's name for the conversation, for the sidebar.
+    var conversationName: String? { sessionName }
     /// Whether there is a usage figure; the plate is shown only if it also fits.
     private var usageIsKnown = false
     private var headerWidth: CGFloat = 0
