@@ -31,6 +31,8 @@ final class ProjectView: NSView {
     /// The maestro's own turns, read from its conversation for the Work tab.
     private let maestroWork = MaestroWorkLog()
     private var lastRuns: [Run] = []
+    private var maestroTurns: [MaestroTurn] = []
+    private var maestroAgents: [MaestroAgent] = []
     private var workTick: Timer?
     let workers = WorkersPanel()
     /// The live stage and timeline of the workers: the Palco tab.
@@ -444,19 +446,35 @@ final class ProjectView: NSView {
 
     // MARK: - The tabs of the right side
 
+    /// The maestro's turns and agents as last read, as rows.
+    private func maestroRows(now: Date) -> [(row: WorkerRow, started: Date)] {
+        MaestroWorkLog.rows(maestroTurns, now: now) + MaestroWorkLog.rows(maestroAgents, now: now)
+    }
+
+    /// Reads the maestro's conversation off the main thread and redraws the
+    /// Work tab when it is back.
+    private func updateMaestroWork() {
+        maestroWork.update(project) { [weak self] turns, agents in
+            guard let self, !self.isShutDown else { return }
+            self.maestroTurns = turns
+            self.maestroAgents = agents
+            let now = Date()
+            self.workers.show(self.lastRuns, now: now, maestro: self.maestroRows(now: now))
+        }
+    }
+
     /// Brings the Work tab's maestro rows up to date, when the tab is open.
     func maestroWorked(_ runs: [Run], now: Date) {
         lastRuns = runs
         guard tabs.selected == .workers else { return }
-        maestroWork.refresh(maestroWork.locate(project))
-        workers.show(runs, now: now, maestro: MaestroWorkLog.rows(maestroWork.turns, now: now) + MaestroWorkLog.rows(maestroWork.agents, now: now))
+        updateMaestroWork()
     }
 
     /// Shows the workers and, on the tab, how many are running.
     func show(_ runs: [Run], now: Date) {
         lastRuns = runs
-        maestroWork.refresh(maestroWork.locate(project))
-        workers.show(runs, now: now, maestro: MaestroWorkLog.rows(maestroWork.turns, now: now) + MaestroWorkLog.rows(maestroWork.agents, now: now))
+        workers.show(runs, now: now, maestro: maestroRows(now: now))
+        updateMaestroWork()
         palco.show(runs, now: now)
         if tabs.selected == .ranking { ranking.runsChanged(runs) }
         // A worker that is done has no more use for its tab, and each tab

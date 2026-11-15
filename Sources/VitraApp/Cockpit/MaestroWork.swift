@@ -2,7 +2,7 @@ import Foundation
 
 /// One turn of the maestro's own work: what it was asked, how long it took,
 /// the tokens it moved and what they would cost at API prices.
-struct MaestroTurn: Equatable {
+struct MaestroTurn: Equatable, Sendable {
     let id: String
     let prompt: String
     let started: Date
@@ -52,7 +52,36 @@ enum MaestroPrice {
 
 /// Reads the maestro's conversation file into turns, a little at a time: the
 /// file runs to tens of megabytes, so each refresh reads only what was added.
-final class MaestroWorkLog {
+final class MaestroWorkLog: @unchecked Sendable {
+    /// How much of a long file's end is read the first time: the turns that
+    /// matter are the recent ones, and a conversation runs to hundreds of MB.
+    static let firstReadLimit: UInt64 = 6_000_000
+    /// Agents whose file has not changed in this long are history.
+    static let agentsKeptFor: TimeInterval = 2 * 24 * 3600
+
+    private let queue = DispatchQueue(label: "dev.vitra.maestro-work", qos: .utility)
+    private var isUpdating = false
+    private var skipsPartialLine = false
+
+    /// Reads what was added to `project`'s conversation off the main thread,
+    /// then hands the turns and agents back on it. A call while one is under
+    /// way is dropped: the next one catches up anyway.
+    @MainActor
+    func update(_ project: CockpitProject, then done: @escaping @MainActor ([MaestroTurn], [MaestroAgent]) -> Void) {
+        guard !isUpdating else { return }
+        isUpdating = true
+        queue.async { [self] in
+            refresh(locate(project))
+            let turns = self.turns, agents = self.agents
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self.isUpdating = false
+                    done(turns, agents)
+                }
+            }
+        }
+    }
+
     private(set) var turns: [MaestroTurn] = []
     /// Agents the maestro started, each read from its own file beside the
     /// conversation: one row each, running until claude marks it finished.
@@ -93,11 +122,19 @@ final class MaestroWorkLog {
         defer { try? handle.close() }
         let size = (try? handle.seekToEnd()) ?? 0
         if size < offset { reset(url) }
+        if offset == 0, size > Self.firstReadLimit {
+            offset = size - Self.firstReadLimit
+            skipsPartialLine = true
+        }
         guard size > offset else { return }
         try? handle.seek(toOffset: offset)
         guard let data = try? handle.readToEnd() else { return }
         offset += UInt64(data.count)
         pending.append(data)
+        if skipsPartialLine, let newline = pending.firstIndex(of: 0x0A) {
+            pending = Data(pending[pending.index(after: newline)...])
+            skipsPartialLine = false
+        }
         guard let lastNewline = pending.lastIndex(of: 0x0A) else { return }
         let complete = pending[pending.startIndex ... lastNewline]
         pending = Data(pending[pending.index(after: lastNewline)...])
@@ -108,6 +145,7 @@ final class MaestroWorkLog {
         self.url = url
         offset = 0
         pending = Data()
+        skipsPartialLine = false
         turns = []
         seen = []
         agents = []
@@ -116,8 +154,13 @@ final class MaestroWorkLog {
 
     private func refreshAgents(beside conversation: URL) {
         let folder = conversation.deletingPathExtension().appendingPathComponent("subagents")
-        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        agents = files.filter { $0.pathExtension == "jsonl" }.compactMap { file in
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        let since = Date().addingTimeInterval(-Self.agentsKeptFor)
+        let recent = files.filter { file in
+            file.pathExtension == "jsonl"
+                && ((try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) > since
+        }
+        agents = recent.compactMap { file in
             let id = file.deletingPathExtension().lastPathComponent
             let log = agentLogs[id] ?? {
                 let made = MaestroWorkLog()
@@ -249,7 +292,7 @@ final class MaestroWorkLog {
 }
 
 /// An agent the maestro started inside its own session (claude's Agent tool).
-struct MaestroAgent: Equatable {
+struct MaestroAgent: Equatable, Sendable {
     let id: String
     let description: String?
     let isFinished: Bool
