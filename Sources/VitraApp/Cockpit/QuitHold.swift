@@ -4,7 +4,9 @@ import CoreGraphics
 /// ⌘Q only quits when it is held.
 ///
 /// ⌘Q sits beside ⌘W, and a slip there would end every project's maestro at
-/// once. A tap shows what to do instead; holding the keys for a moment quits.
+/// once. A tap shows what to do instead; holding the keys for a moment arms
+/// the quit, and letting go quits. Quitting while the keys are still down
+/// sent the held ⌘Q on to the app in front next, and closed it too.
 /// Choosing the menu item with the pointer is deliberate already and quits at
 /// once.
 @MainActor
@@ -16,6 +18,8 @@ final class QuitHold {
     private var began: Date?
     private var timer: Timer?
     private var notice: NSView?
+    private var label: NSTextField?
+    private var isArmed = false
 
     /// Whether a hold that began at `began` has earned the quit by `now`.
     static func isLongEnough(from began: Date, to now: Date) -> Bool {
@@ -42,12 +46,14 @@ final class QuitHold {
         let isHeld = CGEventSource.keyState(.combinedSessionState, key: Self.qKey)
             && NSEvent.modifierFlags.contains(.command)
         guard isHeld else {
+            let quits = isArmed
             stop()
+            if quits { NSApp.terminate(nil) }
             return
         }
-        if Self.isLongEnough(from: began, to: Date()) {
-            stop()
-            NSApp.terminate(nil)
+        if !isArmed, Self.isLongEnough(from: began, to: Date()) {
+            isArmed = true
+            label?.stringValue = "Solte para encerrar"
         }
     }
 
@@ -55,6 +61,8 @@ final class QuitHold {
         timer?.invalidate()
         timer = nil
         began = nil
+        isArmed = false
+        label = nil
         // Left up for a moment after a tap, or it would flash by unread.
         let notice = self.notice
         self.notice = nil
@@ -81,5 +89,6 @@ final class QuitHold {
             .announcement: label.stringValue, .priority: NSAccessibilityPriorityLevel.high.rawValue,
         ])
         notice = pill
+        self.label = label
     }
 }
