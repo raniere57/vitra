@@ -1229,6 +1229,46 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
 
     // MARK: - Clipboard
 
+    /// Right-click: answer the selected passage, copy, paste. Without a menu of
+    /// its own the click fell through to a web page parked behind the window.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        let hasSelection = session.selectedText()?.isEmpty == false
+        if hasSelection, session.isRunningProgram {
+            let reply = NSMenuItem(title: "Responder", action: #selector(replyToSelection(_:)), keyEquivalent: "")
+            reply.image = NSImage(systemSymbolName: "arrowshape.turn.up.left", accessibilityDescription: nil)
+            reply.target = self
+            menu.addItem(reply)
+            menu.addItem(.separator())
+        }
+        let copy = NSMenuItem(title: "Copiar", action: #selector(copy(_:)), keyEquivalent: "")
+        copy.target = self
+        copy.isEnabled = hasSelection
+        let paste = NSMenuItem(title: "Colar", action: #selector(paste(_:)), keyEquivalent: "")
+        paste.target = self
+        menu.autoenablesItems = false
+        menu.addItem(copy)
+        menu.addItem(paste)
+        return menu
+    }
+
+    /// Puts the selected passage in the prompt as a quote, each line behind
+    /// "> ", with the cursor under it for the answer.
+    @objc func replyToSelection(_ sender: Any?) {
+        guard let text = session.selectedText()?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return }
+        session.clearSelection()
+        session.scrollToBottom()
+        session.paste(Self.quoted(text))
+        window?.makeFirstResponder(self)
+    }
+
+    /// `text` as a quote to answer under: every line behind "> ", then a blank line.
+    static func quoted(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { "> " + $0.trimmingCharacters(in: .whitespaces) }
+            .joined(separator: "\n") + "\n\n"
+    }
+
     @objc func copy(_ sender: Any?) {
         guard let text = session.selectedText(), !text.isEmpty else { return }
         let pasteboard = NSPasteboard.general

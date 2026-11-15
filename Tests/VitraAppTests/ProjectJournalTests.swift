@@ -53,3 +53,7 @@ import Testing
     #expect(!FileManager.default.fileExists(atPath: mine.path))
     #expect(FileManager.default.fileExists(atPath: other.path))
 }
+
+@MainActor @Test func aPassageAnsweredFromTheTerminalIsQuotedLineByLine() {
+    #expect(TerminalView.quoted("3. Admin desfazendo\n   a ação") == "> 3. Admin desfazendo\n> a ação\n\n")
+}
