@@ -826,4 +826,6 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     #expect(!ProjectView.isSlashCommand("/clear\nand more"))
     #expect(!ProjectView.isSlashCommand("// comment"))
     #expect(!ProjectView.isSlashCommand("faz o /clear"))
+    #expect(ProjectView.isSlashCommand("!git status"))
+    #expect(!ProjectView.isSlashCommand("!"))
 }

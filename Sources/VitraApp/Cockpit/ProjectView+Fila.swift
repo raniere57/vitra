@@ -105,6 +105,8 @@ extension ProjectView {
     /// "/clear", "/model opus", "/plugin:skill": one line, no path, a name right after the slash.
     static func isSlashCommand(_ text: String) -> Bool {
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // "!ls": claude's shell mode opens only on a typed "!", too.
+        if line.hasPrefix("!"), line.count > 1, !line.contains(where: \.isNewline) { return true }
         guard line.hasPrefix("/"), !line.contains(where: \.isNewline),
               let first = line.dropFirst().first, first.isLetter else { return false }
         // "/Users/x/a.png, look" is a path that opens a message.

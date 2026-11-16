@@ -93,12 +93,36 @@ extension ProjectView {
             return
         }
         isReading = reading
+        carryDraft(toReading: reading)
         applyReading()
         onReadingChange?(reading)
         if reading {
             leitura.focusComposer()
         } else if let terminal {
             window?.makeFirstResponder(terminal)
+        }
+    }
+
+    /// What was being written goes along to the other side: typed in the
+    /// terminal's prompt, it opens in Leitura's field, and back again.
+    private func carryDraft(toReading reading: Bool) {
+        guard let terminal, terminal.session.isRunningProgram else { return }
+        let session = terminal.session
+        if reading {
+            guard let typed = terminal.typedInput(), !typed.isEmpty else { return }
+            let composer = leitura.composer
+            composer.message = composer.message.isEmpty ? typed : composer.message + " " + typed
+            session.send(text: String(repeating: "\u{15}", count: Self.clears))
+        } else {
+            guard isLeituraMade else { return }
+            let draft = leitura.composer.outgoing
+            guard !draft.isEmpty else { return }
+            leitura.composer.clear()
+            // Onto an empty prompt, and not sent: Return stays the user's.
+            session.send(text: String(repeating: "\u{15}", count: Self.clears))
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.clearDelay) {
+                if ProjectView.isSlashCommand(draft) { session.send(text: draft) } else { session.paste(draft) }
+            }
         }
     }
 
