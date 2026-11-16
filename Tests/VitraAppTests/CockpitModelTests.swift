@@ -817,3 +817,13 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     MaestroStray.note(event: "UserPromptSubmit", input: input, tab: "/work/hapto", in: strays, now: typed)
     #expect(MaestroStray.claim(for: "/work/hapto", typedAt: typed, in: strays, sessions: sessions, now: typed) == nil)
 }
+
+@MainActor @Test func slashCommandsAreTypedAndEverythingElsePasted() {
+    #expect(ProjectView.isSlashCommand("/clear"))
+    #expect(ProjectView.isSlashCommand("/model opus\n"))
+    #expect(ProjectView.isSlashCommand("/caveman:caveman lite"))
+    #expect(!ProjectView.isSlashCommand("/Users/raniere/a.png olha isso"))
+    #expect(!ProjectView.isSlashCommand("/clear\nand more"))
+    #expect(!ProjectView.isSlashCommand("// comment"))
+    #expect(!ProjectView.isSlashCommand("faz o /clear"))
+}

@@ -90,10 +90,26 @@ extension ProjectView {
     /// typed to the maestro on the user's behalf: the Fila and Leitura's
     /// composer both go through it.
     func submit(_ text: String, to session: TerminalSession) {
-        session.paste(text)
+        // A slash command is only one when typed: claude takes a paste as
+        // words to send, and "/clear" would reach the model as a message.
+        if Self.isSlashCommand(text) {
+            session.send(text: text.trimmingCharacters(in: .whitespacesAndNewlines))
+        } else {
+            session.paste(text)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.submitDelay) {
             session.send(text: "\r")
         }
+    }
+
+    /// "/clear", "/model opus", "/plugin:skill": one line, no path, a name right after the slash.
+    static func isSlashCommand(_ text: String) -> Bool {
+        let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard line.hasPrefix("/"), !line.contains(where: \.isNewline),
+              let first = line.dropFirst().first, first.isLetter else { return false }
+        // "/Users/x/a.png, look" is a path that opens a message.
+        let name = line.dropFirst().prefix { !$0.isWhitespace }
+        return !name.contains("/")
     }
 
     /// Leitura's "pôr na Fila": the message at the end of the queue, sent
