@@ -34,6 +34,9 @@ final class ProjectView: NSView {
     private var maestroTurns: [MaestroTurn] = []
     private var maestroAgents: [MaestroAgent] = []
     private var workTick: Timer?
+    /// When Return was last pressed in a terminal here: a stray prompt's
+    /// hook is matched to this tab by it.
+    private var lastReturn: Date?
     let workers = WorkersPanel()
     /// The live stage and timeline of the workers: the Palco tab.
     private(set) lazy var palco: PalcoView = {
@@ -954,10 +957,18 @@ final class ProjectView: NSView {
             MainActor.assumeIsolated {
                 guard let self, self.window != nil else { return }
                 self.maestroWorked(self.lastRuns, now: Date())
+                // A prompt typed here that went to a background conversation.
+                if let typed = self.lastReturn, Date().timeIntervalSince(typed) < MaestroStray.window {
+                    MaestroStray.claim(for: self.project.key, typedAt: typed)
+                }
             }
         }
         activityMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown, .scrollWheel]) { [weak self] event in
             MainActor.assumeIsolated {
+                if let self, event.window === self.window, event.type == .keyDown, [36, 76].contains(event.keyCode),
+                   self.window?.firstResponder is TerminalView {
+                    self.lastReturn = Date()
+                }
                 guard let self, event.window === self.window, self.tabs.selected == .browser,
                       let current = self.browserTabs.current else { return }
                 let inPage = event.type == .keyDown

@@ -987,7 +987,10 @@ enum MaestroStatus {
         let project = Maestro.tabFromEnvironment
             ?? (fields?["workspace"] as? [String: Any])?["project_dir"] as? String
             ?? fields?["cwd"] as? String
-        if let project, let model = model(fromStatusInput: input, fallbackEffort: settingsEffort) {
+        // A background conversation's status line carries the daemon's tab:
+        // another folder's model is not this tab's.
+        if let project, Maestro.belongs(cwd: fields?["cwd"] as? String, to: project),
+           let model = model(fromStatusInput: input, fallbackEffort: settingsEffort) {
             note(model, for: project)
         }
         guard let command = userStatusCommand(ours: command(binary: binary)) else { return }

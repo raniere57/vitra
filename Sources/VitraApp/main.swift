@@ -31,6 +31,7 @@ if CommandLine.arguments.dropFirst().first == "hook" {
     let event = CommandLine.arguments.dropFirst(2).first
     let input = FileHandle.standardInput.readDataToEndOfFile()
     Attention.run(event: event, input: input, environmentProject: Maestro.tabFromEnvironment)
+    MaestroStray.note(event: event, input: input, tab: Maestro.tabFromEnvironment)
     // A turn's end goes in the project's diary; a prompt is sent with what
     // the other tabs did since (printed, it joins the conversation).
     if let news = ProjectJournal.hook(event: event, input: input, tab: Maestro.tabFromEnvironment) { print(news) }

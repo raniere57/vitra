@@ -797,3 +797,23 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
     let rows = MaestroWorkLog.rows(log.agents, now: turn.ended.addingTimeInterval(30))
     #expect(rows.first?.row.title == "Aba de tração" && rows.first?.row.kind == .running)
 }
+
+@Test func aPromptToABackgroundConversationIsClaimedByTheTabTypedIn() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let strays = root.appendingPathComponent("strays"), sessions = root.appendingPathComponent("sessions")
+    let session = UUID().uuidString.lowercased()
+    let input = try JSONSerialization.data(withJSONObject: ["session_id": session, "cwd": "/work/hapto", "hook_event_name": "UserPromptSubmit"])
+    let typed = Date(timeIntervalSince1970: 2_000_000)
+    // The daemon's hook says it is efetivy's: noted, not recorded.
+    MaestroStray.note(event: "UserPromptSubmit", input: input, tab: "/work/efetivy", in: strays, now: typed.addingTimeInterval(1))
+    #expect(Maestro.rememberedSession(for: "/work/efetivy", in: sessions) == nil)
+    // Another folder's tab, or one typed in long before, does not take it.
+    #expect(MaestroStray.claim(for: "/work/vitra", typedAt: typed, in: strays, sessions: sessions, now: typed) == nil)
+    #expect(MaestroStray.claim(for: "/work/hapto#3", typedAt: typed.addingTimeInterval(-300), in: strays, sessions: sessions, now: typed) == nil)
+    #expect(MaestroStray.claim(for: "/work/hapto#3", typedAt: typed, in: strays, sessions: sessions, now: typed) == session)
+    #expect(Maestro.rememberedSession(for: "/work/hapto#3", in: sessions) == session)
+    // A hook whose tab owns the folder is not a stray.
+    MaestroStray.note(event: "UserPromptSubmit", input: input, tab: "/work/hapto", in: strays, now: typed)
+    #expect(MaestroStray.claim(for: "/work/hapto", typedAt: typed, in: strays, sessions: sessions, now: typed) == nil)
+}
