@@ -116,8 +116,13 @@ public enum ToolBlockDimming {
     /// "Calling vitra 3 times…". Told from prose by its English verb and the
     /// count right after it.
     static func isFolded(_ rest: String) -> Bool {
-        rest.range(of: #"^(Ran|Read|Wrote|Found|Made|\p{Lu}[a-z]+(ed|ing)) ((for |up )?\d+ \p{Ll}|[a-z][\w-]*( \d+ times?)?(,|$|…))"#, options: .regularExpression) != nil
+        folded.firstMatch(in: rest, range: NSRange(rest.startIndex..., in: rest)) != nil
     }
+
+    /// Compiled once: this runs for every row of every changed frame.
+    private static let folded = try! NSRegularExpression(
+        pattern: #"^(Ran|Read|Wrote|Found|Made|\p{Lu}[a-z]+(ed|ing)) ((for |up )?\d+ \p{Ll}|[a-z][\w-]*( \d+ times?)?(,|$|…))"#
+    )
 
     /// Under a call: the "⎿" line, or anything five spaces in or more.
     static func isOutput(_ row: String) -> Bool {

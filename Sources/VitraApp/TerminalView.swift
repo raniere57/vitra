@@ -563,6 +563,9 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         super.viewDidMoveToWindow()
         guard window != nil else {
             stopDisplayLink()
+            // Off screen (another project in front): the drawable pool goes,
+            // as when drawing stops; coming back sizes it again just below.
+            metalLayer?.drawableSize = CGSize(width: 1, height: 1)
             return
         }
         updateDrawableSize()
