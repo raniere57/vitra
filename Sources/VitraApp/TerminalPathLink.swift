@@ -70,12 +70,18 @@ enum TerminalPathLink {
         guard rows.indices.contains(row) else { return nil }
         var text: [Character] = []
         var click: Int?
+        // Where a row break was read as a space: a word wrapped mid-word
+        // ("…-manifes" / "to-a-bia…") is one word again without it.
+        var breaks: Set<Int> = []
         for (index, cells) in rows.enumerated() {
             let end = cells.lastIndex { !$0.isWhitespace }.map { $0 + 1 } ?? 0
             var start = 0
             if index > 0, !isWrapped(rows[index - 1]) {
                 start = cells.firstIndex { !$0.isWhitespace } ?? end
-                if !text.isEmpty { text.append(" ") }
+                if !text.isEmpty {
+                    breaks.insert(text.count)
+                    text.append(" ")
+                }
             }
             if index == row {
                 guard (start ..< end).contains(column) else { return nil }
@@ -99,9 +105,13 @@ enum TerminalPathLink {
         }
         for start in starts {
             for end in ends.reversed().prefix(30) {
-                let path = trimTrailing(String(text[start ... end]))
-                guard path.contains(" "), let url = resolve(path, base: URL(fileURLWithPath: "/")), fileExists(url) else { continue }
-                return Hit(url: url, line: nil, column: nil)
+                let spaced = trimTrailing(String(text[start ... end]))
+                let glued = trimTrailing(String((start ... end).filter { !breaks.contains($0) }.map { text[$0] }))
+                // A path with spaces as printed, or one the wrap cut in two.
+                for path in [spaced, glued] where path.contains(" ") || path != spaced {
+                    guard let url = resolve(path, base: URL(fileURLWithPath: "/")), fileExists(url) else { continue }
+                    return Hit(url: url, line: nil, column: nil)
+                }
             }
         }
         return nil

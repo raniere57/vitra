@@ -151,3 +151,17 @@ private func filled(_ text: String) -> [Character] {
     #expect(TerminalPathLink.matchSpaced(rows: rows, row: 3, column: 20, fileExists: exists) == nil)
     #expect(TerminalPathLink.matchSpaced(rows: rows, row: 0, column: 3, fileExists: exists) == nil)
 }
+
+@Test func aPathTheProgramWrappedMidWordIsFoundFromEitherRow() throws {
+    let path = "/Users/x/.vitra/runs/65a75110/tree/marketing/postar/2026-11-16-video-manifesto-a-bia-pede-31s/video.mp4"
+    let rows = [
+        row("  Vídeo atual: /Users/x/.vitra/runs/65a75110/tree/marketing/postar/2026-11-16-video-manifes", width: 100),
+        row("  to-a-bia-pede-31s/video.mp4", width: 100),
+        row("", width: 100),
+    ]
+    let exists: (URL) -> Bool = { $0.path == path }
+    for (line, column) in [(0, 30), (0, 90), (1, 5), (1, 25)] {
+        let hit = try #require(TerminalPathLink.matchSpaced(rows: rows, row: line, column: column, fileExists: exists))
+        #expect(hit.url.path == path)
+    }
+}
