@@ -354,9 +354,10 @@ private final class SessionRow: NSView {
 
     override func mouseEntered(with event: NSEvent) { isHovered = true; paint() }
     override func mouseExited(with event: NSEvent) { isHovered = false; paint() }
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
-    }
+    // On the press, like a sidebar: the list is rebuilt whenever a session's
+    // state changes, and a row replaced between press and release would
+    // never see the release.
+    override func mouseDown(with event: NSEvent) { onClick?() }
 
     override func accessibilityPerformPress() -> Bool { onClick?(); return true }
 
@@ -412,9 +413,10 @@ private final class ScratchRow: NSView {
 
     override func mouseEntered(with event: NSEvent) { isHovered = true; paint() }
     override func mouseExited(with event: NSEvent) { isHovered = false; paint() }
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
-    }
+    // On the press, like a sidebar: the list is rebuilt whenever a session's
+    // state changes, and a row replaced between press and release would
+    // never see the release.
+    override func mouseDown(with event: NSEvent) { onClick?() }
 
     override func accessibilityPerformPress() -> Bool { onClick?(); return true }
 
