@@ -138,7 +138,9 @@ final class FilesArea: NSView {
     private func consumes(_ event: NSEvent) -> Bool {
         guard openIndex != nil, event.window === window, !panelSlot.isHidden else { return false }
         if event.type == .keyDown {
-            let here = (window?.firstResponder as? NSView)?.isDescendant(of: self) == true
+            // Typing in a text being edited moves its caret, not the list.
+            let typing = (window?.firstResponder as? NSTextView)?.isEditable == true
+            let here = !typing && (window?.firstResponder as? NSView)?.isDescendant(of: self) == true
             let arrows: [UInt16: Int] = [123: -1, 124: 1]
             guard here, let by = arrows[event.keyCode], event.modifierFlags.intersection([.command, .option, .control]).isEmpty else { return false }
             step(by)
