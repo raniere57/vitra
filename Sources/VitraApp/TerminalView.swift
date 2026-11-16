@@ -1252,6 +1252,20 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         return menu
     }
 
+    /// ⌃↩ is the system's key for the context menu, and it reached here once
+    /// the terminal had one. In a terminal it belongs to the program — Claude
+    /// Code sends a message at once with it — so the key goes on as a key.
+    @available(macOS 15.0, *)
+    override func showContextMenuForSelection(_ sender: Any?) {
+        guard let event = NSApp.currentEvent, event.type == .keyDown else {
+            super.showContextMenuForSelection(sender)
+            return
+        }
+        send(event: event, text: "")
+        session.scrollToBottom()
+        session.clearSelection()
+    }
+
     /// Puts the selected passage in the prompt as a quote, each line behind
     /// "> ", with the cursor under it for the answer.
     @objc func replyToSelection(_ sender: Any?) {
