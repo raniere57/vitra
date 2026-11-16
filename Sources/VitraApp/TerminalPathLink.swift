@@ -76,7 +76,10 @@ enum TerminalPathLink {
         for (index, cells) in rows.enumerated() {
             let end = cells.lastIndex { !$0.isWhitespace }.map { $0 + 1 } ?? 0
             var start = 0
-            if index > 0, !isWrapped(rows[index - 1]) {
+            // Every row after the first starts at its text: a program that
+            // wraps its own lines (Claude Code) fills the row to the last
+            // column and indents the next, so even a full row is a break.
+            if index > 0 {
                 start = cells.firstIndex { !$0.isWhitespace } ?? end
                 if !text.isEmpty {
                     breaks.insert(text.count)

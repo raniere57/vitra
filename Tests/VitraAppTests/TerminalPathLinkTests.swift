@@ -165,3 +165,17 @@ private func filled(_ text: String) -> [Character] {
         #expect(hit.url.path == path)
     }
 }
+
+@Test func aPathClaudeCodeWrappedAtTheLastColumnAndIndentedOpens() throws {
+    let path = "/private/tmp/claude-503/-Users-raniere-Dev-hapto/32f5150d-53d4-4a1c-93ad-bc218b3e0a29/scratchpad/teste-real/folha.png"
+    let first = "  As imagens dos slides estão em /private/tmp/claude-503/-Users-raniere-Dev-hapto/32f5150d-53d4-4"
+    let rows = [
+        row(first, width: first.count),
+        row("  a1c-93ad-bc218b3e0a29/scratchpad/teste-real/folha.png e o .pptx está na mesma pasta.", width: first.count),
+    ]
+    let exists: (URL) -> Bool = { $0.path == path }
+    for (line, column) in [(0, 40), (1, 10), (1, 50)] {
+        let hit = try #require(TerminalPathLink.matchSpaced(rows: rows, row: line, column: column, fileExists: exists))
+        #expect(hit.url.path == path)
+    }
+}
