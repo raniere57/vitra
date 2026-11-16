@@ -33,6 +33,20 @@ public enum RecentFiles {
         return nil
     }
 
+    /// Where Claude Code keeps a project's scratchpads, one per conversation:
+    /// what an agent made "to show you" lands there, outside the project.
+    public static func scratchpads(for project: URL) -> URL {
+        let slug = project.path.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
+        return URL(fileURLWithPath: "/private/tmp/claude-\(getuid())", isDirectory: true).appendingPathComponent(slug)
+    }
+
+    /// The project's files and its conversations' scratchpads, newest first.
+    public static func find(in project: URL, alsoIn extra: [URL], kind: Kind, limit: Int = 120) -> [Entry] {
+        let all = ([project] + extra.filter { FileManager.default.fileExists(atPath: $0.path) })
+            .flatMap { find(in: $0, kind: kind, limit: limit) }
+        return Array(all.sorted { $0.modified > $1.modified }.prefix(limit))
+    }
+
     /// Reads the disk; call it off the main thread.
     public static func find(in root: URL, kind: Kind, limit: Int = 120) -> [Entry] {
         let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey]

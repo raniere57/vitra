@@ -229,7 +229,7 @@ final class RecentFilesView: NSView {
         note.stringValue = "Procurando…"
         note.isHidden = false
         DispatchQueue.global(qos: .userInitiated).async {
-            let entries = RecentFiles.find(in: root, kind: kind)
+            let entries = RecentFiles.find(in: root, alsoIn: [RecentFiles.scratchpads(for: root)], kind: kind)
             DispatchQueue.main.async { [weak self] in
                 guard let self, this == self.search else { return }
                 self.show(entries, root: root)
@@ -245,7 +245,12 @@ final class RecentFilesView: NSView {
         note.isHidden = !entries.isEmpty
         let now = Date()
         for entry in entries {
-            let folder = entry.url.deletingLastPathComponent().path.dropFirst(root.path.count).drop { $0 == "/" }
+            let parent = entry.url.deletingLastPathComponent().path
+            // Outside the project is a conversation's scratchpad: named as such,
+            // with what follows "scratchpad/".
+            let folder: Substring = parent.hasPrefix(root.path + "/") || parent == root.path
+                ? parent.dropFirst(root.path.count).drop { $0 == "/" }
+                : Substring("rascunho do Claude" + (parent.components(separatedBy: "/scratchpad").last.map { $0.isEmpty ? "" : " · " + $0.dropFirst() } ?? ""))
             let row = RecentFileRow(
                 url: entry.url,
                 detail: [GitHistory.stamp(entry.modified, now: now), folder.isEmpty ? nil : String(folder)].compactMap { $0 }.joined(separator: " · ")

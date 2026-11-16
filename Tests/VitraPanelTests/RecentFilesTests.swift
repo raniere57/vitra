@@ -31,3 +31,15 @@ import Testing
     #expect(RecentFiles.find(in: root, kind: .image, limit: 1).count == 1)
     #expect(RecentFiles.find(in: root, kind: .video).isEmpty)
 }
+
+@Test func aConversationsScratchpadIsSearchedBesideTheProject() throws {
+    #expect(RecentFiles.scratchpads(for: URL(fileURLWithPath: "/Users/x/Dev/hapto")).path == "/private/tmp/claude-\(getuid())/-Users-x-Dev-hapto")
+    let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let project = base.appendingPathComponent("p"), scratch = base.appendingPathComponent("s/abc/scratchpad")
+    for folder in [project, scratch] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+    try Data().write(to: project.appendingPathComponent("old.png"))
+    try Data().write(to: scratch.appendingPathComponent("folha.png"))
+    try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)], ofItemAtPath: project.appendingPathComponent("old.png").path)
+    let found = RecentFiles.find(in: project, alsoIn: [base.appendingPathComponent("s"), base.appendingPathComponent("missing")], kind: .image)
+    #expect(found.map(\.url.lastPathComponent) == ["folha.png", "old.png"])
+}
