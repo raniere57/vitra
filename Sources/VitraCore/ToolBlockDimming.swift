@@ -36,7 +36,7 @@ public enum ToolBlockDimming {
         var inBlock = opensInsideBlock(rows)
         var inNotice = false
         for (index, row) in rows.enumerated() {
-            if notices.contains(index) {
+            if notices.contains(index) || isTaskNotice(row) {
                 levels[index] = .output
                 inNotice = true
                 inBlock = false
@@ -77,6 +77,18 @@ public enum ToolBlockDimming {
         guard let first = row.first, !first.isLetter, !first.isNumber, first != " ", !bullets.contains(first),
               !"❯>".contains(first), row.dropFirst().first == " " else { return false }
         return row.dropFirst(2).range(of: #"^\p{Lu}\p{L}+ for \d"#, options: .regularExpression) != nil
+    }
+
+    /// The harness saying a background task ended: "● MCP task k0iq49kwe
+    /// (vitra/agent_wait) completed.", "● Background command "…" failed with
+    /// exit code 144", "● Agent "…" finished · 27m 45s". News of the work,
+    /// not the maestro's words.
+    static func isTaskNotice(_ row: String) -> Bool {
+        guard let first = row.first, bullets.contains(first), row.dropFirst().first == " " else { return false }
+        let rest = row.dropFirst(2)
+        let opens = ["MCP task ", "Background command ", "Agent \"", "Task "].contains { rest.hasPrefix($0) }
+        let ends = [" completed", " failed", " finished", " was stopped", " stopped", " killed"].contains { rest.contains($0) }
+        return opens && ends
     }
 
     static func isBlank(_ row: String) -> Bool { row.allSatisfy { $0 == " " } }

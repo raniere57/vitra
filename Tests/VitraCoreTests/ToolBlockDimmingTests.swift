@@ -108,6 +108,18 @@ struct ToolBlockDimmingTests {
         #expect(!ToolBlockDimming.isNoticeColor(red: 230, green: 80, blue: 80))
     }
 
+    @Test func aBackgroundTaskEndingIsQuietUntilItsBlankRow() {
+        let screen = """
+        ⏺ MCP task k0iq49kwe (vitra/agent_wait) completed.
+
+        ⏺ Background command "npx vite --config vite.preview.config.ts --host 127.0.0.1" failed with exit code
+          144
+
+        ⏺ O agente terminou o trabalho completed hoje.
+        """
+        #expect(levels(screen) == [2, 0, 2, 2, 0, 0])
+    }
+
     @Test func theLineSayingHowLongATurnTookIsQuiet() {
         #expect(levels("✻ Worked for 3m 44s · done 3:51 PM\n\n✻ Working… (12s)\n❯ Worked for 3 days") == [2, 0, 0, 0])
     }
