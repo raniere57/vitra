@@ -197,7 +197,10 @@ enum TranscriptLine {
         let text = said?.text
         switch entry["operation"] as? String {
         case "enqueue":
-            guard let said, !(said.text.isEmpty && said.paths.isEmpty) else { return [] }
+            // Claude Code sometimes logs the enqueue without its words: the
+            // prompt still waits, and Leitura fills in what was typed.
+            let said = said ?? (text: "", paths: [])
+            if content != nil, said.text.isEmpty, said.paths.isEmpty { return [] }
             let stamp = entry["timestamp"] as? String ?? ""
             let images = said.paths.map { ImageRef(path: $0) }
             return [.queued(id: "queued-\(stamp)-\(said.text.utf8.count)", time: time, text: said.text, images: images)]

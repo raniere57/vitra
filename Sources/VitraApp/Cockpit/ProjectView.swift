@@ -37,6 +37,8 @@ final class ProjectView: NSView {
     /// When Return was last pressed in a terminal here: a stray prompt's
     /// hook is matched to this tab by it.
     private var lastReturn: Date?
+    /// What was last sent to the maestro, newest last.
+    var sentPrompts: [String] = []
     let workers = WorkersPanel()
     /// The live stage and timeline of the workers: the Palco tab.
     private(set) lazy var palco: PalcoView = {
@@ -966,8 +968,9 @@ final class ProjectView: NSView {
         activityMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown, .scrollWheel]) { [weak self] event in
             MainActor.assumeIsolated {
                 if let self, event.window === self.window, event.type == .keyDown, [36, 76].contains(event.keyCode),
-                   self.window?.firstResponder is TerminalView {
+                   let focused = self.window?.firstResponder as? TerminalView {
                     self.lastReturn = Date()
+                    if focused === self.terminal, let typed = focused.typedInput(), !typed.isEmpty { self.noteSent(typed) }
                 }
                 guard let self, event.window === self.window, self.tabs.selected == .browser,
                       let current = self.browserTabs.current else { return }

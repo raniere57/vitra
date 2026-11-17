@@ -47,6 +47,14 @@ struct LeituraQueueTests {
         #expect(older.joined(newer).queued.map(\.text) == ["outra"])
     }
 
+    @Test func aPromptLoggedWithoutItsWordsStillWaitsAndGetsWhatWasSent() {
+        let waiting = chunk([line("enqueue", nil)])
+        #expect(waiting.queued.count == 1)
+        #expect(LeituraView.filled(waiting.queued, from: ["antes", "sim"]).map(\.text) == ["sim"])
+        #expect(LeituraView.filled(waiting.queued, from: []).map(\.text) == ["(mensagem na fila)"])
+        #expect(chunk([line("enqueue", nil), line("dequeue", nil)]).queued.isEmpty)
+    }
+
     @Test func aBackgroundTaskNoticeIsNotTheUsersPrompt() {
         #expect(chunk([line("enqueue", "<task-notification><summary>fim</summary></task-notification>")]).queued.isEmpty)
     }

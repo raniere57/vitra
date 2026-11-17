@@ -27,6 +27,7 @@ extension ProjectView {
             self.sendFromLeitura(text) { _ in }
         }
         let key = project.key
+        view.sentSource = { [weak self] in self?.sentPrompts ?? [] }
         view.statusSource = { MaestroLive.line(model: MaestroStatus.model(for: key), live: MaestroStatus.live(for: key)) }
         // Claude Code's own "send queued messages now": ⌃X ⌃S, the chord that
         // every terminal passes on (⌃⏎ reaches some as a plain Return).
@@ -171,6 +172,10 @@ extension ProjectView {
 
     // MARK: - Talking from Leitura
 
+    func noteSent(_ text: String) {
+        sentPrompts = Array((sentPrompts + [text.trimmingCharacters(in: .whitespacesAndNewlines)]).suffix(8))
+    }
+
     /// The composer's message into the maestro's prompt, the way the Fila
     /// sends: pasted whole, then Return. Nil once it went; else why not.
     func sendFromLeitura(_ text: String, done: @escaping @MainActor (String?) -> Void) {
@@ -183,6 +188,7 @@ extension ProjectView {
         // reading the screen back — Claude Code's suggested next prompt reads
         // as typed text there, and a send must not be refused over a guess.
         let session = terminal.session
+        noteSent(text)
         session.send(text: String(repeating: "\u{15}", count: Self.clears))
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.clearDelay) { [weak self] in
             self?.submit(text, to: session)

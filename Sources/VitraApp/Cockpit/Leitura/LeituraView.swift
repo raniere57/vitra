@@ -22,6 +22,9 @@ final class LeituraView: NSView {
     var onOpenScreen: ((String) -> Void)?
     /// Model, context and cost for the line under the field.
     var statusSource: (() -> String)?
+    /// What was sent to the maestro lately, newest last: the words of a
+    /// queued prompt Claude Code logged without them.
+    var sentSource: (() -> [String])?
     private var statusTicks = 0
     /// The prompt the maestro's terminal suggests now, if any.
     var suggestionSource: (() -> String?)?
@@ -355,7 +358,7 @@ final class LeituraView: NSView {
         hasOlder = update.hasOlder
         showMissing(update.isMissing && update.items.isEmpty)
         items = update.items
-        queued = update.queued
+        queued = Self.filled(update.queued, from: sentSource?() ?? [])
         transcriptTurn = (update.isTurnOpen, update.turnStarted, update.lastActivity)
         composer.setWorking(isWorking)
         updateClock()
@@ -382,6 +385,20 @@ final class LeituraView: NSView {
         }
         // What waits for the maestro comes last: it is read after the turn.
         return rows + queued.map { .item(.user($0)) }
+    }
+
+    /// Queued prompts without words get the latest ones sent, in order.
+    nonisolated static func filled(_ queued: [UserMessage], from sent: [String]) -> [UserMessage] {
+        let blanks = queued.filter { $0.text.isEmpty && $0.images.isEmpty }.count
+        var words = Array(sent.suffix(blanks))
+        words.insert(contentsOf: Array(repeating: "", count: blanks - words.count), at: 0)
+        return queued.map { message in
+            guard message.text.isEmpty, message.images.isEmpty else { return message }
+            var message = message
+            let said = words.removeFirst()
+            message.text = said.isEmpty ? "(mensagem na fila)" : said
+            return message
+        }
     }
 
     private func loadOlder() {
