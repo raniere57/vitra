@@ -800,6 +800,45 @@ struct SubscriptionUsage: Codable, Equatable {
 }
 
 /// The model a project's maestro is running on, and how hard it is thinking.
+/// How full the maestro's context is, in percent, and what its session
+/// has cost: what claude's status line says, for Leitura's own.
+struct MaestroLive: Codable, Equatable {
+    let context: Int?
+    let cost: Double?
+
+    init(context: Int?, cost: Double?) {
+        self.context = context
+        self.cost = cost
+    }
+
+    init(statusInput fields: [String: Any]) {
+        let window = fields["context_window"] as? [String: Any]
+        var used = (window?["used_percentage"] as? NSNumber)?.doubleValue
+        if used == nil, let size = (window?["context_window_size"] as? NSNumber)?.doubleValue, size > 0,
+           let current = window?["current_usage"] as? [String: Any] {
+            let tokens = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
+                .compactMap { (current[$0] as? NSNumber)?.doubleValue }.reduce(0, +)
+            used = tokens / size * 100
+        }
+        context = used.map { Int($0.rounded()) }
+        cost = ((fields["cost"] as? [String: Any])?["total_cost_usd"] as? NSNumber).map { ($0.doubleValue * 100).rounded() / 100 }
+    }
+
+    /// "Opus 5.5 · medium · contexto 42% · US$ 3,21", what is known of it.
+    static func line(model: MaestroModel?, live: MaestroLive?) -> String {
+        var parts: [String] = []
+        if let model {
+            parts.append(model.name)
+            if let effort = model.effort, !effort.isEmpty { parts.append(effort) }
+        }
+        if let context = live?.context { parts.append("contexto \(context)%") }
+        if let cost = live?.cost {
+            parts.append("US$ " + String(format: "%.2f", cost).replacingOccurrences(of: ".", with: ","))
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
 struct MaestroModel: Codable, Equatable {
     let name: String
     let effort: String?
@@ -936,6 +975,24 @@ enum MaestroStatus {
         return directory.appendingPathComponent("model-" + name)
     }
 
+    static func liveFile(for project: String, in directory: URL = Maestro.supportDirectory) -> URL {
+        let name = Maestro.sessionFile(for: project, in: directory).lastPathComponent
+        return directory.appendingPathComponent("live-" + name)
+    }
+
+    static func live(for project: String, in directory: URL = Maestro.supportDirectory) -> MaestroLive? {
+        (try? Data(contentsOf: liveFile(for: project, in: directory)))
+            .flatMap { try? JSONDecoder().decode(MaestroLive.self, from: $0) }
+    }
+
+    /// Notes context and cost when they changed; nobody watches this file,
+    /// Leitura reads it every few seconds while shown.
+    static func noteLive(_ live: MaestroLive, for project: String, in directory: URL = Maestro.supportDirectory) {
+        guard live.context != nil || live.cost != nil, self.live(for: project, in: directory) != live else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? JSONEncoder().encode(live).write(to: liveFile(for: project, in: directory), options: .atomic)
+    }
+
     static func model(for project: String, in directory: URL = Maestro.supportDirectory) -> MaestroModel? {
         (try? Data(contentsOf: modelFile(for: project, in: directory)))
             .flatMap { try? JSONDecoder().decode(MaestroModel.self, from: $0) }
@@ -989,9 +1046,9 @@ enum MaestroStatus {
             ?? fields?["cwd"] as? String
         // A background conversation's status line carries the daemon's tab:
         // another folder's model is not this tab's.
-        if let project, Maestro.belongs(cwd: fields?["cwd"] as? String, to: project),
-           let model = model(fromStatusInput: input, fallbackEffort: settingsEffort) {
-            note(model, for: project)
+        if let project, Maestro.belongs(cwd: fields?["cwd"] as? String, to: project) {
+            if let model = model(fromStatusInput: input, fallbackEffort: settingsEffort) { note(model, for: project) }
+            if let fields { noteLive(MaestroLive(statusInput: fields), for: project) }
         }
         guard let command = userStatusCommand(ours: command(binary: binary)) else { return }
 

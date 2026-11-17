@@ -16,6 +16,13 @@ final class LeituraView: NSView {
     var onQueue: ((String) -> Void)?
     /// Delivers what waits in Claude Code's queue now.
     var onDeliverQueue: (() -> Void)?
+    /// ⎋ or "Parar" while the maestro works.
+    var onInterrupt: (() -> Void)?
+    /// A command that opens a screen of its own: the terminal shows it.
+    var onOpenScreen: ((String) -> Void)?
+    /// Model, context and cost for the line under the field.
+    var statusSource: (() -> String)?
+    private var statusTicks = 0
     /// The prompt the maestro's terminal suggests now, if any.
     var suggestionSource: (() -> String?)?
     /// The menu the maestro's terminal has up now, if any.
@@ -42,6 +49,9 @@ final class LeituraView: NSView {
     /// A menu counts when the hooks say the maestro waits on the user, or
     /// when it carries its own hint row: the hook can come late.
     private func readMenu() {
+        // Every other second: the line changes with each turn, not each frame.
+        if statusTicks % 4 == 0 { composer.setStatus(statusSource?() ?? "") }
+        statusTicks += 1
         let found = menuSource?()
         let menu = found.flatMap { attention == .needsPermission || $0.hasFooter ? $0 : nil }
         let wasHidden = banner.isHidden
@@ -160,6 +170,7 @@ final class LeituraView: NSView {
 
     init(project: CockpitProject, transcripts: URL = Maestro.conversationsDirectory) {
         self.project = project
+        composer.project = project.path
         self.transcripts = transcripts
         super.init(frame: .zero)
         wantsLayer = true
@@ -217,8 +228,14 @@ final class LeituraView: NSView {
         composer.onOpenAttachment = { [weak self] path in self?.onOpenLink?(URL(fileURLWithPath: path)) }
         composer.onHeightChange = { [weak self] in self?.fitComposer() }
         composer.onEscape = { [weak self] in self?.focusList() }
+        composer.onInterrupt = { [weak self] in self?.onInterrupt?() }
         composer.onSend = { [weak self] text in
             guard let self else { return }
+            if SlashCatalog.opensScreen(text), self.banner.isHidden {
+                self.composer.clear()
+                self.onOpenScreen?(text)
+                return
+            }
             // A question is up that takes the user's own words: they are its answer.
             if self.answersMenu(with: text) { return }
             self.onSend?(text) { [weak self] problem in
@@ -278,6 +295,7 @@ final class LeituraView: NSView {
             reader?.follow(true)
         } else {
             reader?.follow(false)
+            composer.hideCompletions()
         }
         updateClock()
         watchSuggestion()

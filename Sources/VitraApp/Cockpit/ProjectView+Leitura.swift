@@ -14,6 +14,20 @@ extension ProjectView {
             self.sendFromLeitura(text, done: done)
         }
         view.onQueue = { [weak self] text in self?.enqueue(text) }
+        // claude's own interrupt: Esc, as the key, so the terminal encodes it
+        // the way the program asked.
+        view.onInterrupt = { [weak self] in
+            self?.terminal?.session.send(KeyEvent(keyCode: 53, modifiers: [], text: "\u{1b}", unshiftedCodepoint: 27))
+        }
+        // "/model", "/resume": a screen of claude's own, which only the
+        // terminal can show; ⌘L comes back.
+        view.onOpenScreen = { [weak self] text in
+            guard let self else { return }
+            self.setReading(false)
+            self.sendFromLeitura(text) { _ in }
+        }
+        let key = project.key
+        view.statusSource = { MaestroLive.line(model: MaestroStatus.model(for: key), live: MaestroStatus.live(for: key)) }
         // Claude Code's own "send queued messages now": ⌃X ⌃S, the chord that
         // every terminal passes on (⌃⏎ reaches some as a plain Return).
         view.onDeliverQueue = { [weak self] in self?.deliverQueueNow() }

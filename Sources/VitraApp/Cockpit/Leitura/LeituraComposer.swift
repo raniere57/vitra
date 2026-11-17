@@ -20,6 +20,10 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     var onHeightChange: (() -> Void)?
     /// A pasted image or file was clicked: its path, to open in the preview.
     var onOpenAttachment: ((String) -> Void)?
+    /// ⎋ or "Parar" while the maestro works: claude's own interrupt.
+    var onInterrupt: (() -> Void)?
+    /// The folder "/" and "@" complete in, and whose prompts ↑ goes back to.
+    var project = ""
 
     static let verticalPad: CGFloat = 12
     static let fieldPad: CGFloat = 10
@@ -34,6 +38,18 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     private let send = NSButton()
     private let queue = NSButton()
     private let status = NSTextField.label(font: CockpitStyle.caption, color: CockpitStyle.dangerText)
+    private let stop = NSButton()
+    /// Model, context and cost, as claude's status line has them.
+    private let statusLine = NSTextField.label(font: CockpitStyle.caption, color: ReadingStyle.faint)
+    private let popup = CompletionPopup()
+    /// What "/" offers in this folder, read once.
+    private var slashCommands: [ComposerCompletion]?
+    /// The folder's files, for "@", while they are being looked at.
+    private var files: [String] = []
+    private var isLoadingFiles = false
+    /// ↑'s place in the folder's prompts, and the prompts themselves.
+    private var history: [String]?
+    private var historyIndex: Int?
     private(set) var isWorking = false
     /// What the maestro suggests saying next: shown where the placeholder
     /// is, taken into the text with Tab.
@@ -91,9 +107,14 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         scroll.scrollerStyle = .overlay
         configure(send, action: #selector(sendTapped))
         configure(queue, action: #selector(queueTapped))
+        configure(stop, action: #selector(stopTapped))
+        stop.attributedTitle = NSAttributedString(string: "Parar  ⎋", attributes: [.font: CockpitStyle.caption, .foregroundColor: CockpitStyle.dangerText])
+        stop.toolTip = "Interrompe o maestro, como o Esc no terminal"
+        statusLine.lineBreakMode = .byTruncatingTail
+        popup.onChoose = { [weak self] item in self?.complete(with: item) }
         queue.toolTip = "Guardar na Fila do Vitra: vai quando o maestro terminar o turno"
         placeholder.lineBreakMode = .byTruncatingTail
-        for view in [field, scroll, placeholder, tabHint, send, queue, status] as [NSView] {
+        for view in [field, scroll, placeholder, tabHint, statusLine, stop, send, queue, status] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
@@ -111,7 +132,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     /// which would stay with the terminal underneath, typing into it unseen.
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
-        return hit === placeholder || hit === tabHint || hit === field || hit === self ? text : hit
+        return hit === placeholder || hit === tabHint || hit === statusLine || hit === field || hit === self ? text : hit
     }
 
     private func configure(_ button: NSButton, action: Selector) {
@@ -133,6 +154,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
             : "Envia ao maestro, como se fosse digitada no terminal"
         queue.attributedTitle = NSAttributedString(string: "pôr na Fila", attributes: [.font: CockpitStyle.caption, .foregroundColor: ReadingStyle.quiet])
         queue.isHidden = !working
+        stop.isHidden = !working
         needsLayout = true
     }
 
@@ -275,6 +297,11 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         send.frame = NSRect(x: field.frame.maxX - Self.fieldPad - sendWidth, y: buttonsY, width: sendWidth, height: 26)
         queue.sizeToFit()
         queue.frame = NSRect(x: send.frame.minX - queue.frame.width - 16, y: buttonsY, width: queue.frame.width + 8, height: 26)
+        stop.sizeToFit()
+        let stopRight = (queue.isHidden ? send.frame.minX : queue.frame.minX) - 12
+        stop.frame = NSRect(x: stopRight - stop.frame.width - 8, y: buttonsY, width: stop.frame.width + 8, height: 26)
+        let statusRight = (stop.isHidden ? stopRight + 12 : stop.frame.minX) - 12
+        statusLine.frame = NSRect(x: field.frame.minX + Self.fieldPad + 2, y: buttonsY + 5, width: max(statusRight - field.frame.minX - Self.fieldPad, 0), height: 16)
         status.frame = NSRect(x: column.x + 4, y: field.frame.maxY + 3, width: column.width, height: 15)
         let isEmpty = outgoing.isEmpty
         send.alphaValue = isEmpty ? 0.45 : 1
@@ -292,13 +319,21 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         if text.string.isEmpty { applyTypingLook() }
+        if let index = historyIndex, history?.indices.contains(index) == true, history?[index] != text.string { historyIndex = nil }
+        updateCompletions()
         if !status.isHidden { showProblem(nil) }
         placeholder.isHidden = !text.string.isEmpty
         needsLayout = true
         onHeightChange?()
     }
 
+    func textViewDidChangeSelection(_ notification: Notification) {
+        if popup.isShown { updateCompletions() }
+    }
+
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if popup.isShown, let handled = completionKey(selector) { return handled }
+        if let handled = historyKey(selector) { return handled }
         switch selector {
         case #selector(NSResponder.insertNewline(_:)):
             if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
@@ -315,7 +350,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         case #selector(NSResponder.insertTab(_:)) where suggestion != nil && textView.string.isEmpty:
             return takeSuggestion()
         case #selector(NSResponder.cancelOperation(_:)):
-            onEscape?()
+            if isWorking { onInterrupt?() } else { onEscape?() }
             return true
         default:
             return false
@@ -334,8 +369,22 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         onQueue?(message)
     }
 
+    @objc private func stopTapped() { onInterrupt?() }
+
+    /// The list goes when Leitura does: it is a window of its own.
+    func hideCompletions() { popup.hide() }
+
+    func setStatus(_ line: String) {
+        guard statusLine.stringValue != line else { return }
+        statusLine.stringValue = line
+        statusLine.toolTip = line
+    }
+
     /// The field emptied once its message went.
     func clear() {
+        popup.hide()
+        history = nil
+        historyIndex = nil
         attachments.forEach { $0.view.removeFromSuperview() }
         attachments = []
         quotes.forEach { $0.removeFromSuperview() }
@@ -357,6 +406,14 @@ final class ComposerTextView: NSTextView {
     override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
         if item.action == #selector(paste(_:)) { return true }
         return super.validateUserInterfaceItem(item)
+    }
+
+    /// Files dropped on the field go as they do when pasted.
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        guard !urls.isEmpty else { return super.performDragOperation(sender) }
+        onAttach?(urls.map(\.path))
+        return true
     }
 
     override func paste(_ sender: Any?) {
@@ -420,4 +477,125 @@ final class QuoteChip: NSView {
     }
 
     @objc private func removeTapped() { onRemove?() }
+}
+
+// MARK: - "/", "@" and ↑
+
+extension LeituraComposer {
+    /// What is being completed: where it starts in the text, and the
+    /// letters typed after its "/" or "@".
+    private func token() -> (kind: Character, range: NSRange, query: String)? {
+        let string = text.string as NSString
+        let caret = text.selectedRange()
+        guard caret.length == 0 else { return nil }
+        let before = string.substring(to: caret.location)
+        // "/" only at the very start, as claude takes it.
+        if before.hasPrefix("/"), !before.contains(where: \.isWhitespace) {
+            return ("/", NSRange(location: 0, length: caret.location), String(before.dropFirst()))
+        }
+        guard let at = before.lastIndex(of: "@") else { return nil }
+        let query = before[before.index(after: at)...]
+        guard !query.contains(where: \.isWhitespace) else { return nil }
+        if at > before.startIndex, !before[before.index(before: at)].isWhitespace { return nil }
+        let start = before.utf16.distance(from: before.utf16.startIndex, to: at.samePosition(in: before.utf16) ?? before.utf16.startIndex)
+        return ("@", NSRange(location: start, length: caret.location - start), String(query))
+    }
+
+    func updateCompletions() {
+        guard let window, let token = token() else { return popup.hide() }
+        let items: [ComposerCompletion]
+        if token.kind == "/" {
+            if slashCommands == nil { slashCommands = SlashCatalog.all(project: project) }
+            items = SlashCatalog.matching(token.query, in: slashCommands ?? [])
+        } else {
+            loadFiles()
+            items = FileCatalog.matching(token.query, in: files)
+        }
+        let anchor = window.convertToScreen(convert(field.frame, to: nil))
+        popup.show(items, above: anchor, in: window)
+    }
+
+    /// The folder's files, read off the main thread; the list is drawn
+    /// again when they come.
+    private func loadFiles() {
+        guard !isLoadingFiles, !project.isEmpty else { return }
+        isLoadingFiles = true
+        let project = self.project
+        DispatchQueue.global(qos: .userInitiated).async {
+            let found = FileCatalog.files(in: project)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.isLoadingFiles = false
+                guard found != self.files else { return }
+                self.files = found
+                self.updateCompletions()
+            }
+        }
+    }
+
+    /// The chosen item in place of what was typed, and a space after it.
+    func complete(with item: ComposerCompletion) {
+        guard let token = token() else { return popup.hide() }
+        let insert = item.insert + " "
+        if text.shouldChangeText(in: token.range, replacementString: insert) {
+            text.replaceCharacters(in: token.range, with: insert)
+            text.didChangeText()
+        }
+        text.setSelectedRange(NSRange(location: token.range.location + (insert as NSString).length, length: 0))
+        popup.hide()
+    }
+
+    /// The list's keys while it is up; nil for any other key.
+    func completionKey(_ selector: Selector) -> Bool? {
+        switch selector {
+        case #selector(NSResponder.moveUp(_:)): popup.move(-1)
+        case #selector(NSResponder.moveDown(_:)): popup.move(1)
+        case #selector(NSResponder.insertTab(_:)): popup.chooseSelected()
+        case #selector(NSResponder.insertNewline(_:)) where NSApp.currentEvent?.modifierFlags.intersection([.shift, .control]).isEmpty ?? true:
+            popup.chooseSelected()
+        case #selector(NSResponder.cancelOperation(_:)): popup.hide()
+        default: return nil
+        }
+        return true
+    }
+
+    /// ↑ on the first line goes back through what was said in this folder,
+    /// ↓ forward again, past the newest to an empty field.
+    func historyKey(_ selector: Selector) -> Bool? {
+        let string = text.string as NSString
+        let caret = text.selectedRange().location
+        switch selector {
+        case #selector(NSResponder.moveUp(_:)):
+            guard historyIndex != nil || string.length == 0 else { return nil }
+            let firstLineEnd = string.range(of: "\n").location
+            guard firstLineEnd == NSNotFound || caret <= firstLineEnd else { return nil }
+            if history == nil { history = PromptHistory.prompts(for: project) }
+            guard let history, !history.isEmpty else { return nil }
+            let index = max((historyIndex ?? history.count) - 1, 0)
+            recall(index)
+            return true
+        case #selector(NSResponder.moveDown(_:)):
+            guard let index = historyIndex, let history else { return nil }
+            let lastLineStart = string.range(of: "\n", options: .backwards).location
+            guard lastLineStart == NSNotFound || caret > lastLineStart else { return nil }
+            if index + 1 < history.count {
+                recall(index + 1)
+            } else {
+                historyIndex = nil
+                message = ""
+            }
+            return true
+        default:
+            return nil
+        }
+    }
+
+    private func recall(_ index: Int) {
+        guard let history, history.indices.contains(index) else { return }
+        historyIndex = index
+        message = history[index]
+        historyIndex = index
+        popup.hide()
+        text.setSelectedRange(NSRange(location: (history[index] as NSString).length, length: 0))
+    }
 }
