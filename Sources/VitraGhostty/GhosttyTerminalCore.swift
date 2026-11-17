@@ -21,6 +21,7 @@ public final class GhosttyTerminalCore: TerminalCore, @unchecked Sendable {
     public var onWritePTY: (@Sendable (UnsafeRawBufferPointer) -> Void)?
     public var onTitleChanged: (@Sendable (String) -> Void)?
     public var onBell: (@Sendable () -> Void)?
+    public var onCopy: (@Sendable (String) -> Void)?
 
     public init(size: TerminalSize) throws {
         var terminal: GhosttyTerminal?
@@ -131,6 +132,25 @@ public final class GhosttyTerminalCore: TerminalCore, @unchecked Sendable {
             handle,
             GHOSTTY_TERMINAL_OPT_BELL,
             unsafeBitCast(bell, to: UnsafeRawPointer.self)
+        )
+
+        // Claude Code's full-screen view copies what is selected in it this way.
+        let clipboard: GhosttyTerminalClipboardWriteFn = { _, userdata, write in
+            guard let userdata, let write, write.pointee.contents_len > 0, let contents = write.pointee.contents
+            else { return GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS }
+            let items = UnsafeBufferPointer(start: contents, count: write.pointee.contents_len)
+            let string = { (s: GhosttyString) in
+                s.ptr.map { String(decoding: UnsafeBufferPointer(start: $0, count: s.len), as: UTF8.self) } ?? ""
+            }
+            guard let text = (items.first { string($0.mime).hasPrefix("text/plain") } ?? items.first).map({ string($0.data) })
+            else { return GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS }
+            Unmanaged<GhosttyTerminalCore>.fromOpaque(userdata).takeUnretainedValue().onCopy?(text)
+            return GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS
+        }
+        _ = ghostty_terminal_set(
+            handle,
+            GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE,
+            unsafeBitCast(clipboard, to: UnsafeRawPointer.self)
         )
 
         // The title callback carries no payload; the new title is read back out

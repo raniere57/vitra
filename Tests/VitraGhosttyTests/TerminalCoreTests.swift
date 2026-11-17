@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import VitraCore
 @testable import VitraGhostty
@@ -97,6 +98,17 @@ private func render(
     core.feed("a\u{07}b\u{07}")
 
     #expect(count.value == 2)
+}
+
+@Test func aProgramsClipboardWriteReachesTheCallback() throws {
+    let core = try GhosttyTerminalCore(size: TerminalSize(columns: 20, rows: 5))
+    let copies = Titles()
+    core.onCopy = { copies.append($0) }
+
+    // OSC 52, base64 of "olá mundo".
+    core.feed("\u{1B}]52;c;\(Data("olá mundo".utf8).base64EncodedString())\u{07}")
+
+    #expect(copies.all == ["olá mundo"])
 }
 
 @Test func scrollbackRetainsScrolledOffLines() throws {

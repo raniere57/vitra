@@ -14,6 +14,8 @@ public protocol TerminalCore: AnyObject {
     var onWritePTY: (@Sendable (UnsafeRawBufferPointer) -> Void)? { get set }
     var onTitleChanged: (@Sendable (String) -> Void)? { get set }
     var onBell: (@Sendable () -> Void)? { get set }
+    /// Text the program put on the clipboard (OSC 52).
+    var onCopy: (@Sendable (String) -> Void)? { get set }
 
     /// Feeds bytes read from the PTY into the emulator.
     func feed(_ bytes: UnsafeRawBufferPointer)

@@ -228,6 +228,12 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         session.onNeedsRedraw = { [weak self] in
             self?.setNeedsRender()
         }
+        session.onCopy = { text in
+            MainActor.assumeIsolated {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+        }
 
         // Files dropped anywhere on the terminal become attachments.
         registerForDraggedTypes([.fileURL, TerminalView.paneType])
@@ -839,11 +845,38 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         return (rows, row - start)
     }
 
+    /// A program that asked for the mouse gets the left button too — Claude
+    /// Code's full-screen view selects, scrolls and copies by it, and on its
+    /// alternate screen the terminal's own selection cannot reach past what is
+    /// shown. Shift or Option keep the button for the terminal's selection,
+    /// Command for its links.
+    private var isReportingDrag = false
+
+    private func reportsButton(_ event: NSEvent) -> Bool {
+        snapshot.mouseTracking && event.modifierFlags.isDisjoint(with: [.shift, .option, .command])
+    }
+
+    /// Left button: 0 pressed, +32 moving while held; released is 3 in the
+    /// legacy encoding and a lowercase m in SGR.
+    private func report(button: Int, released: Bool = false, at position: (column: UInt16, row: UInt16)) {
+        let column = Int(position.column) + 1, row = Int(position.row) + 1
+        if snapshot.sgrMouse {
+            session.send(bytes: Array("\u{1b}[<\(button);\(column);\(row)\(released ? "m" : "M")".utf8))
+        } else if column <= 223, row <= 223 {
+            session.send(bytes: [0x1b, 0x5b, 0x4d, UInt8(32 + (released ? 3 : button)), UInt8(32 + column), UInt8(32 + row)])
+        }
+    }
+
     override func mouseDown(with event: NSEvent) {
         // Clicking a pane focuses it; with splits there is more than one.
         if window?.firstResponder !== self { window?.makeFirstResponder(self) }
         let position = cell(for: event)
         pressedCell = position
+        if reportsButton(event) {
+            isReportingDrag = true
+            session.clearSelection()
+            return report(button: 0, at: position)
+        }
         // Shift-click extends what is already selected, from wherever it
         // started — the way a long selection is made in every other app, and
         // the way one longer than the pane is made here: click, scroll,
@@ -861,6 +894,7 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
 
     override func mouseDragged(with event: NSEvent) {
         let position = cell(for: event)
+        if isReportingDrag { return report(button: 32, at: position) }
         // Option turns the drag into a rectangular selection, the convention
         // every terminal that supports it uses.
         let rectangle = event.modifierFlags.contains(.option)
@@ -869,6 +903,18 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if isReportingDrag {
+            isReportingDrag = false
+            let position = cell(for: event)
+            report(button: 0, released: true, at: position)
+            // A click that stayed put on a link still opens it.
+            let stayed = pressedCell.map { $0 == position } ?? false
+            pressedCell = nil
+            if stayed, event.clickCount == 1, let url = link(for: event) {
+                onOpenLink?(url, false)
+            }
+            return
+        }
         stopAutoScroll()
         session.endSelection()
 

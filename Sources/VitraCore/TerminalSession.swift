@@ -17,6 +17,8 @@ public final class TerminalSession: @unchecked Sendable {
     public var onNeedsRedraw: (@Sendable () -> Void)?
     public var onTitleChanged: (@Sendable (String) -> Void)?
     public var onBell: (@Sendable () -> Void)?
+    /// Text the program copied to the clipboard.
+    public var onCopy: (@Sendable (String) -> Void)?
 
     /// A file the program asked the panel to show, via `ESC ] 7337`.
     public var onPreviewRequest: (@Sendable (PreviewTarget) -> Void)?
@@ -76,6 +78,11 @@ public final class TerminalSession: @unchecked Sendable {
         core.onTitleChanged = { [weak self] title in
             guard let handler = self?.onTitleChanged else { return }
             DispatchQueue.main.async { handler(title) }
+        }
+        core.onCopy = { [weak self] text in
+            // A replayed copy is an old one: the clipboard is not the past's.
+            guard let self, !self.pty.isReplaying, let handler = self.onCopy else { return }
+            DispatchQueue.main.async { handler(text) }
         }
         core.onBell = { [weak self] in
             guard let self, !self.pty.isReplaying, let handler = self.onBell else { return }
