@@ -107,14 +107,8 @@ final class MaestroWorkLog: @unchecked Sendable {
     func locate(_ project: CockpitProject) -> URL? {
         guard let session = TranscriptLocator.session(project: project) else { return nil }
         if let located, located.session == session { return located.url }
-        let direct = TranscriptLocator.url(project: project.path, session: session)
-        var found: URL? = FileManager.default.fileExists(atPath: direct.path) ? direct : nil
-        if found == nil {
-            let root = Maestro.conversationsDirectory
-            let folders = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
-            found = folders.map { $0.appendingPathComponent(session + ".jsonl") }
-                .first { FileManager.default.fileExists(atPath: $0.path) }
-        }
+        let url = TranscriptLocator.url(project: project.path, session: session)
+        let found: URL? = FileManager.default.fileExists(atPath: url.path) ? url : nil
         // ponytail: a session not written yet is looked for again only when it changes.
         located = (session, found)
         return found

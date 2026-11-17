@@ -993,6 +993,18 @@ enum MaestroStatus {
         try? JSONEncoder().encode(live).write(to: liveFile(for: project, in: directory), options: .atomic)
     }
 
+    /// The model as shown: the one noted, unless the conversation's last
+    /// answer came from another — a background conversation's status line
+    /// never reaches here, and its model would stay the old one.
+    static func shownModel(for project: String) -> MaestroModel? {
+        let noted = model(for: project)
+        guard let session = Maestro.rememberedSession(for: project),
+              let name = TranscriptLocator.lastModel(in: TranscriptLocator.url(project: CockpitProject(path: project).path, session: session)),
+              name != noted?.name
+        else { return noted }
+        return MaestroModel(name: name, effort: nil, session: noted?.session)
+    }
+
     static func model(for project: String, in directory: URL = Maestro.supportDirectory) -> MaestroModel? {
         (try? Data(contentsOf: modelFile(for: project, in: directory)))
             .flatMap { try? JSONDecoder().decode(MaestroModel.self, from: $0) }

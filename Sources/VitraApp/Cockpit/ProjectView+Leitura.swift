@@ -28,7 +28,7 @@ extension ProjectView {
         }
         let key = project.key
         view.sentSource = { [weak self] in self?.sentPrompts ?? [] }
-        view.statusSource = { MaestroLive.line(model: MaestroStatus.model(for: key), live: MaestroStatus.live(for: key)) }
+        view.statusSource = { MaestroLive.line(model: MaestroStatus.shownModel(for: key), live: MaestroStatus.live(for: key)) }
         // Claude Code's own "send queued messages now": ⌃X ⌃S, the chord that
         // every terminal passes on (⌃⏎ reaches some as a plain Return).
         view.onDeliverQueue = { [weak self] in self?.deliverQueueNow() }
