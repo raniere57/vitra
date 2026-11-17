@@ -9,6 +9,7 @@ import AppKit
 @MainActor
 final class LeituraList: NSView, NSTableViewDataSource, NSTableViewDelegate {
     let context = LeituraContext()
+    private(set) lazy var crossSelection = CrossSelection(list: self)
     /// Scrolled near the top while there is more before it.
     var onNearTop: (() -> Void)?
     /// Whether the bottom is in view changed.

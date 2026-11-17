@@ -64,8 +64,28 @@ final class ReadingTextView: NSTextView {
     /// when it returns the selection is final.
     override func mouseDown(with event: NSEvent) {
         hideReply()
+        let cross = list?.crossSelection
+        cross?.begin(in: self, at: event)
         super.mouseDown(with: event)
+        cross?.end()
         selectionSettled()
+    }
+
+    private var list: LeituraList? {
+        var ancestor = superview
+        while let view = ancestor, !(view is LeituraList) { ancestor = view.superview }
+        return ancestor as? LeituraList
+    }
+
+    /// What is selected across messages, when the drag ran past this one.
+    private var selectionText: String {
+        list?.crossSelection.selectedText() ?? Self.selectedText(string, selectedRange())
+    }
+
+    override func copy(_ sender: Any?) {
+        guard let text = list?.crossSelection.selectedText() else { return super.copy(sender) }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     /// The text view sets the I-beam over all of itself, the button included:
@@ -109,7 +129,7 @@ final class ReadingTextView: NSTextView {
         hideReply()
         let range = selectedRange()
         guard range.length > 0, let layout = layoutManager, let container = textContainer,
-              !Self.selectedText(string, range).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              !selectionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return }
         let rect = layout.boundingRect(forGlyphRange: layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil), in: container)
         let button = NSButton(title: "", target: self, action: #selector(replyToSelection))
@@ -137,7 +157,7 @@ final class ReadingTextView: NSTextView {
     }
 
     @objc private func replyToSelection() {
-        let text = Self.selectedText(string, selectedRange())
+        let text = selectionText
         hideReply()
         setSelectedRange(NSRange(location: selectedRange().location, length: 0))
         var ancestor = superview
