@@ -157,7 +157,12 @@ final class LeituraView: NSView {
     /// do for one a background task or a queued prompt began — by the
     /// transcript itself.
     private var isWorking: Bool {
-        if attention == .working { return true }
+        // An interrupt fires no hook: the transcript closing the turn after
+        // the work began is the word that it stopped.
+        if attention == .working {
+            guard transcriptTurn.isOpen == false, let last = transcriptTurn.lastActivity, let since = workingSince else { return true }
+            return last < since
+        }
         guard attention != .needsPermission, transcriptTurn.isOpen == true, let last = transcriptTurn.lastActivity else { return false }
         return list.context.now().timeIntervalSince(last) < Self.openTurnGrace
     }

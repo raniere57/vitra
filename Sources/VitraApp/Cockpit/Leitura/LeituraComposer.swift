@@ -20,7 +20,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     var onHeightChange: (() -> Void)?
     /// A pasted image or file was clicked: its path, to open in the preview.
     var onOpenAttachment: ((String) -> Void)?
-    /// ⎋ or "Parar" while the maestro works: claude's own interrupt.
+    /// "Parar" while the maestro works: claude's own interrupt.
     var onInterrupt: (() -> Void)?
     /// The folder "/" and "@" complete in, and whose prompts ↑ goes back to.
     var project = ""
@@ -108,7 +108,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         configure(send, action: #selector(sendTapped))
         configure(queue, action: #selector(queueTapped))
         configure(stop, action: #selector(stopTapped))
-        stop.attributedTitle = NSAttributedString(string: "Parar  esc", attributes: [.font: CockpitStyle.caption, .foregroundColor: CockpitStyle.dangerText])
+        stop.attributedTitle = NSAttributedString(string: "Parar", attributes: [.font: CockpitStyle.caption, .foregroundColor: CockpitStyle.dangerText])
         stop.toolTip = "Interrompe o maestro, como o Esc no terminal"
         statusLine.lineBreakMode = .byTruncatingTail
         popup.onChoose = { [weak self] item in self?.complete(with: item) }
@@ -364,7 +364,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         case #selector(NSResponder.insertTab(_:)) where suggestion != nil && textView.string.isEmpty:
             return takeSuggestion()
         case #selector(NSResponder.cancelOperation(_:)):
-            if isWorking { onInterrupt?() } else { onEscape?() }
+            onEscape?()
             return true
         default:
             return false
