@@ -147,7 +147,12 @@ final class ToolRunner {
 
     private func browserClick(_ arguments: JSONValue) async throws -> String {
         guard let ref = arguments["ref"]?.stringValue else { throw ToolError("ref is required") }
-        return try await browser().click(ref: ref)
+        let paths = arguments["files"]?.arrayValue?.compactMap(\.stringValue) ?? []
+        let files = paths.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+        if let missing = files.first(where: { !FileManager.default.fileExists(atPath: $0.path) }) {
+            throw ToolError("no such file: \(missing.path)")
+        }
+        return try await browser().click(ref: ref, files: files)
     }
 
     private func browserType(_ arguments: JSONValue) async throws -> String {

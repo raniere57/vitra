@@ -227,3 +227,40 @@ struct BrowserChromeTests {
     #expect(listing.contains("\"true visible false\""))
     #expect(listing.contains("\"quieto\""))
 }
+
+@MainActor
+@Test func aClickWithFilesChoosesThemInTheFileChooserItOpens() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vitra-upload-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let video = folder.appendingPathComponent("video.mp4")
+    try Data("abc".utf8).write(to: video)
+    // As Instagram does: a button that clicks a hidden file input.
+    let page = folder.appendingPathComponent("page.html")
+    try """
+    <html><body><input id=f type=file style=display:none onchange="document.getElementById('b').textContent='got '+this.files[0].name">
+    <button id=b onclick="document.getElementById('f').click()">Selecionar</button></body></html>
+    """.write(to: page, atomically: true, encoding: .utf8)
+
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+    let browser = BrowserView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    window.contentView = browser
+    window.orderBack(nil)
+    defer { window.orderOut(nil) }
+    defer { browser.prepareForRemoval() }
+    try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+        browser.load(page) { done.resume(with: $0) }
+    }
+    let listing = try await browser.snapshot()
+    let line = try #require(listing.split(separator: "\n").first { $0.contains("Selecionar") })
+    let ref = try #require(line.split(separator: " ").dropFirst().first.map(String.init))
+    let said = try await browser.click(ref: ref, files: [video])
+    #expect(said.contains("files chosen: video.mp4"))
+    var text = ""
+    for _ in 0 ..< 20 {
+        text = try await browser.snapshot()
+        if text.contains("got video.mp4") { break }
+        try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    #expect(text.contains("got video.mp4"))
+}

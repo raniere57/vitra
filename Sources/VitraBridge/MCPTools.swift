@@ -29,8 +29,11 @@ public enum MCPTools {
         ),
         tool(
             "browser_click",
-            "Click the element with the given ref from the most recent snapshot. If the click navigates, this waits for the new page and reports where it landed.",
-            properties: ["ref": string("Element ref from browser_snapshot, such as e12, or f1e3 for one inside a frame.")],
+            "Click the element with the given ref from the most recent snapshot. If the click navigates, this waits for the new page and reports where it landed. To upload, click the button or file input that opens the file chooser and pass files: they are chosen in it, with no dialog.",
+            properties: [
+                "ref": string("Element ref from browser_snapshot, such as e12, or f1e3 for one inside a frame."),
+                "files": ["type": "array", "items": ["type": "string"], "description": "Absolute paths of files to choose if the click opens a file chooser."],
+            ],
             required: ["ref"]
         ),
         tool(

@@ -108,10 +108,19 @@ final class BrowserChrome: NSObject, WKUIDelegate, WKDownloadDelegate {
 
     // MARK: - Choosing files to upload
 
+    /// Files the next file chooser takes instead of asking.
+    var pendingFiles: [URL]?
+
     func webView(
         _ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
         initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping @MainActor @Sendable ([URL]?) -> Void
     ) {
+        // An agent's click that said which files: they go in, no panel.
+        if let files = pendingFiles {
+            pendingFiles = nil
+            onNote?("[upload] \(files.map(\.lastPathComponent).joined(separator: ", "))")
+            return completionHandler(parameters.allowsMultipleSelection ? files : Array(files.prefix(1)))
+        }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection
         panel.canChooseDirectories = parameters.allowsDirectories

@@ -285,13 +285,23 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         return (split.ref, frame)
     }
 
-    public func click(ref: String) async throws -> String {
+    /// With `files`, the file chooser the click opens takes them.
+    public func click(ref: String, files: [URL] = []) async throws -> String {
         let from = currentURL
         let target = try target(of: ref)
+        if !files.isEmpty { chrome.pendingFiles = files }
+        defer { chrome.pendingFiles = nil }
         let result = try await outcome(of: BrowserScripts.click(ref: target.ref), ref: ref, in: target.frame)
         let role = result["role"] as? String ?? "element"
         let label = result["label"] as? String ?? ""
-        let what = label.isEmpty ? "clicked \(ref) (\(role))" : "clicked \(ref) (\(role) \"\(label)\")"
+        var what = label.isEmpty ? "clicked \(ref) (\(role))" : "clicked \(ref) (\(role) \"\(label)\")"
+        if !files.isEmpty {
+            // The chooser opens a moment after the click, if at all.
+            for _ in 0 ..< 20 where chrome.pendingFiles != nil { try? await Task.sleep(for: .milliseconds(100)) }
+            what += chrome.pendingFiles == nil
+                ? "\nfiles chosen: \(files.map(\.lastPathComponent).joined(separator: ", "))"
+                : "\nno file chooser opened: click the button or file input that opens one"
+        }
         return await report(what, movedFrom: from)
     }
 
