@@ -11,6 +11,7 @@ enum BrowserScripts {
     if (!window.__vitra) {
       window.__vitra = {
         next: 1,
+        document: Math.random().toString(36).slice(2),
         toRef: new WeakMap(),
         byRef: new Map(),
         ref(element) {
@@ -60,6 +61,74 @@ enum BrowserScripts {
     }
     """
 
+    /// Makes a page believe it is always looked at and always in focus.
+    ///
+    /// An agent works in a page while the user reads something else: the
+    /// window loses the keyboard, the panel shows another tab, the project
+    /// leaves the screen. Sites notice — `blur`, `visibilitychange`,
+    /// `document.hasFocus()` — and pause videos, stop timers, log people
+    /// out. Run before any of the page's own scripts, in every frame, this
+    /// answers "visible and focused" and lets none of those events through.
+    static let alwaysAttentive = """
+    (() => {
+      const define = (target, name, value) => {
+        try { Object.defineProperty(target, name, { configurable: true, get: () => value }); } catch (error) {}
+      };
+      define(Document.prototype, 'visibilityState', 'visible');
+      define(Document.prototype, 'webkitVisibilityState', 'visible');
+      define(Document.prototype, 'hidden', false);
+      define(Document.prototype, 'webkitHidden', false);
+      try { Document.prototype.hasFocus = function () { return true; }; } catch (error) {}
+      const swallow = (event) => { event.stopImmediatePropagation(); };
+      for (const name of ['visibilitychange', 'webkitvisibilitychange', 'blur', 'focusout', 'pagehide', 'freeze']) {
+        // focusout of a field is the page's own business; only the window's
+        // and the document's losing focus is swallowed.
+        window.addEventListener(name, (event) => {
+          if (event.target === window || event.target === document) swallow(event);
+        }, true);
+      }
+    })();
+    """
+
+    /// What the panel shows in place of a page that did not load.
+    static func failurePage(address: String, reason: String) -> String {
+        func escaped(_ text: String) -> String {
+            text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
+        }
+        return """
+        <!doctype html><meta charset="utf-8"><title>Não abriu</title>
+        <body style="margin:0;background:#15171c;color:#c9ccd3;font:15px -apple-system,system-ui;display:flex;min-height:100vh;align-items:center;justify-content:center">
+        <div style="max-width:520px;padding:32px;text-align:center">
+        <div style="font-size:19px;color:#f1f2f4;font-weight:600;margin-bottom:10px">Esta página não abriu</div>
+        <div style="font:13px ui-monospace,Menlo,monospace;color:#8a8f99;word-break:break-all;margin-bottom:14px">\(escaped(address))</div>
+        <div>\(escaped(reason))</div>
+        </div></body>
+        """
+    }
+
+    /// Every inner frame says hello once it has loaded, which is how the
+    /// browser gets a handle to run the tools inside it.
+    static let frameHello = """
+    if (window !== window.top) {
+      try { window.webkit.messageHandlers.vitraFrame.postMessage('hello'); } catch (error) {}
+    }
+    """
+
+    /// "- e7 button …" → "- f2e7 button …": the element's ref, under its frame's name.
+    static func prefixing(ref frame: String, in line: String) -> String {
+        guard line.hasPrefix("- e") else { return line }
+        return "- " + frame + line.dropFirst(2)
+    }
+
+    /// "f2e7" → ("f2", "e7"); nil for a ref of the page itself.
+    static func frameAndRef(_ ref: String) -> (frame: String, ref: String)? {
+        guard ref.hasPrefix("f"), let split = ref.dropFirst().firstIndex(of: "e"),
+              ref[ref.index(after: ref.startIndex) ..< split].allSatisfy(\.isNumber), split > ref.index(after: ref.startIndex)
+        else { return nil }
+        return (String(ref[..<split]), String(ref[split...]))
+    }
+
     /// A compact listing of what a person could see and use on the page.
     static func snapshot(limit: Int) -> String {
         """
@@ -89,6 +158,7 @@ enum BrowserScripts {
 
         return JSON.stringify({
           url: location.href,
+          document: vitra.document,
           title: document.title,
           truncated: truncated,
           elements: lines,

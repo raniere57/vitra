@@ -203,6 +203,22 @@ private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
     return condition()
 }
 
+@Test(arguments: ["codex", "codex.js"])
+func nodeHostedCodexIsRecognized(scriptName: String) throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let script = directory.appendingPathComponent(scriptName)
+    try "setInterval(() => {}, 1000);".write(to: script, atomically: true, encoding: .utf8)
+    let pty = try PTY(
+        executable: "/usr/bin/env", arguments: ["node", script.path],
+        environment: ShellEnvironment.childEnvironment(), size: .default
+    )
+    defer { pty.terminate(); pty.reap(blocking: true) }
+    pty.startReading(on: DispatchQueue(label: "test.codex"), onData: { _ in }, onEOF: {})
+    #expect(waitUntil(timeout: 10) { Harness.running(pty.foregroundName) == .codex })
+}
+
 /// Job control lives or dies on this: macOS gives out a controlling terminal
 /// only for an explicit TIOCSCTTY, and without one the tty has no session, the
 /// shell never enables job control, Ctrl-C reaches nobody and a resize delivers

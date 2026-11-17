@@ -63,6 +63,20 @@ struct SocketTests {
         #expect(attributes[.posixPermissions] as? Int == 0o600)
     }
 
+    /// Stopping a server removes the socket it made and no other: a test
+    /// server must never take the running app's socket down with it.
+    @Test func stoppingRemovesOnlyTheSocketItBound() throws {
+        let path = NSTemporaryDirectory() + "vitra-own-\(UUID().uuidString.prefix(8)).sock"
+        let bystander = NSTemporaryDirectory() + "vitra-other-\(UUID().uuidString.prefix(8)).sock"
+        FileManager.default.createFile(atPath: bystander, contents: Data())
+        defer { unlink(bystander) }
+        let server = SocketServer { _ in nil }
+        try server.start(at: path)
+        server.stop()
+        #expect(!FileManager.default.fileExists(atPath: path))
+        #expect(FileManager.default.fileExists(atPath: bystander))
+    }
+
     @Test func connectingToNothingSaysVitraIsNotRunning() {
         let path = NSTemporaryDirectory() + "vitra-absent-\(UUID().uuidString.prefix(8)).sock"
         #expect(throws: SocketError.self) {

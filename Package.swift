@@ -21,7 +21,10 @@ let package = Package(
         .target(name: "CVitraSpawn", publicHeadersPath: "include"),
         .target(name: "VitraCore", dependencies: ["CVitraSpawn"]),
         .target(name: "VitraPanel", dependencies: ["VitraCore"]),
-        .target(name: "VitraBridge", dependencies: ["VitraCore"]),
+        // Foundation only: the orchestrator runs inside `vitra mcp`, which must
+        // never pull in AppKit or the terminal.
+        .target(name: "VitraOrchestrator"),
+        .target(name: "VitraBridge", dependencies: ["VitraCore", "VitraOrchestrator"]),
         .target(name: "VitraGhostty", dependencies: ["CGhosttyVT", "VitraCore"]),
         .target(
             name: "VitraRender",
@@ -32,13 +35,14 @@ let package = Package(
         .executableTarget(name: "vitra-spike", dependencies: ["VitraCore", "VitraGhostty", "VitraRender"]),
         .executableTarget(
             name: "VitraApp",
-            dependencies: ["VitraCore", "VitraGhostty", "VitraRender", "VitraPanel", "VitraBridge"]
+            dependencies: ["VitraCore", "VitraGhostty", "VitraRender", "VitraPanel", "VitraBridge", "VitraOrchestrator"]
         ),
         .testTarget(name: "VitraCoreTests", dependencies: ["VitraCore"]),
         .testTarget(name: "VitraGhosttyTests", dependencies: ["VitraGhostty", "VitraCore"]),
         .testTarget(name: "VitraRenderTests", dependencies: ["VitraRender", "VitraCore"]),
-        .testTarget(name: "VitraBridgeTests", dependencies: ["VitraBridge"]),
+        .testTarget(name: "VitraBridgeTests", dependencies: ["VitraBridge", "VitraOrchestrator"]),
+        .testTarget(name: "VitraOrchestratorTests", dependencies: ["VitraOrchestrator"]),
         .testTarget(name: "VitraPanelTests", dependencies: ["VitraPanel", "VitraCore"]),
-        .testTarget(name: "VitraAppTests", dependencies: ["VitraApp", "VitraCore"]),
+        .testTarget(name: "VitraAppTests", dependencies: ["VitraApp", "VitraCore", "VitraOrchestrator"]),
     ]
 )

@@ -26,9 +26,22 @@ public struct MCPServer: Sendable {
     public static let defaultProtocolVersion = "2024-11-05"
 
     private let executor: any ToolExecutor
+    private let tools: [JSONValue]
+    private let gate: (@Sendable (_ tool: String, _ arguments: JSONValue) -> String?)?
 
-    public init(executor: any ToolExecutor) {
+    /// `tools` is what this server offers: everything for a maestro, and for
+    /// a worker only its tier's. `gate`, when there is one, is asked about
+    /// every call to one of Vitra's tools first, and what it answers is the
+    /// refusal the agent reads: a client may send a call for a tool it was
+    /// never offered, or arguments the tier does not allow.
+    public init(
+        executor: any ToolExecutor,
+        tools: [JSONValue] = MCPTools.all,
+        gate: (@Sendable (_ tool: String, _ arguments: JSONValue) -> String?)? = nil
+    ) {
         self.executor = executor
+        self.tools = tools
+        self.gate = gate
     }
 
     /// Handles one request. Returns nil for notifications, which take no reply.
@@ -48,7 +61,7 @@ public struct MCPServer: Sendable {
             return JSONRPC.Response(id: request.id, result: [:])
 
         case "tools/list":
-            return JSONRPC.Response(id: request.id, result: ["tools": .array(MCPTools.all)])
+            return JSONRPC.Response(id: request.id, result: ["tools": .array(tools)])
 
         case "tools/call":
             return await callTool(request)
@@ -66,11 +79,14 @@ public struct MCPServer: Sendable {
         guard let name = request.params?["name"]?.stringValue else {
             return JSONRPC.Response(id: request.id, code: .invalidParams, message: "missing tool name")
         }
-        guard MCPTools.names.contains(name) else {
+        let arguments = request.params?["arguments"] ?? .object([:])
+        if let gate, MCPTools.names.contains(name), let refusal = gate(name, arguments) {
+            return JSONRPC.Response(id: request.id, result: Self.content(refusal, isError: true))
+        }
+        guard tools.contains(where: { $0["name"]?.stringValue == name }) else {
             return JSONRPC.Response(id: request.id, code: .invalidParams, message: "unknown tool: \(name)")
         }
 
-        let arguments = request.params?["arguments"] ?? .object([:])
         let pane = request.params?["pane"]?.stringValue
         do {
             let text = try await executor.run(tool: name, arguments: arguments, pane: pane)

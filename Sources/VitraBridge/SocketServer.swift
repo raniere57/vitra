@@ -12,6 +12,7 @@ public final class SocketServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "dev.vitra.bridge", qos: .userInitiated)
     private let handler: Handler
     private var listenFD: Int32 = -1
+    private var boundPath: String?
     private var acceptSource: DispatchSourceRead?
     private var connections: [Int32: DispatchSourceRead] = [:]
 
@@ -59,6 +60,7 @@ public final class SocketServer: @unchecked Sendable {
             Darwin.close(fd)
             throw SocketError.failed("bind", errno)
         }
+        boundPath = path
 
         chmod(path, 0o600)
         guard listen(fd, 8) == 0 else {
@@ -84,7 +86,11 @@ public final class SocketServer: @unchecked Sendable {
         if listenFD >= 0 {
             Darwin.close(listenFD)
             listenFD = -1
-            unlink(SocketPath.path)
+            // The path this server bound, not the default one: a test server
+            // on a temporary path unlinking the default would cut the running
+            // app off from every agent.
+            if let boundPath { unlink(boundPath) }
+            boundPath = nil
         }
     }
 

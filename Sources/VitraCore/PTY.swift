@@ -243,8 +243,19 @@ public final class PTY: @unchecked Sendable {
     /// Read from the kernel rather than from shell integration: an `OSC 7` from
     /// the user's rc files may never arrive, but the process always has a cwd.
     public var workingDirectory: URL? {
+        Self.workingDirectory(of: foregroundOrShell)
+    }
+
+    /// The foreground job's process group leader, or the shell when the tty
+    /// names none.
+    private var foregroundOrShell: pid_t {
         let foreground = tcgetpgrp(masterFD)
-        let pid = foreground > 0 ? foreground : processID
+        return foreground > 0 ? foreground : processID
+    }
+
+    /// A process's working directory, from the kernel. Static so a terminal
+    /// whose pty lives in another process can ask too.
+    static func workingDirectory(of pid: pid_t) -> URL? {
         var info = proc_vnodepathinfo()
         let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
         guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
@@ -261,8 +272,11 @@ public final class PTY: @unchecked Sendable {
     /// retitles the terminal — opencode, and most others — is invisible to a
     /// title, and this is how a pane running one can still be recognised.
     public var foregroundName: String? {
-        let foreground = tcgetpgrp(masterFD)
-        let pid = foreground > 0 ? foreground : processID
+        Self.programName(of: foregroundOrShell)
+    }
+
+    /// A process's name as the kernel gives it, seen through a script host.
+    static func programName(of pid: pid_t) -> String? {
         var buffer = [CChar](repeating: 0, count: 2 * Int(MAXCOMLEN) + 1)
         guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
         let name = String(cString: buffer)
@@ -316,8 +330,9 @@ public final class PTY: @unchecked Sendable {
 
     private static func agentName(fromArg bytes: [UInt8]) -> String? {
         let arg = String(decoding: bytes, as: UTF8.self)
-        guard let ext = scriptExtensions.first(where: { arg.hasSuffix($0) }) else { return nil }
         let base = (arg as NSString).lastPathComponent
+        if Harness.running(base) != nil { return base }
+        guard let ext = scriptExtensions.first(where: { arg.hasSuffix($0) }) else { return nil }
         return String(base.dropLast(ext.count))
     }
 

@@ -190,6 +190,10 @@ public final class RenderSnapshot {
     public var defaultBackground: TerminalColor = .black
     public var cursor: CursorSnapshot?
 
+    /// Rows drawn quieter, by how much (`ToolBlockDimming.Level`); empty for
+    /// none. Set by whoever shows the snapshot, not read from the terminal.
+    public var rowDim: [UInt8] = []
+
     public init() {}
 
     public subscript(column: Int, row: Int) -> RenderCell {

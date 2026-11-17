@@ -23,7 +23,9 @@ public enum PreviewKind: Sendable, Equatable {
 
         // SVG before the image check: it is an image type, but NSImageView
         // rasterises it unreliably and WebKit draws it properly.
-        if type.conforms(to: .svg) || type.conforms(to: .html) || type.conforms(to: .xml) {
+        // A video too: WebKit plays the file as it is, with its own controls.
+        let isVideo = type.conforms(to: .audiovisualContent) && !type.conforms(to: .audio)
+        if isVideo || type.conforms(to: .svg) || type.conforms(to: .html) || type.conforms(to: .xml) {
             self = .web
         } else if type.conforms(to: .pdf) {
             self = .pdf

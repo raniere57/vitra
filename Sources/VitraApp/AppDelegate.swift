@@ -6,6 +6,7 @@ import VitraCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windows: [TerminalWindowController] = []
+    private var closedPanes: [Layout.Pane] = []
     private var device: MTLDevice?
     private let attachments = AttachmentStore()
     private let holdToQuit = HoldToQuit()
@@ -305,7 +306,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Serves MCP tool calls that `vitra mcp` forwards over the unix socket.
     @MainActor
     private func startBridge() {
-        let server = MCPServer(executor: GUIToolExecutor(runner: ToolRunner(app: self)))
+        let server = MCPServer(executor: GUIToolExecutor(runner: ToolRunner(host: self)))
         let socket = SocketServer { request in await server.handle(request) }
         do {
             try socket.start()
@@ -465,7 +466,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func closePane(_ sender: Any?) {
         guard let controller = currentController else { return }
+        if let saved = controller.focusedPaneLayout() { closedPanes.append(saved) }
         controller.closeFocusedPane()
+    }
+
+    @objc func reopenClosedPane(_ sender: Any?) {
+        guard let saved = closedPanes.last else { NSSound.beep(); return }
+        if let controller = currentController {
+            guard controller.reopen(saved) else { return }
+        } else {
+            makeWindow(asTabOf: nil, restoring: Layout.Window(
+                frame: Layout.Frame(x: 0, y: 0, width: 720, height: 460), root: .pane(saved)
+            ))
+            guard !windows.isEmpty else { return }
+        }
+        closedPanes.removeLast()
     }
 
     /// Orders a window forward for a tool call that has something to show,
