@@ -29,6 +29,9 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
     private var views: [String: ProjectView] = [:]
     private var selected = 0
     private var runs: [Run] = []
+    /// The workers going at the last look. Nil before the first: what stopped
+    /// while Vitra was closed is not news.
+    private var running: Set<String>?
     private var usageWatch: DispatchSourceFileSystemObject?
     private var usageDebounce: DispatchWorkItem?
     /// What each started project's maestro last said about waiting on the user.
@@ -456,8 +459,34 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
 
     private func show(_ runs: [Run]) {
         self.runs = runs
+        let going = Set(runs.filter { $0.state == .running }.map(\.id))
+        let before = running ?? []
+        if running != nil {
+            for (project, stopped) in Dictionary(grouping: WorkerNotice.stopped(runs, wasRunning: before), by: \.spec.project) {
+                if let text = WorkerNotice.text(stopped: stopped) { tellMaestro(of: project, text) }
+            }
+        }
+        for run in runs where going.contains(run.id) && !before.contains(run.id) { watchDeadline(of: run) }
+        running = going
         refresh()
         if projects.indices.contains(selected) { views[projects[selected].key]?.runsChanged(runs) }
+    }
+
+    /// Nobody reads a hung worker while the maestro is not waiting on it:
+    /// past its limit, the maestro is told, and its read cancels the run.
+    private func watchDeadline(of run: Run) {
+        let left = run.started.addingTimeInterval(TimeInterval(WorkerNotice.minutes(run)) * 60).timeIntervalSinceNow
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(left, 0) + 5) { [weak self] in
+            guard let self, let now = self.runs.first(where: { $0.id == run.id }), now.state == .running else { return }
+            self.tellMaestro(of: now.spec.project, WorkerNotice.text(overdue: now))
+        }
+    }
+
+    // ponytail: two orchestrator sessions on one folder both hear of a worker;
+    // runs would have to carry the tab's key to tell them apart.
+    private func tellMaestro(of project: String?, _ text: String) {
+        guard let project else { return }
+        for view in views.values where view.project.path == project { view.tellMaestro(text) }
     }
 
     private func refresh() {

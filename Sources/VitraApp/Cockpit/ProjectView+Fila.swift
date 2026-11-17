@@ -85,6 +85,26 @@ extension ProjectView {
         onQueueChange?()
     }
 
+    /// News from Vitra itself, typed to an orchestrating maestro. It waits
+    /// while the user has words half-typed in the prompt, or a question is
+    /// on screen: pasted there it would send their words, or answer for them.
+    func tellMaestro(_ text: String, tries: Int = 0) {
+        guard mode == .orchestrator, let terminal, terminal.session.isRunningProgram else { return }
+        let isFree = terminal.askedMenu() == nil && terminal.typedInput() == ""
+        guard isFree else {
+            // Given up on after five minutes: the Workers panel says it too.
+            guard tries < Self.tellTries else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.tellDelay) { [weak self] in
+                self?.tellMaestro(text, tries: tries + 1)
+            }
+            return
+        }
+        submit(text, to: terminal.session)
+    }
+
+    private static let tellTries = 150
+    private static let tellDelay: TimeInterval = 2
+
     /// `text` into the maestro's input as a paste — a multi-line message
     /// arrives whole — and Return a moment later. The one way anything is
     /// typed to the maestro on the user's behalf: the Fila and Leitura's
