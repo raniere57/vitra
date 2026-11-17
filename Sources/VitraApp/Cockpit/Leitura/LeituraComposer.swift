@@ -108,7 +108,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         configure(send, action: #selector(sendTapped))
         configure(queue, action: #selector(queueTapped))
         configure(stop, action: #selector(stopTapped))
-        stop.attributedTitle = NSAttributedString(string: "Parar  ⎋", attributes: [.font: CockpitStyle.caption, .foregroundColor: CockpitStyle.dangerText])
+        stop.attributedTitle = NSAttributedString(string: "Parar  esc", attributes: [.font: CockpitStyle.caption, .foregroundColor: CockpitStyle.dangerText])
         stop.toolTip = "Interrompe o maestro, como o Esc no terminal"
         statusLine.lineBreakMode = .byTruncatingTail
         popup.onChoose = { [weak self] item in self?.complete(with: item) }
@@ -155,7 +155,10 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         queue.attributedTitle = NSAttributedString(string: "pôr na Fila", attributes: [.font: CockpitStyle.caption, .foregroundColor: ReadingStyle.quiet])
         queue.isHidden = !working
         stop.isHidden = !working
+        stop.layer?.borderWidth = 1
+        stop.layer?.borderColor = CockpitStyle.dangerText.withAlphaComponent(0.5).cgColor
         needsLayout = true
+        onHeightChange?()
     }
 
     /// A line under the field when a message could not go.
@@ -259,8 +262,11 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     func preferredHeight(width: CGFloat) -> CGFloat {
         let column = ReadingStyle.column(in: width).width
         let problem: CGFloat = status.isHidden ? 0 : 18
-        return Self.verticalPad + Self.fieldPad + quotesHeight + attachmentsHeight + textHeight(width: column - 2 * Self.fieldPad) + 8 + 26 + Self.fieldPad + problem + Self.verticalPad
+        return Self.verticalPad + Self.fieldPad + quotesHeight + attachmentsHeight + textHeight(width: column - 2 * Self.fieldPad) + 8 + stopRow + 26 + Self.fieldPad + problem + Self.verticalPad
     }
+
+    /// "Parar" sits over "Enviar" while the maestro works.
+    private var stopRow: CGFloat { isWorking ? 32 : 0 }
 
     override func layout() {
         super.layout()
@@ -291,16 +297,24 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         placeholder.frame = NSRect(x: scroll.frame.minX, y: scroll.frame.minY - 1, width: inner - hintWidth, height: lineHeight)
         tabHint.frame = NSRect(x: scroll.frame.maxX - tabHint.frame.width, y: scroll.frame.minY + 2, width: tabHint.frame.width, height: 15)
         placeholder.isHidden = !text.string.isEmpty
-        send.sizeToFit()
+        // The long "Enviar (lê assim que puder…)" only when it fits beside
+        // "pôr na Fila"; the tooltip says it all the same.
+        let longTitle = isWorking ? "Enviar (lê assim que puder · ⌃⏎ envia já)" : "Enviar"
+        for title in [longTitle, "Enviar"] {
+            send.attributedTitle = NSAttributedString(string: title + "  ⏎", attributes: [.font: ReadingStyle.smallMedium, .foregroundColor: CockpitStyle.bar])
+            send.sizeToFit()
+            queue.sizeToFit()
+            if send.frame.width + 20 + (queue.isHidden ? 0 : queue.frame.width + 24) <= field.frame.width * 0.75 { break }
+        }
         let sendWidth = send.frame.width + 20
         let buttonsY = field.frame.maxY - Self.fieldPad - 26
         send.frame = NSRect(x: field.frame.maxX - Self.fieldPad - sendWidth, y: buttonsY, width: sendWidth, height: 26)
         queue.sizeToFit()
         queue.frame = NSRect(x: send.frame.minX - queue.frame.width - 16, y: buttonsY, width: queue.frame.width + 8, height: 26)
         stop.sizeToFit()
-        let stopRight = (queue.isHidden ? send.frame.minX : queue.frame.minX) - 12
-        stop.frame = NSRect(x: stopRight - stop.frame.width - 8, y: buttonsY, width: stop.frame.width + 8, height: 26)
-        let statusRight = (stop.isHidden ? stopRight + 12 : stop.frame.minX) - 12
+        let stopWidth = stop.frame.width + 20
+        stop.frame = NSRect(x: send.frame.maxX - stopWidth, y: buttonsY - stopRow, width: stopWidth, height: 26)
+        let statusRight = (queue.isHidden ? send.frame.minX : queue.frame.minX) - 12
         statusLine.frame = NSRect(x: field.frame.minX + Self.fieldPad + 2, y: buttonsY + 5, width: max(statusRight - field.frame.minX - Self.fieldPad, 0), height: 16)
         status.frame = NSRect(x: column.x + 4, y: field.frame.maxY + 3, width: column.width, height: 15)
         let isEmpty = outgoing.isEmpty
