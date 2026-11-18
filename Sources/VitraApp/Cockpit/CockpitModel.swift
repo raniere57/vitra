@@ -479,8 +479,9 @@ enum Maestro {
 
     Do not sit in agent_wait while workers run: blocked there you cannot hear the user and nothing else gets \
     done. After spawning, go on with what is yours — the next piece of the plan, reading the code you will review \
-    against, answering the user — or end your turn saying what is running. Vitra sends you a message the moment a \
-    worker stops ("[Vitra] O operário … terminou"); call agent_wait with its id then, and it answers at once. \
+    against, answering the user — and then end your turn saying what is running. Vitra sends you a message once a \
+    worker stops and your turn is over ("[Vitra] O operário … terminou"); call agent_wait with its id then, and it \
+    answers at once. \
     Before that message, call agent_wait only with timeout_seconds 0, to see where a worker stands.
 
     Do the small things yourself, at once: a change to one or two files of up to about thirty lines, a fix you \

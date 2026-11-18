@@ -86,23 +86,49 @@ extension ProjectView {
     }
 
     /// News from Vitra itself, typed to an orchestrating maestro. It waits
-    /// while the user has words half-typed in the prompt, or a question is
-    /// on screen: pasted there it would send their words, or answer for them.
-    func tellMaestro(_ text: String, tries: Int = 0) {
-        guard mode == .orchestrator, let terminal, terminal.session.isRunningProgram else { return }
-        let isFree = terminal.askedMenu() == nil && terminal.typedInput() == ""
-        guard isFree else {
-            // Given up on after five minutes: the Workers panel says it too.
-            guard tries < Self.tellTries else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.tellDelay) { [weak self] in
-                self?.tellMaestro(text, tries: tries + 1)
-            }
-            return
-        }
-        submit(text, to: terminal.session)
+    /// for the turn to end and while the user is writing in the prompt: typed
+    /// mid-turn it could land in a question on screen and answer for them,
+    /// and pasted onto a draft it would send their words.
+    func tellMaestro(_ text: String) {
+        guard mode == .orchestrator else { return }
+        pendingNotices.append(text)
+        deliverNotices()
     }
 
-    private static let tellTries = 150
+    private func deliverNotices() {
+        guard !pendingNotices.isEmpty else { return }
+        guard let terminal, terminal.session.isRunningProgram else {
+            pendingNotices = []
+            return
+        }
+        // Read fresh, as the Fila does: this view may be newer than the last change.
+        let state = Attention.load(for: project.key)?.state
+        let hold = Self.holdsNotice(
+            isBusy: state == .working || state == .needsPermission || terminal.askedMenu() != nil,
+            typed: terminal.typedInput(),
+            sinceKey: lastTyped.map { Date().timeIntervalSince($0) }
+        )
+        guard !hold else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.tellDelay) { [weak self] in self?.deliverNotices() }
+            return
+        }
+        Self.log.info("notice to the maestro: \(self.pendingNotices.count, privacy: .public)")
+        submit(pendingNotices.joined(separator: "\n"), to: terminal.session)
+        pendingNotices = []
+    }
+
+    /// Whether news for the maestro must wait. `typed` is what sits in the
+    /// prompt, nil when the screen cannot say: claude hides the cursor the
+    /// prompt is found by while its terminal is not the one being typed in,
+    /// which is where the user is when a worker ends. Then the keyboard
+    /// answers: keys pressed there lately, and not yet sent, are a draft.
+    nonisolated static func holdsNotice(isBusy: Bool, typed: String?, sinceKey: TimeInterval?) -> Bool {
+        if isBusy { return true }
+        if let typed { return !typed.isEmpty }
+        return sinceKey.map { $0 < draftWindow } ?? false
+    }
+
+    nonisolated static let draftWindow: TimeInterval = 30
     private static let tellDelay: TimeInterval = 2
 
     /// `text` into the maestro's input as a paste — a multi-line message

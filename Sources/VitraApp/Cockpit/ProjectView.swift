@@ -37,6 +37,11 @@ final class ProjectView: NSView {
     /// When Return was last pressed in a terminal here: a stray prompt's
     /// hook is matched to this tab by it.
     private var lastReturn: Date?
+    /// When a key last went to the maestro's terminal that was not Return:
+    /// words being written there. Nil once Return sends them.
+    var lastTyped: Date?
+    /// News for the maestro held until its prompt is free.
+    var pendingNotices: [String] = []
     /// What was last sent to the maestro, newest last.
     var sentPrompts: [String] = []
     let workers = WorkersPanel()
@@ -971,6 +976,10 @@ final class ProjectView: NSView {
                    let focused = self.window?.firstResponder as? TerminalView {
                     self.lastReturn = Date()
                     if focused === self.terminal, let typed = focused.typedInput(), !typed.isEmpty { self.noteSent(typed) }
+                    if focused === self.terminal { self.lastTyped = nil }
+                } else if let self, event.window === self.window, event.type == .keyDown,
+                          !event.modifierFlags.contains(.command), self.window?.firstResponder === self.terminal {
+                    self.lastTyped = Date()
                 }
                 guard let self, event.window === self.window, self.tabs.selected == .browser,
                       let current = self.browserTabs.current else { return }

@@ -23,3 +23,13 @@ private func run(_ id: String, label: String? = nil, state: Run.State) -> Run {
     #expect(WorkerNotice.text(stopped: stopped) == "[Vitra] O operário aaaa (Inventário) terminou. Leia a entrega com agent_wait.")
     #expect(WorkerNotice.text(stopped: []) == nil)
 }
+
+@Test func newsForTheMaestroWaitsForTheTurnToEndOrADraftAndNotForAScreenItCannotRead() {
+    #expect(ProjectView.holdsNotice(isBusy: true, typed: "", sinceKey: nil))
+    #expect(ProjectView.holdsNotice(isBusy: false, typed: "meio escrito", sinceKey: nil))
+    #expect(!ProjectView.holdsNotice(isBusy: false, typed: "", sinceKey: 2))
+    // The user is in another tab: claude hides the cursor and the prompt cannot be read.
+    #expect(!ProjectView.holdsNotice(isBusy: false, typed: nil, sinceKey: nil))
+    #expect(ProjectView.holdsNotice(isBusy: false, typed: nil, sinceKey: 5))
+    #expect(!ProjectView.holdsNotice(isBusy: false, typed: nil, sinceKey: 31))
+}
