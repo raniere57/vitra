@@ -114,6 +114,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
         }
         sidebar.onScratch = { [weak self] in self?.showScratch() }
         feed.onChange = { [weak self] runs in self?.show(runs) }
+        watchScreens()
         alerts.onOpen = { [weak self] path in
             guard let self, let index = projects.firstIndex(where: { $0.key == path }) else { return }
             self.window?.makeKeyAndOrderFront(nil)
@@ -519,7 +520,7 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
                 name: $0.name,
                 running: WorkerBoard.runningCount(WorkerBoard.runs(runs, in: $0)),
                 callsForYou: record?.state == .needsPermission,
-                maestroWorking: record?.state == .working,
+                maestroWorking: record?.state == .working || workingOnScreen.contains($0.key),
                 finishedUnseen: AttentionPolicy.isUnseen(record, seen: seenAt[$0.key], now: now),
                 queued: views[$0.key]?.promptQueue.count ?? 0,
                 isAsleep: $0.isAsleep,
@@ -529,6 +530,24 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
                 since: record?.since,
                 message: record?.state == .needsPermission ? record?.message : nil
             )
+        }
+    }
+
+    /// Sessions whose terminal says the maestro is at work when no hook did.
+    private var workingOnScreen: Set<String> = []
+    private var screenWatch: Timer?
+
+    /// Looks at each session's terminal every few seconds: a turn claude
+    /// starts on its own leaves the hooks saying it stopped.
+    private func watchScreens() {
+        screenWatch = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let found = Set(self.projects.filter { !$0.isAsleep && self.views[$0.key]?.terminal?.showsWorkOnScreen() == true }.map(\.key))
+                guard found != self.workingOnScreen else { return }
+                self.workingOnScreen = found
+                self.showAttention(now: Date())
+            }
         }
     }
 

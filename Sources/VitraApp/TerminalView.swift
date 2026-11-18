@@ -1462,6 +1462,23 @@ final class TerminalView: NSView, NSMenuItemValidation, NSDraggingSource {
         return (UInt16(first), UInt16(start), UInt16(last), UInt16(end))
     }
 
+    /// Whether the program says on screen that it is at work: Claude Code's
+    /// "esc to interrupt" under its prompt. A turn it starts by itself — a
+    /// background task coming back — fires no hook, and only this shows it.
+    func showsWorkOnScreen() -> Bool {
+        if session.updateSnapshot(snapshot) {
+            updateQuietRows()
+            setNeedsRender()
+        }
+        guard session.isRunningProgram, snapshot.rows > 0 else { return false }
+        let rows = Int(snapshot.rows)
+        return (max(0, rows - Self.footerRows) ..< rows).contains { row in
+            (0 ..< Int(snapshot.columns)).map { snapshot.text(of: snapshot[$0, row]) ?? " " }.joined().contains("esc to interrupt")
+        }
+    }
+
+    private static let footerRows = 12
+
     /// The menu the running program has up at the bottom of its screen, read
     /// fresh like `typedInput`: nil with no program, or scrolled away.
     func askedMenu() -> TerminalMenu? {
