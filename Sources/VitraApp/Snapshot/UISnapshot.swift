@@ -213,12 +213,17 @@ enum UISnapshot {
 
         let bar = CockpitTabBar()
         let sidebar = ProjectSidebar()
+        sidebar.now = { fixtures.now }
         sidebar.show([
             .init(name: "vitra", running: WorkerBoard.runningCount(runs), callsForYou: AttentionPolicy.isCalling(attention[fixtures.path], now: fixtures.now),
-                  queued: project.promptQueue.count, path: "/x/vitra"),
-            .init(name: "hapto", running: 0, finishedUnseen: AttentionPolicy.isCalling(attention["hapto"], now: fixtures.now), path: "/x/hapto"),
-            .init(name: "hapto 2", running: 2, maestroWorking: true, path: "/x/hapto", slot: 2, session: "aba de tração no painel"),
-            .init(name: "docs", running: 0, path: "/x/docs"),
+                  queued: project.promptQueue.count, path: "/x/vitra", since: fixtures.now.addingTimeInterval(-130),
+                  message: attention[fixtures.path]?.message),
+            .init(name: "hapto", running: 0, finishedUnseen: AttentionPolicy.isCalling(attention["hapto"], now: fixtures.now), path: "/x/hapto",
+                  since: fixtures.now.addingTimeInterval(-70)),
+            .init(name: "hapto 2", running: 2, maestroWorking: true, path: "/x/hapto", slot: 2, session: "aba de tração no painel",
+                  since: fixtures.now.addingTimeInterval(-8 * 60)),
+            .init(name: "efetivy", running: 2, path: "/x/efetivy", since: fixtures.now.addingTimeInterval(-5 * 60)),
+            .init(name: "docs", running: 0, path: "/x/docs", since: fixtures.now.addingTimeInterval(-3 * 3600)),
             .init(name: "farol", running: 0, isAsleep: true, path: "/x/farol"),
         ], selected: 0)
         bar.show(chips: ProviderChips.derive(runs: fixtures.chipRuns(), usage: fixtures.subscription, now: fixtures.now))

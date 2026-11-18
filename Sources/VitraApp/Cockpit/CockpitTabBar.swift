@@ -27,6 +27,10 @@ final class CockpitTabBar: NSView {
         /// conversation when it has one.
         var slot = 1
         var session: String?
+        /// When the maestro entered the state it is in, and what it asks
+        /// when it stopped for the user: the sidebar's "8m" and second line.
+        var since: Date?
+        var message: String?
     }
 
     var onSelect: ((Int) -> Void)?

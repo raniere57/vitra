@@ -1,6 +1,7 @@
 import AppKit
 
-/// The left side of the window: each project a group, its sessions under it.
+/// The left side of the window: each project a group, its sessions under it,
+/// and above them the sessions that wait on the user.
 ///
 /// A session is a tab of the cockpit: its own maestro and conversation on the
 /// project's folder. Several on one project are several pieces of work at
@@ -25,14 +26,16 @@ final class ProjectSidebar: NSView {
             guard isScratchSelected != oldValue else { return }
             scratch.isSelected = isScratchSelected
             // The project's row stops looking selected while it is not shown.
-            let tabs = shown
-            shown = []
-            show(tabs, selected: selected)
+            render()
         }
     }
+    /// The clock the ages are read against.
+    var now: () -> Date = Date.init
     private let scratch = ScratchRow()
 
     private let list = NSStackView()
+    /// "PARA VOCÊ": the sessions that stopped for the user, out of their groups.
+    private let calls = NSStackView()
     private let add = NSButton(title: "", target: nil, action: nil)
     private var shown: [CockpitTabBar.Tab] = []
     private var selected = -1
@@ -43,6 +46,10 @@ final class ProjectSidebar: NSView {
         wantsLayer = true
         layer?.backgroundColor = CockpitStyle.bar.cgColor
         build()
+        // "8m" becomes "9m" with nothing else changing.
+        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.render() }
+        }
     }
 
     @available(*, unavailable)
@@ -72,6 +79,40 @@ final class ProjectSidebar: NSView {
         guard tabs != shown || selected != self.selected else { return }
         shown = tabs
         self.selected = selected
+        render()
+    }
+
+    private func render() {
+        let tabs = shown
+        let now = now()
+        let statuses = tabs.map(SessionStatus.init)
+        func row(_ index: Int, title: String, message: String? = nil) -> SessionRow {
+            let row = SessionRow(
+                tabs[index], status: statuses[index], age: SessionStatus.age(since: tabs[index].since, now: now),
+                title: title, message: message, isSelected: index == selected && !isScratchSelected, number: index + 1
+            )
+            row.onClick = { [weak self] in self?.onSelect?(index) }
+            row.onClose = { [weak self] in self?.onClose?(index) }
+            row.onSleep = { [weak self] in self?.onSleep?(index) }
+            row.onReveal = { [weak self] in self?.onReveal?(index) }
+            return row
+        }
+
+        calls.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let forYou = tabs.indices.filter { statuses[$0].isForYou }
+        if !forYou.isEmpty {
+            let title = NSTextField.label("PARA VOCÊ", font: CockpitStyle.micro, color: CockpitStyle.accent)
+            let head = NSStackView(views: [title])
+            head.edgeInsets = NSEdgeInsets(top: CockpitStyle.Space.md, left: CockpitStyle.Space.md, bottom: CockpitStyle.Space.xs, right: 0)
+            calls.addArrangedSubview(head)
+            for index in forYou {
+                let project = URL(fileURLWithPath: tabs[index].path).lastPathComponent
+                let row = row(index, title: "\(project) · \(Self.sessionTitle(tabs[index]))", message: tabs[index].message)
+                calls.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalTo: calls.widthAnchor).isActive = true
+            }
+        }
+
         list.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for group in Self.groups(tabs) {
             let first = group.indices[0]
@@ -81,12 +122,9 @@ final class ProjectSidebar: NSView {
             header.onReveal = { [weak self] in self?.onReveal?(first) }
             list.addArrangedSubview(header)
             header.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
-            for index in group.indices {
-                let row = SessionRow(tabs[index], title: Self.sessionTitle(tabs[index]), isSelected: index == selected && !isScratchSelected, number: index + 1)
-                row.onClick = { [weak self] in self?.onSelect?(index) }
-                row.onClose = { [weak self] in self?.onClose?(index) }
-                row.onSleep = { [weak self] in self?.onSleep?(index) }
-                row.onReveal = { [weak self] in self?.onReveal?(index) }
+            // The project keeps its place while its sessions are up with the user.
+            for index in group.indices where !statuses[index].isForYou {
+                let row = row(index, title: Self.sessionTitle(tabs[index]))
                 list.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
             }
@@ -141,6 +179,9 @@ final class ProjectSidebar: NSView {
         let top = NSStackView(views: [title, NSView(), add])
         top.edgeInsets = NSEdgeInsets(top: 0, left: CockpitStyle.inset, bottom: 0, right: CockpitStyle.Space.md)
 
+        calls.orientation = .vertical
+        calls.alignment = .leading
+        calls.spacing = 0
         list.orientation = .vertical
         list.alignment = .leading
         list.spacing = 0
@@ -158,12 +199,15 @@ final class ProjectSidebar: NSView {
         let rule = NSView.filled(CockpitStyle.line, cornerRadius: 0)
         scratch.onClick = { [weak self] in self?.onScratch?() }
         let footRule = NSView.filled(CockpitStyle.softLine, cornerRadius: 0)
-        for view in [top, scroll, rule, footRule, scratch] as [NSView] {
+        for view in [calls, top, scroll, rule, footRule, scratch] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            top.topAnchor.constraint(equalTo: topAnchor, constant: CockpitStyle.Space.md),
+            calls.topAnchor.constraint(equalTo: topAnchor),
+            calls.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CockpitStyle.Space.sm),
+            calls.trailingAnchor.constraint(equalTo: rule.leadingAnchor, constant: -CockpitStyle.Space.sm),
+            top.topAnchor.constraint(equalTo: calls.bottomAnchor, constant: CockpitStyle.Space.md),
             top.leadingAnchor.constraint(equalTo: leadingAnchor),
             top.trailingAnchor.constraint(equalTo: trailingAnchor),
             top.heightAnchor.constraint(equalToConstant: CockpitStyle.rowHeight),
@@ -239,7 +283,7 @@ private final class GroupHeader: NSView {
     @objc private func reveal(_ sender: Any?) { onReveal?() }
 }
 
-/// One session: its state dot, its name, and its counts.
+/// One session: its state mark, its name, what it is doing and for how long.
 private final class SessionRow: NSView {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     var onClick: (() -> Void)?
@@ -250,7 +294,7 @@ private final class SessionRow: NSView {
     private let isSelected: Bool
     private var isHovered = false
 
-    init(_ tab: CockpitTabBar.Tab, title: String, isSelected: Bool, number: Int) {
+    init(_ tab: CockpitTabBar.Tab, status: SessionStatus, age: String, title: String, message: String?, isSelected: Bool, number: Int) {
         self.isSelected = isSelected
         super.init(frame: .zero)
         wantsLayer = true
@@ -265,37 +309,53 @@ private final class SessionRow: NSView {
         name.lineBreakMode = .byTruncatingTail
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        // The same meanings as the old tabs: steady amber is work going on,
-        // pulsing amber a permission asked, pulsing green a turn not seen
-        // yet, a moon asleep, nothing idle and seen.
+        // A mark of its own for each state: a hand asks, a check is a turn
+        // not seen yet, a steady dot is the maestro at work, a half disc its
+        // workers going on without it, a moon asleep, nothing idle and seen.
+        func symbol(_ name: String, _ color: NSColor) -> NSImageView {
+            let image = NSImageView()
+            image.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold))
+            image.contentTintColor = color
+            return image
+        }
+        let tint: NSColor
         let mark: NSView
-        if tab.isAsleep {
-            let moon = NSImageView()
-            moon.image = NSImage(systemSymbolName: "moon.fill", accessibilityDescription: nil)?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 9, weight: .regular))
-            moon.contentTintColor = CockpitStyle.muted.withAlphaComponent(0.6)
-            mark = moon
-        } else if tab.running > 0 || tab.callsForYou || tab.maestroWorking || tab.finishedUnseen {
-            let isDone = tab.finishedUnseen && !tab.callsForYou
-            let dot = NSView.filled(isDone ? CockpitStyle.success : CockpitStyle.accent, cornerRadius: CockpitStyle.Radius.dot)
-            if (tab.callsForYou || tab.finishedUnseen), !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-                let pulse = CABasicAnimation(keyPath: "opacity")
-                pulse.fromValue = 1
-                pulse.toValue = 0.25
-                pulse.duration = 0.9
-                pulse.autoreverses = true
-                pulse.repeatCount = .infinity
-                dot.layer?.add(pulse, forKey: "attention-pulse")
-            }
-            mark = dot
-        } else {
+        switch status {
+        case .asleep:
+            tint = CockpitStyle.muted.withAlphaComponent(0.6)
+            mark = symbol("moon.fill", tint)
+        case .permission:
+            tint = CockpitStyle.accent
+            mark = symbol("hand.raised.fill", tint)
+        case .finished:
+            tint = CockpitStyle.success
+            mark = symbol("checkmark", tint)
+        case .working:
+            tint = CockpitStyle.muted
+            mark = NSView.filled(CockpitStyle.accent, cornerRadius: CockpitStyle.Radius.dot)
+        case .workers:
+            tint = CockpitStyle.muted
+            mark = symbol("circle.lefthalf.filled", CockpitStyle.accent)
+        case .idle:
+            tint = CockpitStyle.muted.withAlphaComponent(0.6)
             mark = NSView()
+        }
+        if status.isForYou, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            mark.wantsLayer = true
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = 1
+            pulse.toValue = 0.25
+            pulse.duration = 0.9
+            pulse.autoreverses = true
+            pulse.repeatCount = .infinity
+            mark.layer?.add(pulse, forKey: "attention-pulse")
         }
         let markBox = NSView()
         markBox.translatesAutoresizingMaskIntoConstraints = false
         mark.translatesAutoresizingMaskIntoConstraints = false
         markBox.addSubview(mark)
-        let side: CGFloat = tab.isAsleep ? 10 : 2 * CockpitStyle.Radius.dot
+        let side: CGFloat = status == .working ? 2 * CockpitStyle.Radius.dot : 11
         NSLayoutConstraint.activate([
             markBox.widthAnchor.constraint(equalToConstant: 12),
             markBox.heightAnchor.constraint(equalToConstant: 12),
@@ -305,21 +365,37 @@ private final class SessionRow: NSView {
             mark.centerYAnchor.constraint(equalTo: markBox.centerYAnchor),
         ])
 
-        var views: [NSView] = [markBox, name, NSView()]
-        var counts: [String] = []
-        if tab.running > 0 { counts.append("\(tab.running)") }
-        if tab.queued > 0 { counts.append("+\(tab.queued)") }
-        if !counts.isEmpty { views.append(NSTextField.label(counts.joined(separator: " "), font: CockpitStyle.meta, color: CockpitStyle.muted)) }
-        let row = NSStackView(views: views)
+        // Up with the user the row's place says why it is there; its age is what is left to say.
+        var words = message == nil && !status.isForYou ? [status.label] : []
+        if !age.isEmpty { words.append(age) }
+        if tab.running > 0, status != .workers(tab.running) { words.append("· \(tab.running)") }
+        if tab.queued > 0 { words.append("+\(tab.queued)") }
+        let state = NSTextField.label(words.joined(separator: " "), font: CockpitStyle.meta, color: tint)
+        state.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let row = NSStackView(views: [markBox, name, NSView(), state])
         row.spacing = CockpitStyle.Space.md
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 28),
             row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CockpitStyle.Space.lg),
             row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CockpitStyle.Space.md),
-            row.centerYAnchor.constraint(equalTo: centerYAnchor),
+            row.centerYAnchor.constraint(equalTo: topAnchor, constant: 14),
         ])
+        // What the maestro asks, under its name.
+        if let message, !message.isEmpty {
+            let asked = NSTextField.label(message, font: CockpitStyle.meta, color: CockpitStyle.muted)
+            asked.lineBreakMode = .byTruncatingTail
+            asked.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(asked)
+            NSLayoutConstraint.activate([
+                heightAnchor.constraint(equalToConstant: 44),
+                asked.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+                asked.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CockpitStyle.Space.md),
+                asked.topAnchor.constraint(equalTo: topAnchor, constant: 25),
+            ])
+        } else {
+            heightAnchor.constraint(equalToConstant: 28).isActive = true
+        }
 
         menu = NSMenu()
         let items: [(String, String, Selector)] = [
@@ -335,11 +411,10 @@ private final class SessionRow: NSView {
             menu?.addItem(item)
         }
         let chord = (1...9).contains(number) ? "⌘\(number)" : ""
-        toolTip = [title, tab.isAsleep ? "suspensa" : "", chord].filter { !$0.isEmpty }.joined(separator: " · ")
+        toolTip = [title, status == .idle ? "" : status.label, message ?? "", chord].filter { !$0.isEmpty }.joined(separator: " · ")
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        let waiting = tab.callsForYou ? ", pede permissão" : (tab.finishedUnseen ? ", terminou e aguarda você" : (tab.maestroWorking ? ", trabalhando" : ""))
-        setAccessibilityLabel(tab.name + " " + title + (tab.isAsleep ? ", suspensa" : "") + waiting)
+        setAccessibilityLabel(([tab.name + " " + title] + (status == .idle ? [] : [status.label]) + (message.map { [$0] } ?? [])).joined(separator: ", "))
         paint()
     }
 

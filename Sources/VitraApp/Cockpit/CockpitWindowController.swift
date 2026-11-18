@@ -525,7 +525,9 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
                 isAsleep: $0.isAsleep,
                 path: $0.path,
                 slot: $0.slot,
-                session: views[$0.key]?.conversationName
+                session: views[$0.key]?.conversationName,
+                since: record?.since,
+                message: record?.state == .needsPermission ? record?.message : nil
             )
         }
     }
