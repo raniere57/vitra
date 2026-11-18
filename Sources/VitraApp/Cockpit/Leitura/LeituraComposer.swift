@@ -22,6 +22,8 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     var onOpenAttachment: ((String) -> Void)?
     /// "Parar" while the maestro works: claude's own interrupt.
     var onInterrupt: (() -> Void)?
+    /// "pergunta rápida" was pressed: the button, for the window to hang from.
+    var onSideQuestion: ((NSView) -> Void)?
     /// The folder "/" and "@" complete in, and whose prompts ↑ goes back to.
     var project = ""
 
@@ -39,6 +41,7 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
     private let queue = NSButton()
     private let status = NSTextField.label(font: CockpitStyle.caption, color: CockpitStyle.dangerText)
     private let stop = NSButton()
+    private let aside = NSButton()
     /// Model, context and cost, as claude's status line has them.
     private let statusLine = NSTextField.label(font: CockpitStyle.caption, color: ReadingStyle.faint)
     private let popup = CompletionPopup()
@@ -108,13 +111,16 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         configure(send, action: #selector(sendTapped))
         configure(queue, action: #selector(queueTapped))
         configure(stop, action: #selector(stopTapped))
+        configure(aside, action: #selector(asideTapped))
+        aside.attributedTitle = NSAttributedString(string: "pergunta rápida", attributes: [.font: CockpitStyle.caption, .foregroundColor: ReadingStyle.quiet])
+        aside.toolTip = "Pergunta sobre a conversa sem entrar nela, como o /btw do Claude Code"
         stop.attributedTitle = NSAttributedString(string: "Parar", attributes: [.font: CockpitStyle.caption, .foregroundColor: CockpitStyle.dangerText])
         stop.toolTip = "Interrompe o maestro, como o Esc no terminal"
         statusLine.lineBreakMode = .byTruncatingTail
         popup.onChoose = { [weak self] item in self?.complete(with: item) }
         queue.toolTip = "Guardar na Fila do Vitra: vai quando o maestro terminar o turno"
         placeholder.lineBreakMode = .byTruncatingTail
-        for view in [field, scroll, placeholder, tabHint, statusLine, stop, send, queue, status] as [NSView] {
+        for view in [field, scroll, placeholder, tabHint, statusLine, stop, send, queue, aside, status] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
@@ -314,7 +320,9 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         stop.sizeToFit()
         let stopWidth = stop.frame.width + 20
         stop.frame = NSRect(x: send.frame.maxX - stopWidth, y: buttonsY - stopRow, width: stopWidth, height: 26)
-        let statusRight = (queue.isHidden ? send.frame.minX : queue.frame.minX) - 12
+        aside.sizeToFit()
+        aside.frame = NSRect(x: (queue.isHidden ? send.frame.minX : queue.frame.minX) - aside.frame.width - 16, y: buttonsY, width: aside.frame.width + 8, height: 26)
+        let statusRight = aside.frame.minX - 12
         statusLine.frame = NSRect(x: field.frame.minX + Self.fieldPad + 2, y: buttonsY + 5, width: max(statusRight - field.frame.minX - Self.fieldPad, 0), height: 16)
         status.frame = NSRect(x: column.x + 4, y: field.frame.maxY + 3, width: column.width, height: 15)
         let isEmpty = outgoing.isEmpty
@@ -382,6 +390,8 @@ final class LeituraComposer: NSView, NSTextViewDelegate {
         guard !message.isEmpty else { return }
         onQueue?(message)
     }
+
+    @objc private func asideTapped() { onSideQuestion?(aside) }
 
     @objc private func stopTapped() { onInterrupt?() }
 

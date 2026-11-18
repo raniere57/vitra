@@ -246,3 +246,13 @@ struct LeituraAttachmentTests {
     let raw = "<pasted_content id=\"eed3\">\nlinha um\nlinha dois\n</pasted_content id=\"eed3\">\ne o resto"
     #expect(UserText.clean(raw) == "linha um\nlinha dois\ne o resto")
 }
+
+@Test func aSideQuestionAsksACopyOfTheConversationFromItsOwnFolderAndKeepsNothing() throws {
+    let arguments = SideQuestion.arguments(question: "o que falta?", session: "abc")
+    #expect(arguments.prefix(4) == ["-p", "o que falta?", "--resume", "abc"])
+    #expect(arguments.contains("--fork-session") && arguments.contains("--no-session-persistence"))
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jsonl")
+    defer { try? FileManager.default.removeItem(at: file) }
+    try Data(#"{"cwd":"/work/a","type":"user"}"# .utf8 + Data("\n".utf8) + Data(#"{"cwd":"/work/a/.wt/x","type":"assistant"}"#.utf8)).write(to: file)
+    #expect(SideQuestion.folder(of: file) == "/work/a/.wt/x")
+}

@@ -19,6 +19,11 @@ extension ProjectView {
         view.onInterrupt = { [weak self] in
             self?.terminal?.session.send(KeyEvent(keyCode: 53, modifiers: [], text: "\u{1b}", unshiftedCodepoint: 27))
         }
+        view.onSideQuestion = { [weak self] anchor in
+            guard let self, let session = TranscriptLocator.session(project: self.project) else { return }
+            let transcript = TranscriptLocator.url(project: self.project.path, session: session)
+            SideQuestionPopover.show(session: session, folder: SideQuestion.folder(of: transcript) ?? self.project.path, from: anchor)
+        }
         // "/model", "/resume": a screen of claude's own, which only the
         // terminal can show; ⌘L comes back.
         view.onOpenScreen = { [weak self] text in

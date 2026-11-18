@@ -18,6 +18,7 @@ final class LeituraView: NSView {
     var onDeliverQueue: (() -> Void)?
     /// ⎋ or "Parar" while the maestro works.
     var onInterrupt: (() -> Void)?
+    var onSideQuestion: ((NSView) -> Void)?
     /// A command that opens a screen of its own: the terminal shows it.
     var onOpenScreen: ((String) -> Void)?
     /// Model, context and cost for the line under the field.
@@ -237,6 +238,7 @@ final class LeituraView: NSView {
         composer.onHeightChange = { [weak self] in self?.fitComposer() }
         composer.onEscape = { [weak self] in self?.focusList() }
         composer.onInterrupt = { [weak self] in self?.onInterrupt?() }
+        composer.onSideQuestion = { [weak self] anchor in self?.onSideQuestion?(anchor) }
         composer.onSend = { [weak self] text in
             guard let self else { return }
             if SlashCatalog.opensScreen(text), self.banner.isHidden {
