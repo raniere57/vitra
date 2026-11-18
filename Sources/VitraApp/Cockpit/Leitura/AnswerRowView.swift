@@ -16,6 +16,8 @@ final class AnswerRowView: LeituraRowView {
     private var codes: [CodeBlockView] = []
     private var order: [NSView] = []
     private let copy = NSButton()
+    /// When the answer was written, beside its first line while hovered.
+    private let clock = NSTextField.label(font: CockpitStyle.meta, color: ReadingStyle.faint)
     private var markdown = ""
     private var tracking: NSTrackingArea?
 
@@ -34,6 +36,8 @@ final class AnswerRowView: LeituraRowView {
         copy.layer?.backgroundColor = ReadingStyle.page.cgColor
         copy.layer?.cornerRadius = CockpitStyle.Radius.control
         addSubview(copy)
+        clock.isHidden = true
+        addSubview(clock)
     }
 
     @available(*, unavailable)
@@ -59,6 +63,8 @@ final class AnswerRowView: LeituraRowView {
         super.configure(row, context: context)
         guard case let .item(.answer(answer)) = row else { return }
         markdown = answer.markdown
+        clock.stringValue = Self.time(answer.time)
+        copy.toolTip = clock.stringValue.isEmpty ? "Copiar resposta" : "Copiar resposta · " + clock.stringValue
         let segments = context.segments(for: answer)
         // Reuse the views this row already has, in kind order.
         var textPool = texts[...], codePool = codes[...]
@@ -98,6 +104,8 @@ final class AnswerRowView: LeituraRowView {
         // In the gutter beside the answer's last line: it takes no line of
         // its own and can never sit over the text.
         copy.frame = NSRect(x: column.x + column.width + 6, y: bounds.height - Self.bottom - 24, width: 24, height: 24)
+        clock.sizeToFit()
+        clock.frame.origin = NSPoint(x: column.x + column.width + 10, y: Self.top + 2)
     }
 
     override func refreshHighlights() {
@@ -123,11 +131,11 @@ final class AnswerRowView: LeituraRowView {
         tracking = area
     }
 
-    override func mouseEntered(with event: NSEvent) { copy.isHidden = false }
-    override func mouseExited(with event: NSEvent) { copy.isHidden = true }
+    override func mouseEntered(with event: NSEvent) { copy.isHidden = false; clock.isHidden = false }
+    override func mouseExited(with event: NSEvent) { copy.isHidden = true; clock.isHidden = true }
 
     /// For the snapshot: the row as it looks under the pointer.
-    func showHover() { copy.isHidden = false }
+    func showHover() { copy.isHidden = false; clock.isHidden = false }
 
     @objc private func copyAnswer() {
         NSPasteboard.general.clearContents()
