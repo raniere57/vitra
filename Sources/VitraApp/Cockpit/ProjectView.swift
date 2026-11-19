@@ -1011,6 +1011,7 @@ final class ProjectView: NSView {
 
     private func makePanel(for tab: SideTab) -> PreviewPanel {
         let panel = PreviewPanel()
+        panel.browserProfile = BrowserProfile.id(for: project.path)
         panel.onClose = { [weak self, weak panel] in
             guard let self, let panel else { return }
             // The browser's close button closes the tab in front, not all of them.

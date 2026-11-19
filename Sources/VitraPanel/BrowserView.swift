@@ -54,12 +54,22 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         return bar
     }()
 
-    public override init(frame frameRect: NSRect) {
+    /// Where this browser keeps its cookies and logins.
+    private let profile: UUID?
+
+    /// `profile` names a store of its own on disk: a project's logins stay
+    /// with the project. Nil is the app's default store.
+    public init(frame frameRect: NSRect, profile: UUID? = nil) {
+        self.profile = profile
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = PanelStyle.surface.cgColor
         buildToolbar()
         buildWebView()
+    }
+
+    public override convenience init(frame frameRect: NSRect) {
+        self.init(frame: frameRect, profile: nil)
     }
 
     @available(*, unavailable)
@@ -538,7 +548,7 @@ public final class BrowserView: NSView, PreviewContentView, WKNavigationDelegate
         // and the app restarting, which is the difference between a browser and
         // a throwaway. The file preview view stays non-persistent — it shows
         // local files, not sites anyone logs into.
-        configuration.websiteDataStore = .default()
+        configuration.websiteDataStore = profile.map { WKWebsiteDataStore(forIdentifier: $0) } ?? .default()
         // A page may start its own video or sound, as in any browser the
         // user has let it: the agents drive pages that play things.
         configuration.mediaTypesRequiringUserActionForPlayback = []

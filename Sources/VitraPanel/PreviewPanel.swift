@@ -71,6 +71,8 @@ public final class PreviewPanel: NSView {
     private let contentContainer = NSView()
     private var content: (any PreviewContentView)?
     private var emptyState: NSView?
+    /// The browser profile its pages use; nil shares the app's default one.
+    public var browserProfile: UUID?
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -290,7 +292,7 @@ public final class PreviewPanel: NSView {
         if let kept = browsers[key] {
             browser = kept
         } else {
-            browser = BrowserView(frame: contentContainer.bounds)
+            browser = BrowserView(frame: contentContainer.bounds, profile: browserProfile)
             browser.onPageChanged = { [weak self, weak browser] title, host in
                 // Only the one on screen writes the header: the others keep
                 // loading in the background and say nothing.
