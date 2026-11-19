@@ -113,6 +113,10 @@ final class CockpitWindowController: NSWindowController, NSWindowDelegate {
             self.open(self.projects[index].path, maestro: self.projects[index].maestro)
         }
         sidebar.onScratch = { [weak self] in self?.showScratch() }
+        sidebar.onOwnBrowser = { [weak self] path in
+            BrowserProfile.setOwn(!BrowserProfile.isOwn(path), for: path)
+            self?.views.values.filter { $0.project.path == path }.forEach { $0.browserProfileChanged() }
+        }
         feed.onChange = { [weak self] runs in self?.show(runs) }
         watchScreens()
         alerts.onOpen = { [weak self] path in

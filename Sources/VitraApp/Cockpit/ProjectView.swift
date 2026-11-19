@@ -875,6 +875,19 @@ final class ProjectView: NSView {
         if let current = saved.current { browserTabs.show(current) }
     }
 
+    /// The browser moves to the profile the folder now has: each tab's page
+    /// is kept and loads again, in the other profile, when it is shown.
+    func browserProfileChanged() {
+        let profile = BrowserProfile.profile(for: project.path)
+        guard profile != browserPanel.browserProfile else { return }
+        for tab in browserTabs.tabs {
+            if let url = browserPanel.keptBrowser(for: tab.id)?.currentURL, url.scheme != "about" { pendingPages[tab.id] = url }
+            browserPanel.dropBrowser(for: tab.id)
+        }
+        browserPanel.browserProfile = profile
+        if tabs.selected == .browser, let current = browserTabs.current { _ = page(for: current) }
+    }
+
     /// Workers' tabs are not kept: their runs do not outlive the app.
     private func saveBrowserPages() {
         var pages: [String: String] = [:]
@@ -1011,7 +1024,7 @@ final class ProjectView: NSView {
 
     private func makePanel(for tab: SideTab) -> PreviewPanel {
         let panel = PreviewPanel()
-        panel.browserProfile = BrowserProfile.id(for: project.path)
+        panel.browserProfile = BrowserProfile.profile(for: project.path)
         panel.onClose = { [weak self, weak panel] in
             guard let self, let panel else { return }
             // The browser's close button closes the tab in front, not all of them.

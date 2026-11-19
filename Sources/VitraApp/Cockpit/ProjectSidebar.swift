@@ -13,6 +13,8 @@ final class ProjectSidebar: NSView {
     var onClose: ((Int) -> Void)?
     var onSleep: ((Int) -> Void)?
     var onReveal: ((Int) -> Void)?
+    /// The folder's browser gets a profile of its own, or goes back to the shared one.
+    var onOwnBrowser: ((String) -> Void)?
     /// Another session on the folder of the tab at this index.
     var onNewSession: ((Int) -> Void)?
     var onAdd: (() -> Void)?
@@ -120,6 +122,7 @@ final class ProjectSidebar: NSView {
             let header = GroupHeader(name: URL(fileURLWithPath: group.path).lastPathComponent, path: group.path, isAsleep: allAsleep)
             header.onAdd = { [weak self] in self?.onNewSession?(first) }
             header.onReveal = { [weak self] in self?.onReveal?(first) }
+            header.onOwnBrowser = { [weak self] in self?.onOwnBrowser?(group.path) }
             list.addArrangedSubview(header)
             header.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
             // The project keeps its place while its sessions are up with the user.
@@ -242,6 +245,8 @@ private final class GroupHeader: NSView {
     var onAdd: (() -> Void)?
     var onReveal: (() -> Void)?
 
+    var onOwnBrowser: (() -> Void)?
+
     init(name: String, path: String, isAsleep: Bool) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -272,9 +277,18 @@ private final class GroupHeader: NSView {
         let reveal = NSMenuItem(title: "Mostrar no Finder", action: #selector(reveal(_:)), keyEquivalent: "")
         reveal.target = self
         reveal.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        let own = NSMenuItem(title: "Navegador próprio", action: #selector(ownBrowser(_:)), keyEquivalent: "")
+        own.target = self
+        own.image = NSImage(systemSymbolName: "person.crop.circle", accessibilityDescription: nil)
+        own.state = BrowserProfile.isOwn(path) ? .on : .off
+        own.toolTip = "Logins e cookies só deste projeto, para entrar em outra conta (outro Instagram, por exemplo). Desligado, usa os logins de todos os projetos."
         menu?.addItem(new)
         menu?.addItem(reveal)
+        menu?.addItem(.separator())
+        menu?.addItem(own)
     }
+
+    @objc private func ownBrowser(_ sender: Any?) { onOwnBrowser?() }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
