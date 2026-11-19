@@ -1324,12 +1324,40 @@ final class ProjectView: NSView {
     /// project does; its exit starts a fresh shell and the maestro again, in
     /// the current mode, resuming the conversation it was in.
     func relaunchMaestro() {
-        guard let terminal else {
-            startTerminal(launchingMaestro: true)
-            return
+        // A conversation claude moved to the background keeps running in its
+        // daemon, with the tools and brief it started with: resumed, claude
+        // only attaches to it. Stopped first (the conversation is kept), it
+        // starts again in the mode and brief of now.
+        let session = TranscriptLocator.session(project: project)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            if let session { Self.stopBackground(session) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard let terminal = self.terminal else {
+                    self.startTerminal(launchingMaestro: true)
+                    return
+                }
+                self.relaunchPending = true
+                terminal.session.terminate()
+            }
         }
-        relaunchPending = true
-        terminal.session.terminate()
+    }
+
+    /// `claude stop`, which only touches a background session; for any other
+    /// it fails, and that is fine.
+    nonisolated private static func stopBackground(_ session: String) {
+        guard let claude = Executables.discover().paths[.claude] else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: claude)
+        process.arguments = ["stop", String(session.prefix(8))]  // background sessions go by the first 8 of their id
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return }
+        // ponytail: a claude that hangs here holds the relaunch 10 s at most.
+        let deadline = Date().addingTimeInterval(10)
+        while process.isRunning, Date() < deadline { usleep(100_000) }
+        if process.isRunning { process.terminate() }
     }
 
     private func showFailure(_ message: String) {
